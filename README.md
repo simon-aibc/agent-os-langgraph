@@ -19,14 +19,15 @@ python -m pytest tests/
 
 ## Flow
 
-**R7a Cascading Tool Flow**:
+**R7a/R7b Cascading Tool Flow**:
 New tasks pass through the tool dispatcher before agent escalation. Plans still
 pause for human approval before the executor can run:
 ```text
 START → planner → supervisor → tool_dispatcher
-                                  ├─ tool selected → END
-                                  └─ escalate → supervisor → architect → human_gate
-                                      ⇢ supervisor → executor → supervisor → END
+                                  ├─ Tier 1/Tier 2 success → END
+                                  └─ Tier 3 escalation → supervisor → architect
+                                      → human_gate → supervisor → executor
+                                      → supervisor → END
 ```
 
 ## Tool Routing
@@ -45,23 +46,60 @@ write <relative_path> :: <content>
 bash <command and arguments>
 ```
 
-The registry is injectable and extensible at runtime:
+### MCP Tool Ecosystem
+
+The registry combines three native tools with three optional MCP sources. Each
+MCP server may expose several tools; loaded names are prefixed as
+`mcp_<server>_<tool>` to avoid collisions.
+
+| Source | Kind | Capability |
+|---|---|---|
+| `read_file` | Native tool | Read a sandboxed file |
+| `write_file` | Native tool | Write a sandboxed file |
+| `bash` | Native tool | Run a bounded subprocess in the sandbox |
+| `filesystem` | MCP server | File operations from `@modelcontextprotocol/server-filesystem` |
+| `codegraph` | MCP server | Code intelligence from `codegraph serve --mcp` |
+| `gbrain` | MCP server | Tools exposed by an HTTP MCP endpoint |
+
+### MCP Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `MCP_FILESYSTEM_ENABLED` | `false` | Enable the stdio filesystem server; requires `AGENT_OS_SANDBOX`. |
+| `MCP_CODEGRAPH_ENABLED` | `false` | Enable the local CodeGraph MCP server. |
+| `MCP_GBRAIN_URL` | empty | Enable gbrain with an absolute HTTP(S) MCP URL. |
+| `AGENT_OS_SANDBOX` | `./sandbox` | Restrict the filesystem server to this root. `/` and the user home directory are rejected. |
+
+### Loading Custom MCP Servers
+
+Applications load remote tools asynchronously, then inject the resulting
+synchronous registry into the dispatcher:
 
 ```python
-from agent_os.skills import RegisteredSkill, SkillRegistry
+import asyncio
 
-registry = SkillRegistry()
-registry.register(
-    RegisteredSkill(
-        name="summarize",
-        aliases=["summary"],
-        handler=lambda text: text[:100],
+from agent_os.default_registry import build_default_registry_with_mcp
+from agent_os.graph import build_graph
+from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
+
+CUSTOM_SERVERS = {
+    "docs": {
+        "transport": "http",
+        "url": "https://mcp.example.com/mcp",
+    }
+}
+
+
+async def build_custom_graph():
+    registry = await build_default_registry_with_mcp(
+        server_configs=CUSTOM_SERVERS,
     )
-)
-```
+    dispatcher = build_tool_dispatcher_node(registry=registry)
+    return build_graph(tool_dispatcher_node_impl=dispatcher)
 
-Filesystem, CodeGraph, and gbrain MCP integrations are intentionally deferred
-to R7b; `langchain-mcp-adapters` is not required by R7a.
+
+graph = asyncio.run(build_custom_graph())
+```
 
 **Recursion Limit**:
 The default recursion limit is 7. `build_runtime_config()` applies this bound
@@ -103,10 +141,23 @@ result = build_graph().invoke(Command(resume="approved"), config=config)
 Tests may inject `InMemorySaver` through `build_graph(checkpointer=...)` when
 cross-process durability is not under test.
 
+To run real, opt-in MCP integration tests (requires appropriate local servers):
+```shell
+MCP_FILESYSTEM_ENABLED=true \
+AGENT_OS_SANDBOX=./sandbox \
+python -m pytest -m integration tests/test_mcp_integration.py
+```
+
 ## Security Caveats
 - Never commit `checkpoints.db` or its WAL files. Checkpoints can contain task
   text, messages, plans, human feedback, and other sensitive workflow state.
 - `AGENT_OS_SANDBOX` enforces directory paths, not container-level executable
   isolation. Use a container for untrusted models or commands.
+- stdio servers execute local binaries. For example, enabling the filesystem
+  server runs `npx` in the local process environment.
+- The filesystem MCP server is restricted to `AGENT_OS_SANDBOX`; other stdio
+  servers must be trusted not to execute arbitrary OS commands.
+- Enabled MCP servers extend the agent's trust boundary. Only configure URLs
+  or packages from trusted publishers.
 - Bash subprocess output is currently unbounded and needs a size cap for
   production environments.

@@ -1,10 +1,17 @@
+import logging
 import shlex
+from collections.abc import Sequence
 
+from langchain_core.tools import BaseTool
+
+from agent_os.mcp import MCPClientFactory, MCPServerConfigs, load_mcp_tools
 from agent_os.schemas import RouterDecision
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.tools.bash import bash
 from agent_os.tools.edit_file import edit_file
 from agent_os.tools.read_file import read_file
+
+logger = logging.getLogger(__name__)
 
 
 def parse_tier1_request(
@@ -60,7 +67,9 @@ def parse_tier1_request(
     return None
 
 
-def build_default_registry() -> SkillRegistry:
+def build_default_registry(
+    mcp_tools: Sequence[BaseTool] = (),
+) -> SkillRegistry:
     registry = SkillRegistry()
     registry.register(
         RegisteredSkill(name="read_file", aliases=["read"], handler=read_file)
@@ -73,4 +82,27 @@ def build_default_registry() -> SkillRegistry:
         )
     )
     registry.register(RegisteredSkill(name="bash", aliases=[], handler=bash))
+
+    for tool in mcp_tools:
+        try:
+            registry.register(RegisteredSkill(name=tool.name, aliases=[], handler=tool))
+        except ValueError as error:
+            logger.warning(
+                "Skipping MCP tool %r due to registry collision: %s",
+                tool.name,
+                error,
+            )
+
     return registry
+
+
+async def build_default_registry_with_mcp(
+    server_configs: MCPServerConfigs | None = None,
+    client_factory: MCPClientFactory | None = None,
+) -> SkillRegistry:
+    """Build the native registry and add tools from enabled MCP servers."""
+    mcp_tools = await load_mcp_tools(
+        server_configs=server_configs,
+        client_factory=client_factory,
+    )
+    return build_default_registry(mcp_tools=mcp_tools)
