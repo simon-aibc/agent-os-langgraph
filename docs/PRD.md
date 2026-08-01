@@ -1,12 +1,13 @@
 # agent-os-langgraph — Product Requirements Document
 
-- **Version:** 0.2 (open questions resolved, ready for handoff)
+- **Version:** 1.0 (shipped)
 - **Author:** Simon (Tran Khai Minh) + Claude Code (drafter)
 - **Created:** 2026-08-01
-- **Status:** APPROVED FOR EXECUTION — awaiting final "apply" from Simon
-- **Executors:** Antigravity IDE (Simon self-drives, research/explore) + Codex CLI (implementation via `codex-implement`/`codex-edit` skills)
-- **Repo:** `~/Projects/simonos-langgraph/` → public GitHub `simon-aibc/agent-os-langgraph`
-- **Timeline:** ASAP (no fixed weekly milestones — ship as fast as executor throughput allows)
+- **Shipped:** 2026-08-02 (R11 commit `641ca12`, tag `v1.0.0`)
+- **Status:** SHIPPED — R1-R9 + R11 delivered; R10 (demo video) deferred to v1.1
+- **Repo:** https://github.com/simon-aibc/agent-os-langgraph
+- **Tests at v1.0:** 196 unit + 3 integration, `-W error` clean, Ruff clean, CI green on Python 3.11+3.12
+- **Executors used:** Claude Code (architect/reviewer) + Codex CLI (task splitter + reviewer) + Antigravity IDE (implementer, courier: Simon)
 
 ---
 
