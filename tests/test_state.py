@@ -69,7 +69,7 @@ def test_build_graph_compiles():
         ("supervisor", "tool_dispatcher"),
         ("supervisor", "__end__"),
         ("architect", "supervisor"),
-        ("executor", "__end__"),
+        ("executor", "supervisor"),
         ("tool_dispatcher", "__end__")
     }
     assert edges == expected_edges
@@ -103,7 +103,8 @@ def test_graph_invocation():
     assert result["messages"] == []
 
 
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import ArchitectBrief, BashResult, EditFileResult, ExecutorReport
+
 
 def test_architect_brief_validation():
     """ArchitectBrief validates a correct payload."""
@@ -112,10 +113,12 @@ def test_architect_brief_validation():
     assert brief.changes == ["fix"]
     assert brief.verify_cmd == "pytest"
 
+
 def test_architect_brief_missing_fields():
     """Missing fields fail validation."""
     with pytest.raises(ValidationError):
         ArchitectBrief(files=["a.py"])
+
 
 def test_simon_state_plan_accepts_brief():
     """SimonState accepts both a string plan and ArchitectBrief."""
@@ -130,3 +133,37 @@ def test_simon_state_plan_accepts_brief():
     }
     validated = adapter.validate_python(valid_state)
     assert validated["plan"].files == ["file1"]
+
+
+def test_executor_report_validation():
+    report = ExecutorReport(diff="foo", verify_output="ok", success=True)
+    assert report.success is True
+
+
+def test_edit_file_result_validation():
+    res = EditFileResult(path="foo", bytes_written=10)
+    assert res.bytes_written == 10
+
+
+def test_bash_result_validation():
+    res = BashResult(args=["ls"], returncode=0, stdout="out", stderr="", timed_out=False)
+    assert res.args == ["ls"]
+
+
+def test_simon_state_executor_output_accepts_report():
+    adapter = TypeAdapter(SimonState)
+    valid_state = {
+        "messages": [],
+        "task": "Do something",
+        "plan": None,
+        "executor_output": ExecutorReport(diff="foo", verify_output="ok", success=True),
+        "approval": None,
+        "hot_context": None
+    }
+    validated = adapter.validate_python(valid_state)
+    assert validated["executor_output"].success is True
+
+    # Legacy string should also work
+    valid_state["executor_output"] = "Legacy output string"
+    validated2 = adapter.validate_python(valid_state)
+    assert validated2["executor_output"] == "Legacy output string"

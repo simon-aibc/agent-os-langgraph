@@ -12,10 +12,13 @@ from agent_os.routing import DEFAULT_RUNTIME_CONFIG, ROUTE_TO_NODE, route_from_s
 from agent_os.state import SimonState
 
 
-def build_graph(architect_node_impl: Callable[[SimonState], dict] | None = None) -> CompiledStateGraph:
+def build_graph(
+    architect_node_impl: Callable[[SimonState], dict] | None = None,
+    executor_node_impl: Callable[[SimonState], dict] | None = None
+) -> CompiledStateGraph:
     """
     Builds and compiles the core graph skeleton.
-    The six-step runtime safety bound can be supplied with
+    The runtime safety bound can be supplied with
     graph.invoke(state, DEFAULT_RUNTIME_CONFIG).
     """
     builder = StateGraph(SimonState)
@@ -23,11 +26,14 @@ def build_graph(architect_node_impl: Callable[[SimonState], dict] | None = None)
     if architect_node_impl is None:
         architect_node_impl = architect_node
 
+    if executor_node_impl is None:
+        executor_node_impl = executor_node
+
     # Add nodes
     builder.add_node("planner", planner_node)
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("architect", architect_node_impl)
-    builder.add_node("executor", executor_node)
+    builder.add_node("executor", executor_node_impl)
     builder.add_node("tool_dispatcher", tool_dispatcher_node)
 
     # Core flow
@@ -40,8 +46,10 @@ def build_graph(architect_node_impl: Callable[[SimonState], dict] | None = None)
     # R3: architect routes back to supervisor
     builder.add_edge("architect", "supervisor")
 
+    # R4: executor routes back to supervisor
+    builder.add_edge("executor", "supervisor")
+
     # Placeholders map to END
-    builder.add_edge("executor", END)
     builder.add_edge("tool_dispatcher", END)
 
     return builder.compile()

@@ -15,3 +15,16 @@ def get_architect_llm(model_name: str | None = None) -> BaseChatModel:
         raise ValueError("No architect model configured. Pass model_name or set LLM_ARCHITECT.")
 
     return ChatLiteLLM(model=resolved_model)
+
+
+def get_executor_llm(model_name: str | None = None) -> BaseChatModel:
+    """
+    Get the configured executor LLM.
+    Resolves model_name explicitly first, then falls back to LLM_EXECUTOR
+    environment variable.
+    """
+    resolved_model = model_name or os.getenv("LLM_EXECUTOR")
+    if not resolved_model:
+        raise ValueError("No executor model configured. Pass model_name or set LLM_EXECUTOR.")
+
+    return ChatLiteLLM(model=resolved_model)

@@ -23,6 +23,7 @@ def test_build_architect_agent_factory(mock_create):
     assert kwargs["model"] == mock_llm
     assert kwargs["tools"] == [read_file, grep, plan_writer]
     assert kwargs["response_format"] == ArchitectBrief
+    assert "prompt" not in kwargs
     assert "architect_react_agent" in kwargs.get("name", "")
     assert "read-only" in kwargs["system_prompt"].lower()
     assert "inspect" in kwargs["system_prompt"].lower()

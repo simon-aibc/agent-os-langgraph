@@ -1,9 +1,34 @@
 from agent_os.routing import DEFAULT_RUNTIME_CONFIG, route_from_state
+from agent_os.schemas import ExecutorReport
 
 
-def test_default_runtime_config_limits_recursion_to_six_steps():
-    """The shared runtime convention caps graph execution at six steps."""
-    assert DEFAULT_RUNTIME_CONFIG == {"recursion_limit": 6}
+def test_default_runtime_config_allows_workflow_termination():
+    """The runtime config allows six nodes plus the termination superstep."""
+    assert DEFAULT_RUNTIME_CONFIG == {"recursion_limit": 7}
+
+
+def test_successful_executor_report_routes_to_end():
+    state = {
+        "messages": [],
+        "task": "A normal task",
+        "plan": None,
+        "executor_output": ExecutorReport(diff="done", verify_output="ok", success=True),
+        "approval": True,
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "end"
+
+
+def test_failed_executor_report_with_approval_retries_executor():
+    state = {
+        "messages": [],
+        "task": "A normal task",
+        "plan": None,
+        "executor_output": ExecutorReport(diff="", verify_output="failed", success=False),
+        "approval": True,
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "executor"
 
 
 def test_route_from_state_skill():

@@ -2,7 +2,7 @@ from typing import Literal
 
 from langgraph.graph import END
 
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import ArchitectBrief, ExecutorReport
 from agent_os.state import SimonState
 
 Route = Literal["architect", "executor", "tool", "end"]
@@ -14,7 +14,8 @@ ROUTE_TO_NODE: dict[str, str] = {
     "end": END,
 }
 
-DEFAULT_RECURSION_LIMIT = 6
+# Six executed nodes plus LangGraph's final termination superstep.
+DEFAULT_RECURSION_LIMIT = 7
 DEFAULT_RUNTIME_CONFIG = {"recursion_limit": DEFAULT_RECURSION_LIMIT}
 
 # Tier-1 substring-matching stub.
@@ -24,25 +25,21 @@ KNOWN_SKILLS = ("search", "read", "write", "fetch")
 
 
 def route_from_state(state: SimonState) -> Route:
-    """Determine the next logical step."""
-    task_lower = state.get("task", "").lower()
+    executor_output = state.get("executor_output")
+    if isinstance(executor_output, ExecutorReport) and executor_output.success is True:
+        return "end"
 
-    # 1. skill-first precedence
+    task_lower = state["task"].lower()
     if any(skill in task_lower for skill in KNOWN_SKILLS):
         return "tool"
 
-    # 2. if executor_output is present
-    if state.get("executor_output") is not None:
+    if isinstance(executor_output, str):
         return "end"
 
-    # 3. if approval is True
     if state.get("approval") is True:
         return "executor"
 
-    # R3 Termination rule:
-    # If plan is already ArchitectBrief and approval is not True, route end.
     if isinstance(state.get("plan"), ArchitectBrief):
         return "end"
 
-    # 4. otherwise return architect
     return "architect"

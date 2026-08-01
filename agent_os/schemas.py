@@ -20,3 +20,22 @@ class GrepMatch(BaseModel):
 
 class GrepResult(BaseModel):
     matches: list[GrepMatch]
+
+
+class ExecutorReport(BaseModel):
+    diff: str
+    verify_output: str
+    success: bool
+
+
+class EditFileResult(BaseModel):
+    path: str
+    bytes_written: int
+
+
+class BashResult(BaseModel):
+    args: list[str]
+    returncode: int | None
+    stdout: str
+    stderr: str
+    timed_out: bool

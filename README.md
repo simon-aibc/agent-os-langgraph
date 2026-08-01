@@ -24,7 +24,8 @@ The system routes dynamically from the supervisor node based on the current stat
 `START → planner → supervisor → [architect | executor | tool_dispatcher | END]`
 
 **Recursion Limit**:
-The default recursion limit is 6. You can pass this via runtime config when invoking the graph:
+The default recursion limit is 7: six executed nodes plus LangGraph's final
+termination superstep. Pass it via runtime config when invoking the graph:
 ```python
 from agent_os.routing import DEFAULT_RUNTIME_CONFIG
 

@@ -6,7 +6,7 @@ from agent_os.routing import DEFAULT_RUNTIME_CONFIG
 
 
 def test_recursion_limit_enforced():
-    """Prove the six-step runtime bound is actually applied."""
+    """Prove the configured runtime bound is applied."""
 
     # Injects an architect node that returns nothing,
     # causing an infinite architect <-> supervisor loop

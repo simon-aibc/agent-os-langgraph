@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_os.llm import get_architect_llm
+from agent_os.llm import get_architect_llm, get_executor_llm
 
 
 def test_get_architect_llm_missing_config(monkeypatch):
@@ -21,6 +21,32 @@ def test_get_architect_llm_explicit_model(mock_chat, monkeypatch):
     get_architect_llm(model_name="openai/gpt-4o")
 
     mock_chat.assert_called_once_with(model="openai/gpt-4o")
+
+
+@patch("agent_os.llm.ChatLiteLLM")
+def test_get_executor_llm_missing_config(mock_chat_lite_llm, monkeypatch):
+    """Missing configuration raises ValueError."""
+    monkeypatch.delenv("LLM_EXECUTOR", raising=False)
+    with pytest.raises(ValueError, match="No executor model configured"):
+        get_executor_llm()
+
+
+@patch("agent_os.llm.ChatLiteLLM")
+def test_get_executor_llm_explicit_model(mock_chat_lite_llm, monkeypatch):
+    """Explicit model_name takes precedence over environment."""
+    monkeypatch.setenv("LLM_EXECUTOR", "env-model")
+    llm = get_executor_llm(model_name="explicit-model")
+    assert llm == mock_chat_lite_llm.return_value
+    mock_chat_lite_llm.assert_called_once_with(model="explicit-model")
+
+
+@patch("agent_os.llm.ChatLiteLLM")
+def test_get_executor_llm_env_model(mock_chat_lite_llm, monkeypatch):
+    """Environment value is used when no argument is supplied."""
+    monkeypatch.setenv("LLM_EXECUTOR", "env-model")
+    llm = get_executor_llm()
+    assert llm == mock_chat_lite_llm.return_value
+    mock_chat_lite_llm.assert_called_once_with(model="env-model")
 
 
 @patch("agent_os.llm.ChatLiteLLM")

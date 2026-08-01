@@ -4,7 +4,10 @@ from langchain_core.messages import AnyMessage
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import ArchitectBrief, ExecutorReport
+
+PlanArtifact = str | ArchitectBrief
+ExecutorArtifact = str | ExecutorReport
 
 
 class SimonState(TypedDict):
@@ -13,7 +16,7 @@ class SimonState(TypedDict):
     """
     messages: Annotated[list[AnyMessage], add_messages]
     task: str
-    plan: str | ArchitectBrief | None
-    executor_output: str | None
+    plan: PlanArtifact | None
+    executor_output: ExecutorArtifact | None
     approval: bool | None
     hot_context: str | None
