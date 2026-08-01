@@ -4,7 +4,12 @@ from contextlib import closing
 import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from agent_os.checkpoints import CHECKPOINT_DB_ENV, get_default_checkpointer
+from agent_os.checkpoints import (
+    CHECKPOINT_DB_ENV,
+    get_checkpoint_serializer,
+    get_default_checkpointer,
+)
+from agent_os.schemas import ArchitectBrief
 
 
 def test_get_default_checkpointer_uses_configured_path(tmp_path, monkeypatch):
@@ -45,3 +50,17 @@ def test_closed_checkpointer_releases_database(tmp_path):
 
     with closing(sqlite3.connect(database_path)) as connection:
         assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+
+def test_checkpoint_serializer_round_trips_allowed_application_models():
+    serializer = get_checkpoint_serializer()
+    brief = ArchitectBrief(
+        files=["demo.py"],
+        changes=["add logging"],
+        verify_cmd="pytest",
+    )
+
+    restored = serializer.loads_typed(serializer.dumps_typed(brief))
+
+    assert restored == brief
+    assert isinstance(restored, ArchitectBrief)

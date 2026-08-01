@@ -13,6 +13,14 @@ def get_sandbox_root() -> Path:
     return Path(sandbox_env).resolve()
 
 
+def get_read_root() -> Path:
+    """Use an explicit sandbox for reads, otherwise preserve cwd behavior."""
+    configured_root = os.getenv("AGENT_OS_SANDBOX")
+    if configured_root:
+        return Path(configured_root).resolve()
+    return Path.cwd().resolve()
+
+
 def resolve_sandbox_path(path: str) -> Path:
     """
     Resolves a user path and rejects anything outside the sandbox,

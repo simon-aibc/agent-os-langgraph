@@ -3,13 +3,14 @@ from pathlib import Path
 
 from langchain_core.tools import tool
 
+from agent_os.sandbox import get_read_root
 from agent_os.schemas import GrepMatch, GrepResult
 
 
 @tool
 def grep(query: str, path: str = ".") -> GrepResult:
     """Search text files under a supplied project-relative path."""
-    root = Path.cwd().resolve()
+    root = get_read_root()
     target_dir = (root / path).resolve()
 
     if not target_dir.is_relative_to(root):

@@ -1,14 +1,13 @@
-from pathlib import Path
-
 from langchain_core.tools import tool
 
+from agent_os.sandbox import get_read_root
 from agent_os.schemas import ReadFileResult
 
 
 @tool
 def read_file(path: str) -> ReadFileResult:
     """Read UTF-8 text from a file within the project."""
-    root = Path.cwd().resolve()
+    root = get_read_root()
     target = (root / path).resolve()
 
     if not target.is_relative_to(root):

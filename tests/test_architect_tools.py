@@ -10,6 +10,7 @@ from agent_os.tools import grep, plan_writer, read_file
 @pytest.fixture
 def test_workspace(tmp_path, monkeypatch):
     """Create a temporary workspace and mock cwd to point to it."""
+    monkeypatch.delenv("AGENT_OS_SANDBOX", raising=False)
     monkeypatch.chdir(tmp_path)
 
     # Create some test files

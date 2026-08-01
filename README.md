@@ -12,10 +12,55 @@ Agent OS built with LangGraph.
 python -m pip install -e ".[dev]"
 ```
 
-## Testing
+## Usage
+
+Configure the three model roles in `.env` using [.env.example](.env.example),
+then start a workflow with one command:
+
 ```bash
-python -m pytest tests/
+agent-os "refactor the architect node to return a structured brief" \
+  --sandbox ./sandbox
 ```
+
+The equivalent module entrypoint is:
+
+```bash
+python -m agent_os "read_file README.md" --thread-id demo-read
+```
+
+The CLI prints its generated thread ID and streams model tokens, supervisor
+routes, tool calls, and results. It never claims to expose private
+chain-of-thought. A deterministic tool run looks like this:
+
+```text
+[THREAD] demo-read
+[SUPERVISOR] → tool_dispatcher
+[TOOL] read_file({"path": "README.md"})
+[RESULT] # agent-os-langgraph ...
+```
+
+Plans pause inline for human review:
+
+```text
+[SUPERVISOR] → architect
+[HUMAN] Review the proposed implementation plan. ...
+> approved
+[SUPERVISOR] → executor
+[SUPERVISOR] → __end__
+```
+
+Use `--thread-id` when you need a stable workflow identifier. If the process
+stops at the human gate, resume the SQLite checkpoint without repeating the
+original task:
+
+```bash
+agent-os --resume --thread-id simon-20260801T143000Z-f8b1c2
+```
+
+Pressing Ctrl+C or closing stdin at the gate leaves the checkpoint intact and
+prints the exact resume command. Use `-v`/`--verbose` for node progress and
+tracebacks; normal output remains compact. `--sandbox <path>` overrides
+`AGENT_OS_SANDBOX` for the current CLI run.
 
 ## Flow
 
@@ -140,6 +185,14 @@ result = build_graph().invoke(Command(resume="approved"), config=config)
 
 Tests may inject `InMemorySaver` through `build_graph(checkpointer=...)` when
 cross-process durability is not under test.
+
+## Testing
+
+The default suite is fully offline and deselects real MCP integrations:
+
+```bash
+python -m pytest -W error
+```
 
 To run real, opt-in MCP integration tests (requires appropriate local servers):
 ```shell

@@ -19,7 +19,11 @@ dependencies = [
     "litellm==1.93.0",
     "mcp==1.29.0",
     "langchain-mcp-adapters==0.3.0",
+    "rich==15.0.0",
 ]
+
+[project.scripts]
+agent-os = "agent_os.__main__:main"
 
 [project.optional-dependencies]
 dev = [
