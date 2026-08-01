@@ -1,11 +1,4 @@
-from agent_os.nodes import architect_node, executor_node, tool_dispatcher_node
-
-
-def test_architect_node_preserves_state():
-    """Architect node placeholder should return an empty dict."""
-    state = {"task": "test"}
-    result = architect_node(state)  # type: ignore
-    assert result == {}
+from agent_os.nodes import executor_node, tool_dispatcher_node
 
 
 def test_executor_node_preserves_state():

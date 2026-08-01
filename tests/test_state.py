@@ -43,9 +43,14 @@ def test_simon_state_validation_failure():
         adapter.validate_python(invalid_state)
 
 
+def fake_architect_node(state):
+    from agent_os.schemas import ArchitectBrief
+    return {"plan": ArchitectBrief(files=["dummy"], changes=["dummy"], verify_cmd="dummy")}
+
+
 def test_build_graph_compiles():
     """4. build_graph() compiles without error."""
-    graph = build_graph()
+    graph = build_graph(architect_node_impl=fake_architect_node)
     assert graph is not None
 
     g = graph.get_graph()
@@ -63,7 +68,7 @@ def test_build_graph_compiles():
         ("supervisor", "executor"),
         ("supervisor", "tool_dispatcher"),
         ("supervisor", "__end__"),
-        ("architect", "__end__"),
+        ("architect", "supervisor"),
         ("executor", "__end__"),
         ("tool_dispatcher", "__end__")
     }
@@ -71,8 +76,8 @@ def test_build_graph_compiles():
 
 
 def test_graph_invocation():
-    """5. Invoking the compiled graph with a valid initial state completes and sets plan equal to task while preserving the other state values."""
-    graph = build_graph()
+    """5. Invoking the compiled graph routes correctly through planner, supervisor, and architect."""
+    graph = build_graph(architect_node_impl=fake_architect_node)
     initial_state = {
         "messages": [],
         "task": "Test task",
@@ -87,8 +92,41 @@ def test_graph_invocation():
 
     # Assert values
     assert result["task"] == "Test task"
-    assert result["plan"] == "Test task"
+
+    from agent_os.schemas import ArchitectBrief
+    assert isinstance(result["plan"], ArchitectBrief)
+    assert result["plan"].files == ["dummy"]
+
     assert result["executor_output"] is None
     assert result["approval"] is None
     assert result["hot_context"] is None
     assert result["messages"] == []
+
+
+from agent_os.schemas import ArchitectBrief
+
+def test_architect_brief_validation():
+    """ArchitectBrief validates a correct payload."""
+    brief = ArchitectBrief(files=["a.py"], changes=["fix"], verify_cmd="pytest")
+    assert brief.files == ["a.py"]
+    assert brief.changes == ["fix"]
+    assert brief.verify_cmd == "pytest"
+
+def test_architect_brief_missing_fields():
+    """Missing fields fail validation."""
+    with pytest.raises(ValidationError):
+        ArchitectBrief(files=["a.py"])
+
+def test_simon_state_plan_accepts_brief():
+    """SimonState accepts both a string plan and ArchitectBrief."""
+    adapter = TypeAdapter(SimonState)
+    valid_state = {
+        "messages": [],
+        "task": "Do something",
+        "plan": ArchitectBrief(files=["file1"], changes=["fix"], verify_cmd="ls"),
+        "executor_output": None,
+        "approval": None,
+        "hot_context": None
+    }
+    validated = adapter.validate_python(valid_state)
+    assert validated["plan"].files == ["file1"]

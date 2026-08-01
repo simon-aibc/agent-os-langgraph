@@ -6,18 +6,18 @@ def test_default_runtime_config_limits_recursion_to_six_steps():
     assert DEFAULT_RUNTIME_CONFIG == {"recursion_limit": 6}
 
 
-def test_route_skill_first():
-    """1. skill-first: if task matches a known skill keyword, return 'tool'."""
-    # Even if other conditions are met, skill precedence should win
-    state = {
-        "messages": [],
-        "task": "Please search for something",
-        "plan": None,
-        "executor_output": "Some output",  # Ordinarily maps to "end"
-        "approval": True,                  # Ordinarily maps to "executor"
-        "hot_context": None
-    }
-    assert route_from_state(state) == "tool"
+def test_route_from_state_skill():
+    """Tasks containing known skills route to tool."""
+    for skill in ["search", "read", "write", "fetch"]:
+        state = {
+            "messages": [],
+            "task": f"please {skill} for data",
+            "plan": None,
+            "executor_output": "Some output",
+            "approval": True,
+            "hot_context": None
+        }
+        assert route_from_state(state) == "tool"
 
 
 def test_route_executor_output():
