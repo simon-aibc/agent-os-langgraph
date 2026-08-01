@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-os-langgraph"
+version = "0.1.0"
+description = "Agent OS built with LangGraph"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph==1.2.9",
+    "langchain-core==1.4.9",
+    "pydantic==2.13.4",
+    "python-dotenv==1.2.2",
+    "typing-extensions==4.16.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1"
+]
