@@ -28,3 +28,16 @@ def get_executor_llm(model_name: str | None = None) -> BaseChatModel:
         raise ValueError("No executor model configured. Pass model_name or set LLM_EXECUTOR.")
 
     return ChatLiteLLM(model=resolved_model)
+
+
+def get_router_llm(model_name: str | None = None) -> BaseChatModel:
+    """
+    Get the configured router LLM (cheap model).
+    Resolves model_name explicitly first, then falls back to LLM_ROUTER
+    environment variable.
+    """
+    resolved_model = model_name or os.getenv("LLM_ROUTER")
+    if not resolved_model:
+        raise ValueError("No router model configured. Pass model_name or set LLM_ROUTER.")
+
+    return ChatLiteLLM(model=resolved_model)

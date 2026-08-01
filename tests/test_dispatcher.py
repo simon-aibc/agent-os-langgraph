@@ -1,0 +1,170 @@
+from unittest.mock import MagicMock
+
+from langgraph.types import Command
+from pydantic import BaseModel
+
+from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
+from agent_os.schemas import RouterDecision
+from agent_os.skills import RegisteredSkill, SkillRegistry
+from agent_os.state import SimonState
+
+
+class DummyResult(BaseModel):
+    foo: str
+
+
+def make_state(task: str) -> SimonState:
+    return {
+        "messages": [],
+        "task": task,
+        "plan": None,
+        "executor_output": None,
+        "approval": None,
+        "human_feedback": None,
+        "hot_context": None,
+    }
+
+
+def test_dispatcher_tier1():
+    registry = SkillRegistry()
+
+    mock_handler = MagicMock(return_value=DummyResult(foo="bar"))
+    registry.register(RegisteredSkill(name="read_file", aliases=["read"], handler=mock_handler))
+
+    mock_llm = MagicMock()
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
+
+    cmd = node(make_state("read path/to/f.txt"))
+
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "__end__"
+    assert cmd.update["tool_result"].success is True
+    assert "foo" in cmd.update["tool_result"].output
+    assert cmd.update["router_escalated"] is False
+
+    mock_handler.assert_called_once_with(path="path/to/f.txt")
+    mock_llm.with_structured_output.assert_not_called()
+
+
+def test_dispatcher_tier2_high_confidence():
+    registry = SkillRegistry()
+    mock_handler = MagicMock(return_value="done")
+    registry.register(RegisteredSkill(name="custom_tool", aliases=[], handler=mock_handler))
+
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = RouterDecision(
+        tool="custom_tool", confidence=0.70, arguments={"a": 1}
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
+
+    cmd = node(make_state("do custom"))
+
+    assert cmd.goto == "__end__"
+    assert cmd.update["tool_result"].success is True
+    mock_handler.assert_called_once_with(a=1)
+
+
+def test_dispatcher_tier3_low_confidence():
+    registry = SkillRegistry()
+    mock_handler = MagicMock(return_value="done")
+    registry.register(RegisteredSkill(name="custom_tool", aliases=[], handler=mock_handler))
+
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = RouterDecision(
+        tool="custom_tool", confidence=0.69, arguments={"a": 1}
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
+
+    cmd = node(make_state("do custom"))
+
+    assert cmd.goto == "supervisor"
+    assert cmd.update["router_escalated"] is True
+    assert "tool_result" not in cmd.update
+    mock_handler.assert_not_called()
+
+
+def test_dispatcher_tier3_unknown_tool():
+    registry = SkillRegistry()
+
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = RouterDecision(
+        tool=None, confidence=0.0, arguments={}
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
+
+    cmd = node(make_state("do custom"))
+
+    assert cmd.goto == "supervisor"
+    assert cmd.update["router_escalated"] is True
+    assert "tool_result" not in cmd.update
+
+
+def test_dispatcher_tool_failure():
+    registry = SkillRegistry()
+    mock_handler = MagicMock(side_effect=RuntimeError("Tool crashed"))
+    registry.register(RegisteredSkill(name="read_file", aliases=["read"], handler=mock_handler))
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=MagicMock())
+
+    cmd = node(make_state("read path/to/f.txt"))
+
+    assert cmd.goto == "supervisor"
+    assert cmd.update["router_escalated"] is True
+    assert cmd.update["tool_result"].success is False
+    assert cmd.update["tool_result"].output == "Tool crashed"
+
+
+def test_dispatcher_invokes_real_langchain_tool(tmp_path, monkeypatch):
+    target = tmp_path / "sample.txt"
+    target.write_text("real tool output", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    command = build_tool_dispatcher_node()(make_state("read sample.txt"))
+
+    assert command.goto == "__end__"
+    assert command.update["tool_result"].success is True
+    assert "real tool output" in command.update["tool_result"].output
+
+
+def test_dispatcher_malformed_tier1_request_escalates_safely():
+    command = build_tool_dispatcher_node()(make_state("write file.txt ::   "))
+
+    assert command.goto == "supervisor"
+    assert command.update["router_escalated"] is True
+    assert command.update["tool_result"].tool == "write_file"
+    assert command.update["tool_result"].success is False
+    assert "Missing content" in command.update["tool_result"].output
+
+
+def test_dispatcher_router_failure_escalates_safely():
+    registry = SkillRegistry()
+    registry.register(
+        RegisteredSkill(
+            name="custom_tool",
+            aliases=[],
+            handler=MagicMock(return_value="done"),
+        )
+    )
+    mock_llm = MagicMock()
+    mock_llm.with_structured_output.side_effect = RuntimeError("router unavailable")
+
+    command = build_tool_dispatcher_node(
+        registry=registry,
+        router_llm=mock_llm,
+    )(make_state("please do custom work"))
+
+    assert command.goto == "supervisor"
+    assert command.update["router_escalated"] is True
+    assert command.update["tool_result"].tool == "router"
+    assert command.update["tool_result"].success is False
+    assert command.update["tool_result"].output == "router unavailable"

@@ -29,12 +29,6 @@ def build_runtime_config(thread_id: str) -> dict[str, object]:
     }
 
 
-# Tier-1 substring-matching stub.
-# It can produce false positives such as "readme" or "researching".
-# R7 replaces it with the deterministic registry plus LLM classifier.
-KNOWN_SKILLS = ("search", "read", "write", "fetch")
-
-
 def route_from_state(state: SimonState) -> Route:
     executor_output = state.get("executor_output")
     human_feedback = state.get("human_feedback")
@@ -51,22 +45,21 @@ def route_from_state(state: SimonState) -> Route:
     if human_feedback and human_feedback.startswith("rejected:"):
         return "architect"
 
-    # d. R2 skill-first check -> tool
-    task_lower = state.get("task", "").lower()
-    if any(skill in task_lower for skill in KNOWN_SKILLS):
-        return "tool"
-
-    # e. legacy string executor_output -> end
+    # legacy string executor_output -> end
     if isinstance(executor_output, str):
         return "end"
 
-    # f. legacy approval=True -> executor only when human_feedback is None
+    # legacy approval=True -> executor only when human_feedback is None
     if state.get("approval") is True and human_feedback is None:
         return "executor"
 
-    # g. ArchitectBrief without a decision -> end
+    # ArchitectBrief without a decision -> end
     if isinstance(state.get("plan"), ArchitectBrief):
         return "end"
 
-    # h. otherwise -> architect
-    return "architect"
+    # When router_escalated is True, supervisor must route to architect
+    if state.get("router_escalated") is True:
+        return "architect"
+
+    # For a new unresolved task -> tool_dispatcher first
+    return "tool"

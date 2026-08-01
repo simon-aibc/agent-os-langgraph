@@ -1,17 +1,25 @@
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 from pydantic import TypeAdapter, ValidationError
 
 from agent_os.graph import build_graph
 from agent_os.routing import build_runtime_config
-from agent_os.schemas import ArchitectBrief, BashResult, EditFileResult, ExecutorReport
+from agent_os.schemas import (
+    ArchitectBrief,
+    BashResult,
+    EditFileResult,
+    ExecutorReport,
+    RouterDecision,
+    ToolExecutionResult,
+)
 from agent_os.state import SimonState
 
 
 def test_simon_state_keys():
     """1. SimonState exposes exactly the seven required keys."""
     # TypedDict.__annotations__ gives the keys and types
-    expected_keys = {
+    expected_required_keys = {
         "messages",
         "task",
         "plan",
@@ -20,9 +28,13 @@ def test_simon_state_keys():
         "human_feedback",
         "hot_context",
     }
-    assert set(SimonState.__annotations__.keys()) == expected_keys
+    expected_all_keys = expected_required_keys | {"tool_result", "router_escalated"}
+    assert set(SimonState.__annotations__.keys()) == expected_all_keys
     # TypedDict fields are required unless declared with NotRequired.
-    assert set(SimonState.__required_keys__) == expected_keys
+    # Note: TypedDict.__required_keys__ excludes fields declared as NotRequired.
+    assert set(SimonState.__required_keys__) == expected_required_keys
+    assert "tool_result" not in SimonState.__required_keys__
+    assert "router_escalated" not in SimonState.__required_keys__
 
 
 def test_simon_state_validation_success():
@@ -53,6 +65,36 @@ def test_simon_state_validation_failure():
     }
     with pytest.raises(ValidationError):
         adapter.validate_python(invalid_state)
+
+
+@pytest.mark.parametrize("confidence", [-0.01, 1.01])
+def test_router_decision_rejects_out_of_bounds_confidence(confidence):
+    with pytest.raises(ValidationError):
+        RouterDecision(tool=None, confidence=confidence)
+
+
+def test_simon_state_accepts_optional_r7_dispatch_fields():
+    adapter = TypeAdapter(SimonState)
+    state = {
+        "messages": [],
+        "task": "read README.md",
+        "plan": None,
+        "executor_output": None,
+        "approval": None,
+        "human_feedback": None,
+        "hot_context": None,
+        "tool_result": ToolExecutionResult(
+            tool="read_file",
+            output="contents",
+            success=True,
+        ),
+        "router_escalated": False,
+    }
+
+    validated = adapter.validate_python(state)
+
+    assert validated["tool_result"].tool == "read_file"
+    assert validated["router_escalated"] is False
 
 
 def fake_architect_node(state):
@@ -91,6 +133,7 @@ def test_build_graph_compiles():
         ("architect", "human_gate"),
         ("human_gate", "supervisor"),
         ("executor", "supervisor"),
+        ("tool_dispatcher", "supervisor"),
         ("tool_dispatcher", "__end__"),
     }
     assert edges == expected_edges
@@ -100,6 +143,10 @@ def test_graph_invocation():
     """5. Invocation reaches the architect and pauses at the human gate."""
     graph = build_graph(
         architect_node_impl=fake_architect_node,
+        tool_dispatcher_node_impl=lambda state: Command(
+            update={"router_escalated": True},
+            goto="supervisor",
+        ),
         checkpointer=InMemorySaver(),
     )
     initial_state = {

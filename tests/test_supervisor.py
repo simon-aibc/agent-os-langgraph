@@ -66,7 +66,8 @@ def test_supervisor_node_routes_to_architect():
         "plan": None,
         "executor_output": None,
         "approval": None,
-        "hot_context": None
+        "hot_context": None,
+        "router_escalated": True
     }
     logical_route = route_from_state(state)
     assert logical_route == "architect"

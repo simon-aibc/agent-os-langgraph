@@ -36,6 +36,10 @@ def pause_workflow(thread_id: str, status_path: Path) -> None:
     graph = build_graph(
         architect_node_impl=fake_architect_node,
         executor_node_impl=fake_executor_node,
+        tool_dispatcher_node_impl=lambda state: Command(
+            update={"router_escalated": True},
+            goto="supervisor",
+        ),
     )
     config = build_runtime_config(thread_id)
     initial_state: SimonState = {
@@ -70,6 +74,10 @@ def resume_workflow(thread_id: str) -> None:
     graph = build_graph(
         architect_node_impl=fake_architect_node,
         executor_node_impl=fake_executor_node,
+        tool_dispatcher_node_impl=lambda state: Command(
+            update={"router_escalated": True},
+            goto="supervisor",
+        ),
     )
     config = build_runtime_config(thread_id)
     before_resume = graph.get_state(config)

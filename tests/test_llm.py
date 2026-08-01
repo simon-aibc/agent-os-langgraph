@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from agent_os.llm import get_architect_llm, get_executor_llm
+from agent_os.llm import get_architect_llm, get_executor_llm, get_router_llm
 
 
 def test_get_architect_llm_missing_config(monkeypatch):
@@ -57,3 +57,23 @@ def test_get_architect_llm_env_fallback(mock_chat, monkeypatch):
     get_architect_llm()
 
     mock_chat.assert_called_once_with(model="anthropic/claude-3-5-sonnet-20240620")
+
+
+def test_get_router_llm_missing_config(monkeypatch):
+    monkeypatch.delenv("LLM_ROUTER", raising=False)
+    with pytest.raises(ValueError, match="No router model configured"):
+        get_router_llm()
+
+
+@patch("agent_os.llm.ChatLiteLLM")
+def test_get_router_llm_explicit_model(mock_chat, monkeypatch):
+    monkeypatch.setenv("LLM_ROUTER", "env-model")
+    get_router_llm(model_name="explicit-model")
+    mock_chat.assert_called_once_with(model="explicit-model")
+
+
+@patch("agent_os.llm.ChatLiteLLM")
+def test_get_router_llm_env_fallback(mock_chat, monkeypatch):
+    monkeypatch.setenv("LLM_ROUTER", "ollama/qwen2.5:14b")
+    get_router_llm()
+    mock_chat.assert_called_once_with(model="ollama/qwen2.5:14b")

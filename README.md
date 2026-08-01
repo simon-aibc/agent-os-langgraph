@@ -19,13 +19,49 @@ python -m pytest tests/
 
 ## Flow
 
-**R5 Human Approval Flow**:
-The supervisor dynamically routes work, while implementation plans pause for
-human approval before the executor can run:
+**R7a Cascading Tool Flow**:
+New tasks pass through the tool dispatcher before agent escalation. Plans still
+pause for human approval before the executor can run:
 ```text
-START → planner → supervisor → architect → human_gate
+START → planner → supervisor → tool_dispatcher
+                                  ├─ tool selected → END
+                                  └─ escalate → supervisor → architect → human_gate
                                       ⇢ supervisor → executor → supervisor → END
 ```
+
+## Tool Routing
+
+The dispatcher uses three progressively more expensive tiers:
+
+1. Tier 1 parses an explicit native command deterministically without an LLM.
+2. Tier 2 uses the `LLM_ROUTER` model to return a structured tool decision.
+3. Tier 3 sends decisions below `0.70` confidence back to the supervisor.
+
+Tier-1 commands use these formats:
+
+```text
+read <relative_path>
+write <relative_path> :: <content>
+bash <command and arguments>
+```
+
+The registry is injectable and extensible at runtime:
+
+```python
+from agent_os.skills import RegisteredSkill, SkillRegistry
+
+registry = SkillRegistry()
+registry.register(
+    RegisteredSkill(
+        name="summarize",
+        aliases=["summary"],
+        handler=lambda text: text[:100],
+    )
+)
+```
+
+Filesystem, CodeGraph, and gbrain MCP integrations are intentionally deferred
+to R7b; `langchain-mcp-adapters` is not required by R7a.
 
 **Recursion Limit**:
 The default recursion limit is 7. `build_runtime_config()` applies this bound

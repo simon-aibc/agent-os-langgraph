@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ArchitectBrief(BaseModel):
@@ -39,3 +39,19 @@ class BashResult(BaseModel):
     stdout: str
     stderr: str
     timed_out: bool
+
+
+class RouterDecision(BaseModel):
+    """Output of the router LLM classifying the user's intent."""
+
+    tool: str | None
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    arguments: dict[str, object] = Field(default_factory=dict)
+
+
+class ToolExecutionResult(BaseModel):
+    """Output of executing a native tool."""
+
+    tool: str
+    output: str
+    success: bool

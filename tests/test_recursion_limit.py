@@ -2,6 +2,7 @@ from unittest import mock
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.types import Command
 from langgraph.errors import GraphRecursionError
 
 from agent_os.graph import build_graph
@@ -22,6 +23,10 @@ def test_recursion_limit_enforced():
     ):
         graph = build_graph(
             architect_node_impl=looping_architect_node,
+            tool_dispatcher_node_impl=lambda state: Command(
+                update={"router_escalated": True},
+                goto="supervisor",
+            ),
             checkpointer=InMemorySaver(),
         )
 

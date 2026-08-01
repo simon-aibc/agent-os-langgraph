@@ -43,21 +43,8 @@ def test_failed_executor_report_with_approval_retries_executor():
     assert route_from_state(state) == "executor"
 
 
-def test_route_from_state_skill():
-    """Tasks containing known skills route to tool."""
-    for skill in ["search", "read", "write", "fetch"]:
-        state = {
-            "messages": [],
-            "task": f"please {skill} for data",
-            "plan": None,
-            "executor_output": "Some output",
-            "approval": True,
-            "hot_context": None
-        }
-        assert route_from_state(state) == "tool"
-
-
-def test_route_from_state_uses_documented_substring_matcher():
+def test_route_unresolved_task_to_tool():
+    """For a new unresolved task -> tool_dispatcher first."""
     state = {
         "messages": [],
         "task": "research the codebase",
@@ -68,6 +55,21 @@ def test_route_from_state_uses_documented_substring_matcher():
         "hot_context": None,
     }
     assert route_from_state(state) == "tool"
+
+
+def test_route_escalated_to_architect():
+    """When router_escalated is True, supervisor must route to architect."""
+    state = {
+        "messages": [],
+        "task": "A normal task",
+        "plan": None,
+        "executor_output": None,
+        "approval": None,
+        "human_feedback": None,
+        "hot_context": None,
+        "router_escalated": True,
+    }
+    assert route_from_state(state) == "architect"
 
 
 def test_route_executor_output():
@@ -97,7 +99,7 @@ def test_route_approval_true():
 
 
 def test_route_otherwise_architect():
-    """4. otherwise return 'architect'."""
+    """An unresolved task reaches the dispatcher regardless of legacy False."""
     state = {
         "messages": [],
         "task": "A normal task",
@@ -106,11 +108,12 @@ def test_route_otherwise_architect():
         "approval": None,
         "hot_context": None
     }
-    assert route_from_state(state) == "architect"
+    # A new unresolved task routes to tool
+    assert route_from_state(state) == "tool"
 
-    # Even if approval is False, it goes to architect
+    # Even if approval is False, it goes to tool, which can escalate
     state["approval"] = False
-    assert route_from_state(state) == "architect"
+    assert route_from_state(state) == "tool"
 
 
 def test_route_approved_overrides_approval_false():
