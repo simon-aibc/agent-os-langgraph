@@ -1,37 +1,62 @@
+from unittest import mock
+
 import pytest
 from langgraph.errors import GraphRecursionError
 
 from agent_os.graph import build_graph
-from agent_os.routing import DEFAULT_RUNTIME_CONFIG
+from agent_os.routing import build_runtime_config
+from agent_os.schemas import ExecutorReport
+from agent_os.state import SimonState
 
 
 def test_recursion_limit_enforced():
-    """Prove the configured runtime bound is applied."""
+    """A rejected architect loop stops at the configured runtime bound."""
 
-    # Injects an architect node that returns nothing,
-    # causing an infinite architect <-> supervisor loop
-    # because 'plan' never becomes an ArchitectBrief.
-    def looping_architect_node(state):
+    def looping_architect_node(state: SimonState) -> dict:
         return {}
 
-    graph = build_graph(architect_node_impl=looping_architect_node)
+    with mock.patch(
+        "agent_os.graph.human_gate_node",
+        side_effect=lambda state: {"human_feedback": "rejected: auto"},
+    ):
+        graph = build_graph(architect_node_impl=looping_architect_node)
 
-    state = {
+    state: SimonState = {
         "messages": [],
         "task": "infinite loop task",
         "plan": None,
         "executor_output": None,
         "approval": False,
+        "human_feedback": None,
         "hot_context": None,
-    }
-    assert set(state) == {
-        "messages",
-        "task",
-        "plan",
-        "executor_output",
-        "approval",
-        "hot_context",
     }
 
     with pytest.raises(GraphRecursionError):
-        graph.invoke(state, config=DEFAULT_RUNTIME_CONFIG)
+        graph.invoke(state, config=build_runtime_config("architect-retry-loop"))
+
+
+def test_recursion_limit_executor_retry():
+    """A failing approved executor loop also stops at the runtime bound."""
+
+    def failing_executor_node(state: SimonState) -> dict[str, ExecutorReport]:
+        return {
+            "executor_output": ExecutorReport(
+                diff="partial change",
+                verify_output="tests failed",
+                success=False,
+            )
+        }
+
+    graph = build_graph(executor_node_impl=failing_executor_node)
+    state: SimonState = {
+        "messages": [],
+        "task": "infinite loop executor task",
+        "plan": None,
+        "executor_output": None,
+        "approval": None,
+        "human_feedback": "approved",
+        "hot_context": None,
+    }
+
+    with pytest.raises(GraphRecursionError):
+        graph.invoke(state, config=build_runtime_config("executor-retry-loop"))

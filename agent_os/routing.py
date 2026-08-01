@@ -18,6 +18,17 @@ ROUTE_TO_NODE: dict[str, str] = {
 DEFAULT_RECURSION_LIMIT = 7
 DEFAULT_RUNTIME_CONFIG = {"recursion_limit": DEFAULT_RECURSION_LIMIT}
 
+
+def build_runtime_config(thread_id: str) -> dict[str, object]:
+    normalized_thread_id = thread_id.strip()
+    if not normalized_thread_id:
+        raise ValueError("thread_id must not be empty")
+    return {
+        "recursion_limit": DEFAULT_RECURSION_LIMIT,
+        "configurable": {"thread_id": normalized_thread_id},
+    }
+
+
 # Tier-1 substring-matching stub.
 # It can produce false positives such as "readme" or "researching".
 # R7 replaces it with the deterministic registry plus LLM classifier.
@@ -26,20 +37,36 @@ KNOWN_SKILLS = ("search", "read", "write", "fetch")
 
 def route_from_state(state: SimonState) -> Route:
     executor_output = state.get("executor_output")
+    human_feedback = state.get("human_feedback")
+
+    # a. successful ExecutorReport -> end
     if isinstance(executor_output, ExecutorReport) and executor_output.success is True:
         return "end"
 
-    task_lower = state["task"].lower()
+    # b. human_feedback == "approved" -> executor
+    if human_feedback == "approved":
+        return "executor"
+
+    # c. human_feedback beginning "rejected:" -> architect
+    if human_feedback and human_feedback.startswith("rejected:"):
+        return "architect"
+
+    # d. R2 skill-first check -> tool
+    task_lower = state.get("task", "").lower()
     if any(skill in task_lower for skill in KNOWN_SKILLS):
         return "tool"
 
+    # e. legacy string executor_output -> end
     if isinstance(executor_output, str):
         return "end"
 
-    if state.get("approval") is True:
+    # f. legacy approval=True -> executor only when human_feedback is None
+    if state.get("approval") is True and human_feedback is None:
         return "executor"
 
+    # g. ArchitectBrief without a decision -> end
     if isinstance(state.get("plan"), ArchitectBrief):
         return "end"
 
+    # h. otherwise -> architect
     return "architect"

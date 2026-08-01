@@ -2,15 +2,25 @@ import pytest
 from pydantic import TypeAdapter, ValidationError
 
 from agent_os.graph import build_graph
+from agent_os.routing import build_runtime_config
+from agent_os.schemas import ArchitectBrief, BashResult, EditFileResult, ExecutorReport
 from agent_os.state import SimonState
 
 
 def test_simon_state_keys():
-    """1. SimonState exposes exactly the six required keys."""
+    """1. SimonState exposes exactly the seven required keys."""
     # TypedDict.__annotations__ gives the keys and types
-    expected_keys = {"messages", "task", "plan", "executor_output", "approval", "hot_context"}
+    expected_keys = {
+        "messages",
+        "task",
+        "plan",
+        "executor_output",
+        "approval",
+        "human_feedback",
+        "hot_context",
+    }
     assert set(SimonState.__annotations__.keys()) == expected_keys
-    # Also verify they are required (in Python 3.11+, typed dicts require all fields by default unless NotRequired is used)
+    # TypedDict fields are required unless declared with NotRequired.
     assert set(SimonState.__required_keys__) == expected_keys
 
 
@@ -23,6 +33,7 @@ def test_simon_state_validation_success():
         "plan": "My plan",
         "executor_output": "Success",
         "approval": True,
+        "human_feedback": "approved",
         "hot_context": "Some context"
     }
     # Should not raise exception
@@ -44,7 +55,6 @@ def test_simon_state_validation_failure():
 
 
 def fake_architect_node(state):
-    from agent_os.schemas import ArchitectBrief
     return {"plan": ArchitectBrief(files=["dummy"], changes=["dummy"], verify_cmd="dummy")}
 
 
@@ -55,8 +65,14 @@ def test_build_graph_compiles():
 
     g = graph.get_graph()
     expected_nodes = {
-        "__start__", "planner", "supervisor",
-        "architect", "executor", "tool_dispatcher", "__end__"
+        "__start__",
+        "planner",
+        "supervisor",
+        "architect",
+        "human_gate",
+        "executor",
+        "tool_dispatcher",
+        "__end__",
     }
     assert set(g.nodes.keys()) == expected_nodes
 
@@ -68,15 +84,16 @@ def test_build_graph_compiles():
         ("supervisor", "executor"),
         ("supervisor", "tool_dispatcher"),
         ("supervisor", "__end__"),
-        ("architect", "supervisor"),
+        ("architect", "human_gate"),
+        ("human_gate", "supervisor"),
         ("executor", "supervisor"),
-        ("tool_dispatcher", "__end__")
+        ("tool_dispatcher", "__end__"),
     }
     assert edges == expected_edges
 
 
 def test_graph_invocation():
-    """5. Invoking the compiled graph routes correctly through planner, supervisor, and architect."""
+    """5. Invocation reaches the architect and pauses at the human gate."""
     graph = build_graph(architect_node_impl=fake_architect_node)
     initial_state = {
         "messages": [],
@@ -84,27 +101,26 @@ def test_graph_invocation():
         "plan": None,
         "executor_output": None,
         "approval": None,
-        "hot_context": None
+        "human_feedback": None,
+        "hot_context": None,
     }
 
+    config = build_runtime_config("thread-test-1")
+
     # Run the graph
-    result = graph.invoke(initial_state)
+    result = graph.invoke(initial_state, config=config)
 
     # Assert values
     assert result["task"] == "Test task"
 
-    from agent_os.schemas import ArchitectBrief
     assert isinstance(result["plan"], ArchitectBrief)
     assert result["plan"].files == ["dummy"]
 
     assert result["executor_output"] is None
     assert result["approval"] is None
+    assert result["human_feedback"] is None
     assert result["hot_context"] is None
     assert result["messages"] == []
-
-
-from agent_os.schemas import ArchitectBrief, BashResult, EditFileResult, ExecutorReport
-
 
 def test_architect_brief_validation():
     """ArchitectBrief validates a correct payload."""
@@ -129,7 +145,8 @@ def test_simon_state_plan_accepts_brief():
         "plan": ArchitectBrief(files=["file1"], changes=["fix"], verify_cmd="ls"),
         "executor_output": None,
         "approval": None,
-        "hot_context": None
+        "human_feedback": None,
+        "hot_context": None,
     }
     validated = adapter.validate_python(valid_state)
     assert validated["plan"].files == ["file1"]
@@ -158,7 +175,8 @@ def test_simon_state_executor_output_accepts_report():
         "plan": None,
         "executor_output": ExecutorReport(diff="foo", verify_output="ok", success=True),
         "approval": None,
-        "hot_context": None
+        "human_feedback": None,
+        "hot_context": None,
     }
     validated = adapter.validate_python(valid_state)
     assert validated["executor_output"].success is True

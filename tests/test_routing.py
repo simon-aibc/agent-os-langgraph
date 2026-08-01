@@ -1,10 +1,22 @@
-from agent_os.routing import DEFAULT_RUNTIME_CONFIG, route_from_state
+import pytest
+
+from agent_os.routing import DEFAULT_RUNTIME_CONFIG, build_runtime_config, route_from_state
 from agent_os.schemas import ExecutorReport
 
 
 def test_default_runtime_config_allows_workflow_termination():
     """The runtime config allows six nodes plus the termination superstep."""
     assert DEFAULT_RUNTIME_CONFIG == {"recursion_limit": 7}
+
+
+def test_build_runtime_config_normalizes_and_requires_thread_id():
+    assert build_runtime_config("  workflow-1  ") == {
+        "recursion_limit": 7,
+        "configurable": {"thread_id": "workflow-1"},
+    }
+    for invalid_thread_id in ("", " ", "\t\n"):
+        with pytest.raises(ValueError, match="thread_id must not be empty"):
+            build_runtime_config(invalid_thread_id)
 
 
 def test_successful_executor_report_routes_to_end():
@@ -43,6 +55,19 @@ def test_route_from_state_skill():
             "hot_context": None
         }
         assert route_from_state(state) == "tool"
+
+
+def test_route_from_state_uses_documented_substring_matcher():
+    state = {
+        "messages": [],
+        "task": "research the codebase",
+        "plan": None,
+        "executor_output": None,
+        "approval": None,
+        "human_feedback": None,
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "tool"
 
 
 def test_route_executor_output():
@@ -86,3 +111,42 @@ def test_route_otherwise_architect():
     # Even if approval is False, it goes to architect
     state["approval"] = False
     assert route_from_state(state) == "architect"
+
+
+def test_route_approved_overrides_approval_false():
+    state = {
+        "messages": [],
+        "task": "do something",
+        "plan": None,
+        "executor_output": None,
+        "approval": False,
+        "human_feedback": "approved",
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "executor"
+
+
+def test_route_rejected_overrides_approval_true():
+    state = {
+        "messages": [],
+        "task": "do something",
+        "plan": None,
+        "executor_output": None,
+        "approval": True,
+        "human_feedback": "rejected: bad plan",
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "architect"
+
+
+def test_route_legacy_approval_works_without_feedback():
+    state = {
+        "messages": [],
+        "task": "do something",
+        "plan": None,
+        "executor_output": None,
+        "approval": True,
+        "human_feedback": None,
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "executor"
