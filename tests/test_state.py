@@ -49,13 +49,25 @@ def test_build_graph_compiles():
     assert graph is not None
 
     g = graph.get_graph()
-    assert set(g.nodes.keys()) == {"__start__", "planner", "supervisor", "__end__"}
+    expected_nodes = {
+        "__start__", "planner", "supervisor",
+        "architect", "executor", "tool_dispatcher", "__end__"
+    }
+    assert set(g.nodes.keys()) == expected_nodes
+
     edges = {(e.source, e.target) for e in g.edges}
-    assert edges == {
+    expected_edges = {
         ("__start__", "planner"),
         ("planner", "supervisor"),
-        ("supervisor", "__end__")
+        ("supervisor", "architect"),
+        ("supervisor", "executor"),
+        ("supervisor", "tool_dispatcher"),
+        ("supervisor", "__end__"),
+        ("architect", "__end__"),
+        ("executor", "__end__"),
+        ("tool_dispatcher", "__end__")
     }
+    assert edges == expected_edges
 
 
 def test_graph_invocation():

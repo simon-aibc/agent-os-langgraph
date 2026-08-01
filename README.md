@@ -14,8 +14,19 @@ python -m pip install -e ".[dev]"
 
 ## Testing
 ```bash
-python -m pytest tests/test_state.py
+python -m pytest tests/
 ```
 
-## R1 Flow
-START → planner → supervisor → END
+## Flow
+
+**R2 Dynamic Routing**:
+The system routes dynamically from the supervisor node based on the current state:
+`START → planner → supervisor → [architect | executor | tool_dispatcher | END]`
+
+**Recursion Limit**:
+The default recursion limit is 6. You can pass this via runtime config when invoking the graph:
+```python
+from agent_os.routing import DEFAULT_RUNTIME_CONFIG
+
+graph.invoke(state, DEFAULT_RUNTIME_CONFIG)
+```
