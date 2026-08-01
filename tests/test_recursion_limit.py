@@ -1,6 +1,7 @@
 from unittest import mock
 
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.errors import GraphRecursionError
 
 from agent_os.graph import build_graph
@@ -19,7 +20,10 @@ def test_recursion_limit_enforced():
         "agent_os.graph.human_gate_node",
         side_effect=lambda state: {"human_feedback": "rejected: auto"},
     ):
-        graph = build_graph(architect_node_impl=looping_architect_node)
+        graph = build_graph(
+            architect_node_impl=looping_architect_node,
+            checkpointer=InMemorySaver(),
+        )
 
     state: SimonState = {
         "messages": [],
@@ -47,7 +51,10 @@ def test_recursion_limit_executor_retry():
             )
         }
 
-    graph = build_graph(executor_node_impl=failing_executor_node)
+    graph = build_graph(
+        executor_node_impl=failing_executor_node,
+        checkpointer=InMemorySaver(),
+    )
     state: SimonState = {
         "messages": [],
         "task": "infinite loop executor task",

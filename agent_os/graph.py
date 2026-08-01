@@ -1,10 +1,10 @@
 from typing import Callable
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
+from agent_os.checkpoints import get_default_checkpointer
 from agent_os.nodes import human_gate_node
 from agent_os.nodes.architect import architect_node
 from agent_os.nodes.executor import executor_node
@@ -20,7 +20,7 @@ def build_graph(
     executor_node_impl: Callable[[SimonState], dict] | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
-    """Build the graph with an injected or in-memory checkpointer."""
+    """Build the graph with an injected or SQLite checkpointer."""
     builder = StateGraph(SimonState)
 
     if architect_node_impl is None:
@@ -30,7 +30,7 @@ def build_graph(
         executor_node_impl = executor_node
 
     if checkpointer is None:
-        checkpointer = InMemorySaver()
+        checkpointer = get_default_checkpointer()
 
     builder.add_node("planner", planner_node)
     builder.add_node("supervisor", supervisor_node)

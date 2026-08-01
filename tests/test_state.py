@@ -1,4 +1,5 @@
 import pytest
+from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import TypeAdapter, ValidationError
 
 from agent_os.graph import build_graph
@@ -60,7 +61,10 @@ def fake_architect_node(state):
 
 def test_build_graph_compiles():
     """4. build_graph() compiles without error."""
-    graph = build_graph(architect_node_impl=fake_architect_node)
+    graph = build_graph(
+        architect_node_impl=fake_architect_node,
+        checkpointer=InMemorySaver(),
+    )
     assert graph is not None
 
     g = graph.get_graph()
@@ -94,7 +98,10 @@ def test_build_graph_compiles():
 
 def test_graph_invocation():
     """5. Invocation reaches the architect and pauses at the human gate."""
-    graph = build_graph(architect_node_impl=fake_architect_node)
+    graph = build_graph(
+        architect_node_impl=fake_architect_node,
+        checkpointer=InMemorySaver(),
+    )
     initial_state = {
         "messages": [],
         "task": "Test task",

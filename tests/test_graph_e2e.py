@@ -2,6 +2,7 @@ from typing import cast
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
 
 from agent_os.graph import build_graph
@@ -70,12 +71,19 @@ def build_test_graph():
     return graph, architect, executor, checkpointer
 
 
-def test_build_graph_compiles_with_default_and_injected_checkpointers():
+def test_build_graph_compiles_with_default_and_injected_checkpointers(
+    tmp_path,
+    monkeypatch,
+):
+    database_path = tmp_path / "default.db"
+    monkeypatch.setenv("AGENT_OS_CHECKPOINTS_DB", str(database_path))
     default_graph = build_graph(
         architect_node_impl=ArchitectSpy(),
         executor_node_impl=ExecutorSpy(),
     )
-    assert isinstance(default_graph.checkpointer, InMemorySaver)
+    assert isinstance(default_graph.checkpointer, SqliteSaver)
+    assert database_path.exists()
+    default_graph.checkpointer.conn.close()
 
     graph, _, _, checkpointer = build_test_graph()
     assert graph.checkpointer is checkpointer
@@ -94,6 +102,7 @@ def test_default_checkpointer_requires_thread_id():
     graph = build_graph(
         architect_node_impl=ArchitectSpy(),
         executor_node_impl=ExecutorSpy(),
+        checkpointer=InMemorySaver(),
     )
 
     with pytest.raises(ValueError, match="thread_id"):
