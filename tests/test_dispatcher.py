@@ -1,3 +1,4 @@
+import re
 from unittest.mock import MagicMock
 
 from langgraph.types import Command
@@ -167,3 +168,36 @@ def test_dispatcher_router_failure_escalates_safely():
     assert command.update["tool_result"].tool == "router"
     assert command.update["tool_result"].success is False
     assert command.update["tool_result"].output == "router unavailable"
+
+
+def test_dispatcher_output_truncation():
+    registry = SkillRegistry()
+    large_output = "A" * 60000
+    mock_handler = MagicMock(return_value=large_output)
+    registry.register(
+        RegisteredSkill(
+            name="large_tool",
+            aliases=["large"],
+            handler=mock_handler,
+        )
+    )
+
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+    mock_structured.invoke.return_value = RouterDecision(
+        tool="large_tool", confidence=0.99, arguments={"arg": 1}
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
+    cmd = node(make_state("do large work"))
+
+    assert cmd.goto == "__end__"
+    assert cmd.update["tool_result"].success is True
+
+    output = cmd.update["tool_result"].output
+    match = re.match(r"^\[truncated (\d+) bytes\]\n", output)
+    assert match is not None
+    retained = output[match.end():]
+    assert len(output.encode("utf-8")) <= 50 * 1024
+    assert int(match.group(1)) == len(large_output.encode()) - len(retained.encode())

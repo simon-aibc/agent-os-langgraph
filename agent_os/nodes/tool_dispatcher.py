@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from agent_os.default_registry import build_default_registry, parse_tier1_request
 from agent_os.nodes.smart_router import classify_tool_request
+from agent_os.output_limits import DISPATCHER_OUTPUT_MAX_BYTES, truncate_utf8
 from agent_os.schemas import ToolExecutionResult
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.state import SimonState
@@ -19,10 +20,13 @@ DispatcherCommand = Command[Literal["supervisor", "__end__"]]
 
 def _serialize_tool_output(raw_output: object) -> str:
     if isinstance(raw_output, BaseModel):
-        return raw_output.model_dump_json(indent=2)
-    if isinstance(raw_output, (dict, list, tuple)):
-        return json.dumps(raw_output, sort_keys=True, default=str)
-    return str(raw_output)
+        serialized = raw_output.model_dump_json(indent=2)
+    elif isinstance(raw_output, (dict, list, tuple)):
+        serialized = json.dumps(raw_output, sort_keys=True, default=str)
+    else:
+        serialized = str(raw_output)
+    capped_output, _ = truncate_utf8(serialized, DISPATCHER_OUTPUT_MAX_BYTES)
+    return capped_output
 
 
 def _escalate(

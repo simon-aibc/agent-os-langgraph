@@ -39,6 +39,7 @@ class BashResult(BaseModel):
     stdout: str
     stderr: str
     timed_out: bool
+    truncated: bool = False
 
 
 class RouterDecision(BaseModel):

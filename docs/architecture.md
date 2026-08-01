@@ -143,6 +143,29 @@ processes. Untrusted workloads require a container or microVM. Explicit Tier-1
 write/bash commands are direct user instructions and do not pass through the
 architect/HITL plan loop.
 
+## Token economy
+
+Agent OS treats each model invocation as a cost boundary:
+
+1. **Structured outputs** (`agent_os/schemas.py`) bound response shapes with
+   Pydantic contracts.
+2. **Cascading routing** (`agent_os/nodes/tool_dispatcher.py`) tries the
+   deterministic path before structured-model routing and agent escalation.
+3. **HITL gating** (`agent_os/nodes/human_gate.py`) prevents unapproved plans
+   from entering the Executor phase.
+4. **Anthropic prompt caching** (`agent_os/llm.py`) adds an ephemeral
+   `cache_control` content block to Architect and Executor system messages.
+   Keeping this provider-specific representation at the LLM boundary prevents
+   it from leaking into graph routing.
+5. **8K message trimming** (`agent_os/messages.py`) bounds context at the
+   Architect and Executor invocation boundaries without mutating persistent
+   `SimonState`. Full history remains available for HITL review and replay.
+6. **Output caps** (`agent_os/output_limits.py`) bound retained UTF-8 data to
+   100KB per Bash stream and 50KB per dispatcher result before checkpointing.
+   `subprocess.run(capture_output=True)` still buffers before this cap applies.
+7. **Offline startup** (`agent_os/cli/app.py`) selects LiteLLM's local cost map
+   before imports that could otherwise make an incidental metadata request.
+
 ## Extension points
 
 - Register `RegisteredSkill` instances in an injected `SkillRegistry`.

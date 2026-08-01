@@ -2,7 +2,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 
-from agent_os.llm import get_executor_llm
+from agent_os.llm import get_executor_llm, prepare_system_prompt
 from agent_os.schemas import ExecutorReport
 from agent_os.tools import bash, edit_file, run_tests
 
@@ -21,11 +21,12 @@ def build_executor_agent(llm: BaseChatModel | None = None) -> CompiledStateGraph
     resolved_llm = llm if llm is not None else get_executor_llm()
 
     tools = [edit_file, bash, run_tests]
+    system_prompt = prepare_system_prompt(SYSTEM_PROMPT, resolved_llm)
 
     return create_agent(
         model=resolved_llm,
         tools=tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         response_format=ExecutorReport,
-        name="executor_react_agent"
+        name="executor_react_agent",
     )

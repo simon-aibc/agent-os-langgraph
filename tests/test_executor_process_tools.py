@@ -1,3 +1,4 @@
+import re
 import sys
 from unittest.mock import patch
 
@@ -41,6 +42,29 @@ def test_bash_output_captured(test_sandbox):
     assert result.returncode == 0
     assert "hello world" in result.stdout
     assert result.stderr == ""
+
+
+def test_bash_output_truncation(test_sandbox):
+    stdout_bytes = 110 * 1024
+    stderr_bytes = 120 * 1024
+    script = (
+        f"import sys; sys.stdout.write('A' * {stdout_bytes}); "
+        f"sys.stderr.write('B' * {stderr_bytes})"
+    )
+
+    result = bash.invoke({"cmd_args": [sys.executable, "-c", script]})
+
+    assert result.returncode == 0
+    assert result.truncated is True
+    for original_size, output in (
+        (stdout_bytes, result.stdout),
+        (stderr_bytes, result.stderr),
+    ):
+        match = re.match(r"^\[truncated (\d+) bytes\]\n", output)
+        assert match is not None
+        retained = output[match.end():]
+        assert len(output.encode()) <= 100 * 1024
+        assert int(match.group(1)) == original_size - len(retained.encode())
 
 
 def test_bash_timeout_works(test_sandbox):

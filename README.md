@@ -149,6 +149,37 @@ Model roles use provider/model strings from `.env`. Tests or applications may
 also inject any compatible `BaseChatModel` into `build_architect_agent()`,
 `build_executor_agent()`, or `build_tool_dispatcher_node()`.
 
+## Token Economy
+
+Every LLM call is a cost boundary. Deterministic tools form the free, fast
+path; model-backed routing and agent steps are bounded explicitly.
+
+| Pattern | Description |
+| :--- | :--- |
+| Structured outputs | Pydantic contracts bound the shape of model responses. |
+| Cascading router | Tier 1 is deterministic; Tier 2 uses a cheaper model before Tier 3 agent escalation. |
+| HITL gate | Executor work starts only after the proposed plan is approved. |
+| Anthropic prompt caching | Ephemeral `cache_control` blocks target up to 90% lower cost for eligible cached-input tokens. |
+| 8K message trimming | Architect and Executor invocation histories are trimmed before model calls. |
+| Output caps | Bash streams are capped at 100KB each; serialized dispatcher results at 50KB total. |
+| Offline startup | CLI initialization uses LiteLLM's local cost map and avoids incidental provider calls. |
+
+### Illustrative benchmark
+
+These estimates depend on the model, provider, and workload; they are not
+measured SLAs.
+
+- **Tier 1 (Deterministic)** = $0 / ~0ms LLM latency
+- **Tier 2 (Structured LLM)** = ~$0.0002 / ~200ms
+- **Tier 3 (Agent Escalation)** = ~$0.01 / ~2s
+
+### Output limits
+
+Bash standard output and error are truncated independently to 100KB (UTF-8
+bytes) each. Total serialized dispatcher tool results are capped at 50KB.
+Subprocess capture still buffers in memory before truncation; containerized,
+streamed execution remains v2.
+
 ## Security and trust boundaries
 
 - The HITL gate protects **agent-planned executor work**. Explicit Tier-1
@@ -168,7 +199,9 @@ also inject any compatible `BaseChatModel` into `build_architect_agent()`,
   arguments redact common credential fields before display.
 - CLI startup uses LiteLLM's local model-cost map, avoiding an incidental
   metadata request before the workflow begins.
-- Bash and dispatcher output size caps remain deferred to R11.
+- Bash and dispatcher results are byte-capped before checkpoint storage. The
+  subprocess capture itself remains an in-memory boundary, not an OS resource
+  limit.
 
 ## CLI exit codes
 
@@ -200,8 +233,7 @@ CI runs Ruff and the offline test suite on Python 3.11 and 3.12.
 ## Roadmap / v2 backlog
 
 - R10: record and embed an end-to-end demo.
-- R11: cap subprocess/dispatcher output, add budget hooks, trim messages, and
-  document token-economy measurements.
+- Add durable, process-safe LiteLLM daily-budget accounting and enforcement.
 - Run untrusted execution in a disposable container or microVM.
 - Add an optional web interface only after the CLI workflow is validated.
 

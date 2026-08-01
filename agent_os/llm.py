@@ -1,7 +1,35 @@
 import os
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import SystemMessage
 from langchain_litellm import ChatLiteLLM
+
+
+def prepare_system_prompt(prompt: str, llm: BaseChatModel) -> str | SystemMessage:
+    """Add Anthropic's ephemeral cache control to a system prompt."""
+    provider = getattr(llm, "custom_llm_provider", None)
+    model_values = (
+        getattr(llm, "model", None),
+        getattr(llm, "model_name", None),
+    )
+    is_anthropic = (
+        isinstance(provider, str) and provider.casefold() == "anthropic"
+    ) or any(
+        isinstance(model, str) and model.casefold().startswith("anthropic/")
+        for model in model_values
+    )
+
+    if is_anthropic:
+        return SystemMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        )
+    return prompt
 
 
 def get_architect_llm(model_name: str | None = None) -> BaseChatModel:

@@ -2,7 +2,7 @@ from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 
-from agent_os.llm import get_architect_llm
+from agent_os.llm import get_architect_llm, prepare_system_prompt
 from agent_os.schemas import ArchitectBrief
 from agent_os.tools import grep, plan_writer, read_file
 
@@ -19,11 +19,12 @@ def build_architect_agent(llm: BaseChatModel | None = None) -> CompiledStateGrap
     resolved_llm = llm if llm is not None else get_architect_llm()
 
     tools = [read_file, grep, plan_writer]
+    system_prompt = prepare_system_prompt(SYSTEM_PROMPT, resolved_llm)
 
     return create_agent(
         model=resolved_llm,
         tools=tools,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         response_format=ArchitectBrief,
-        name="architect_react_agent"
+        name="architect_react_agent",
     )

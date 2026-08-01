@@ -1,8 +1,22 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.messages import SystemMessage
 
-from agent_os.llm import get_architect_llm, get_executor_llm, get_router_llm
+from agent_os.agents.architect import (
+    SYSTEM_PROMPT as ARCHITECT_SYSTEM_PROMPT,
+)
+from agent_os.agents.architect import build_architect_agent
+from agent_os.agents.executor import (
+    SYSTEM_PROMPT as EXECUTOR_SYSTEM_PROMPT,
+)
+from agent_os.agents.executor import build_executor_agent
+from agent_os.llm import (
+    get_architect_llm,
+    get_executor_llm,
+    get_router_llm,
+    prepare_system_prompt,
+)
 
 
 def test_get_architect_llm_missing_config(monkeypatch):
@@ -76,3 +90,49 @@ def test_get_router_llm_env_fallback(mock_chat, monkeypatch):
     monkeypatch.setenv("LLM_ROUTER", "ollama/qwen2.5:14b")
     get_router_llm()
     mock_chat.assert_called_once_with(model="ollama/qwen2.5:14b")
+
+
+@pytest.mark.parametrize(
+    ("patch_target", "factory", "expected_text"),
+    [
+        (
+            "agent_os.agents.architect.create_agent",
+            build_architect_agent,
+            ARCHITECT_SYSTEM_PROMPT,
+        ),
+        (
+            "agent_os.agents.executor.create_agent",
+            build_executor_agent,
+            EXECUTOR_SYSTEM_PROMPT,
+        ),
+    ],
+)
+def test_anthropic_agent_system_prompts_enable_ephemeral_caching(
+    patch_target,
+    factory,
+    expected_text,
+):
+    mock_llm = MagicMock()
+    mock_llm.model = "anthropic/claude-sonnet-4-5"
+
+    with patch(patch_target) as mock_create:
+        factory(llm=mock_llm)
+
+    prompt = mock_create.call_args.kwargs["system_prompt"]
+    assert isinstance(prompt, SystemMessage)
+    assert prompt.content == [
+        {
+            "type": "text",
+            "text": expected_text,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def test_non_anthropic_system_prompt_remains_plain_text():
+    mock_llm = MagicMock()
+    mock_llm.model = "openai/gpt-4o"
+
+    prompt = prepare_system_prompt("system instructions", mock_llm)
+
+    assert prompt == "system instructions"
