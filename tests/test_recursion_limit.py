@@ -2,8 +2,8 @@ from unittest import mock
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.types import Command
 from langgraph.errors import GraphRecursionError
+from langgraph.types import Command
 
 from agent_os.graph import build_graph
 from agent_os.routing import build_runtime_config
@@ -35,7 +35,6 @@ def test_recursion_limit_enforced():
         "task": "infinite loop task",
         "plan": None,
         "executor_output": None,
-        "approval": False,
         "human_feedback": None,
         "hot_context": None,
     }
@@ -65,7 +64,6 @@ def test_recursion_limit_executor_retry():
         "task": "infinite loop executor task",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": "approved",
         "hot_context": None,
     }

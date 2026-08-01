@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import START, StateGraph

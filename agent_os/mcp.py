@@ -45,24 +45,36 @@ def _validate_http_url(name: str, value: str) -> str:
     return value
 
 
+def _validate_sandbox_root(sandbox_path: str) -> Path:
+    """Require the filesystem MCP root to be strictly below the user home."""
+    if not sandbox_path:
+        raise ValueError(
+            "AGENT_OS_SANDBOX must be configured when "
+            "MCP_FILESYSTEM_ENABLED is true"
+        )
+    resolved = Path(sandbox_path).resolve()
+    home = Path.home().resolve()
+
+    if resolved == home:
+        raise ValueError("Filesystem MCP root cannot be the user home directory itself.")
+
+    try:
+        resolved.relative_to(home)
+    except ValueError:
+        raise ValueError(
+            "Filesystem MCP root must be inside the user home directory."
+        ) from None
+
+    return resolved
+
+
 def build_mcp_server_configs() -> dict[str, MCPServerConfig]:
     """Build adapter-compatible server configurations from the environment."""
     configs: dict[str, MCPServerConfig] = {}
 
     if parse_env_bool("MCP_FILESYSTEM_ENABLED"):
-        sandbox_path = os.getenv("AGENT_OS_SANDBOX")
-        if not sandbox_path:
-            raise ValueError(
-                "AGENT_OS_SANDBOX must be configured when "
-                "MCP_FILESYSTEM_ENABLED is true"
-            )
-
-        resolved_sandbox = Path(sandbox_path).resolve()
-        if resolved_sandbox in {Path("/").resolve(), Path.home().resolve()}:
-            raise ValueError(
-                "Filesystem MCP root cannot be / or the user home directory: "
-                f"{resolved_sandbox}"
-            )
+        sandbox_path = os.getenv("AGENT_OS_SANDBOX", "")
+        resolved_sandbox = _validate_sandbox_root(sandbox_path)
 
         configs["filesystem"] = {
             "transport": "stdio",
@@ -75,9 +87,13 @@ def build_mcp_server_configs() -> dict[str, MCPServerConfig]:
         }
 
     if parse_env_bool("MCP_CODEGRAPH_ENABLED"):
+        cg_command = os.getenv("MCP_CODEGRAPH_COMMAND", "codegraph").strip()
+        if not cg_command:
+            raise ValueError("MCP_CODEGRAPH_COMMAND cannot be blank when enabled.")
+
         configs["codegraph"] = {
             "transport": "stdio",
-            "command": "codegraph",
+            "command": cg_command,
             "args": ["serve", "--mcp"],
         }
 

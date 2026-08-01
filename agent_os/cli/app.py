@@ -52,7 +52,6 @@ def _initial_state(task: str) -> dict[str, object]:
         "task": task,
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }

@@ -47,7 +47,6 @@ def pause_workflow(thread_id: str, status_path: Path) -> None:
         "task": "prove workflow survives restart",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }

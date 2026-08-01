@@ -17,14 +17,13 @@ from agent_os.state import SimonState
 
 
 def test_simon_state_keys():
-    """1. SimonState exposes exactly the seven required keys."""
+    """SimonState exposes six required and two optional dispatch keys."""
     # TypedDict.__annotations__ gives the keys and types
     expected_required_keys = {
         "messages",
         "task",
         "plan",
         "executor_output",
-        "approval",
         "human_feedback",
         "hot_context",
     }
@@ -45,7 +44,6 @@ def test_simon_state_validation_success():
         "task": "Do something",
         "plan": "My plan",
         "executor_output": "Success",
-        "approval": True,
         "human_feedback": "approved",
         "hot_context": "Some context"
     }
@@ -80,7 +78,6 @@ def test_simon_state_accepts_optional_r7_dispatch_fields():
         "task": "read README.md",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
         "tool_result": ToolExecutionResult(
@@ -154,7 +151,6 @@ def test_graph_invocation():
         "task": "Test task",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }
@@ -171,7 +167,6 @@ def test_graph_invocation():
     assert result["plan"].files == ["dummy"]
 
     assert result["executor_output"] is None
-    assert result["approval"] is None
     assert result["human_feedback"] is None
     assert result["hot_context"] is None
     assert result["messages"] == []
@@ -198,7 +193,6 @@ def test_simon_state_plan_accepts_brief():
         "task": "Do something",
         "plan": ArchitectBrief(files=["file1"], changes=["fix"], verify_cmd="ls"),
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }
@@ -228,7 +222,6 @@ def test_simon_state_executor_output_accepts_report():
         "task": "Do something",
         "plan": None,
         "executor_output": ExecutorReport(diff="foo", verify_output="ok", success=True),
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }

@@ -366,7 +366,6 @@ async def test_resume_from_preexisting_sqlite_checkpoint(tmp_path, monkeypatch):
         "task": "add logging",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }

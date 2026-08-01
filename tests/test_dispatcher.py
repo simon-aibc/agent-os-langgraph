@@ -19,7 +19,6 @@ def make_state(task: str) -> SimonState:
         "task": task,
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }

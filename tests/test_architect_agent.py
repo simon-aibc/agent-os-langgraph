@@ -1,4 +1,4 @@
-from typing import Any, List, Optional
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -15,7 +15,7 @@ def test_build_architect_agent_factory(mock_create):
     """Test the architect agent factory forwards correct parameters."""
     mock_llm = MagicMock()
 
-    agent = build_architect_agent(llm=mock_llm)
+    build_architect_agent(llm=mock_llm)
 
     mock_create.assert_called_once()
 
@@ -33,9 +33,9 @@ def test_build_architect_agent_factory(mock_create):
 class DeterministicFakeLLM(BaseChatModel):
     def _generate(
         self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
         **kwargs: Any,
     ) -> ChatResult:
         message = AIMessage(

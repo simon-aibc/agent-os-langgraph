@@ -1,8 +1,12 @@
 # Secrets
 .env
-.env.local
+.env.*
+!.env.example
+.envrc
 *.key
 *.pem
+*.p12
+*.pfx
 credentials.json
 service-account*.json
 
@@ -17,16 +21,29 @@ dist/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
+.pyright/
 .ruff_cache/
+.tox/
+.nox/
 .venv/
 venv/
 env/
+.python-version
 
-# LangGraph checkpoints
-checkpoints.db
-checkpoints.db-*
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+coverage.json
+
+# Databases / Checkpoints
+*.db
+*.db-*
 *.sqlite
 *.sqlite-*
+*.sqlite3
+*.sqlite3-*
 
 # IDE
 .vscode/

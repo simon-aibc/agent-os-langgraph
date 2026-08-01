@@ -49,8 +49,16 @@ def test_build_mcp_server_configs_all_disabled():
         assert configs == {}
 
 
-def test_build_mcp_server_configs_filesystem(tmp_path):
-    sandbox = tmp_path / "sandbox"
+@pytest.fixture
+def mock_home(tmp_path, monkeypatch):
+    home_dir = tmp_path / "mock_home"
+    home_dir.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: home_dir)
+    return home_dir
+
+
+def test_build_mcp_server_configs_filesystem_valid_sandbox(mock_home):
+    sandbox = mock_home / "sandbox"
     sandbox.mkdir()
     with mock.patch.dict(
         os.environ,
@@ -71,8 +79,10 @@ def test_build_mcp_server_configs_filesystem(tmp_path):
             str(sandbox.resolve()),
         ]
 
-
-def test_build_mcp_server_configs_filesystem_invalid_sandbox():
+def test_build_mcp_server_configs_filesystem_invalid_sandbox(
+    mock_home,
+    tmp_path,
+):
     with mock.patch.dict(
         os.environ,
         {"MCP_FILESYSTEM_ENABLED": "true"},
@@ -83,21 +93,42 @@ def test_build_mcp_server_configs_filesystem_invalid_sandbox():
 
     with mock.patch.dict(
         os.environ,
-        {"MCP_FILESYSTEM_ENABLED": "true", "AGENT_OS_SANDBOX": "/"},
-        clear=True,
-    ):
-        with pytest.raises(ValueError, match="cannot be / or the user home"):
-            build_mcp_server_configs()
-
-    with mock.patch.dict(
-        os.environ,
         {
             "MCP_FILESYSTEM_ENABLED": "true",
-            "AGENT_OS_SANDBOX": str(Path.home()),
+            "AGENT_OS_SANDBOX": str(mock_home),
         },
         clear=True,
     ):
-        with pytest.raises(ValueError, match="cannot be / or the user home"):
+        with pytest.raises(ValueError, match="cannot be the user home directory itself"):
+            build_mcp_server_configs()
+
+    for invalid_path in ["/", "/etc", "/var", "/System"]:
+        with mock.patch.dict(
+            os.environ,
+            {"MCP_FILESYSTEM_ENABLED": "true", "AGENT_OS_SANDBOX": invalid_path},
+            clear=True,
+        ):
+            with pytest.raises(ValueError, match="must be inside the user home directory"):
+                build_mcp_server_configs()
+
+    outside_dir = tmp_path / "outside_home"
+    outside_dir.mkdir()
+    with mock.patch.dict(
+        os.environ,
+        {"MCP_FILESYSTEM_ENABLED": "true", "AGENT_OS_SANDBOX": str(outside_dir)},
+        clear=True,
+    ):
+        with pytest.raises(ValueError, match="must be inside the user home directory"):
+            build_mcp_server_configs()
+
+    escape_link = mock_home / "escape"
+    escape_link.symlink_to(outside_dir)
+    with mock.patch.dict(
+        os.environ,
+        {"MCP_FILESYSTEM_ENABLED": "true", "AGENT_OS_SANDBOX": str(escape_link)},
+        clear=True,
+    ):
+        with pytest.raises(ValueError, match="must be inside the user home directory"):
             build_mcp_server_configs()
 
 
@@ -112,6 +143,25 @@ def test_build_mcp_server_configs_codegraph():
         assert configs["codegraph"]["transport"] == "stdio"
         assert configs["codegraph"]["command"] == "codegraph"
         assert configs["codegraph"]["args"] == ["serve", "--mcp"]
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "MCP_CODEGRAPH_ENABLED": "true",
+            "MCP_CODEGRAPH_COMMAND": "/path/to/custom_codegraph ",
+        },
+        clear=True,
+    ):
+        configs = build_mcp_server_configs()
+        assert configs["codegraph"]["command"] == "/path/to/custom_codegraph"
+
+    with mock.patch.dict(
+        os.environ,
+        {"MCP_CODEGRAPH_ENABLED": "true", "MCP_CODEGRAPH_COMMAND": "   "},
+        clear=True,
+    ):
+        with pytest.raises(ValueError, match="cannot be blank when enabled"):
+            build_mcp_server_configs()
 
 
 def test_build_mcp_server_configs_gbrain():
@@ -140,8 +190,8 @@ def test_build_mcp_server_configs_rejects_unsafe_gbrain_url(url):
             build_mcp_server_configs()
 
 
-def test_build_mcp_server_configs_combined(tmp_path):
-    sandbox = tmp_path / "sandbox"
+def test_build_mcp_server_configs_combined(mock_home):
+    sandbox = mock_home / "sandbox"
     sandbox.mkdir()
     with mock.patch.dict(
         os.environ,

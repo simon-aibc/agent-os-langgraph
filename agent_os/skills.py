@@ -1,7 +1,8 @@
 import inspect
 import json
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from langchain_core.tools import BaseTool
 

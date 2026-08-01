@@ -11,7 +11,6 @@ def make_state(human_feedback: str | None = None) -> SimonState:
         "task": "do architecture",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": human_feedback,
         "hot_context": None,
     }

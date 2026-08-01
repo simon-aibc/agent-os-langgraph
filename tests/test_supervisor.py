@@ -11,7 +11,6 @@ def test_supervisor_node_routes_to_tool():
         "task": "Please search",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "hot_context": None
     }
     logical_route = route_from_state(state)
@@ -29,7 +28,6 @@ def test_supervisor_node_routes_to_end():
         "task": "Normal task",
         "plan": None,
         "executor_output": "Done",
-        "approval": None,
         "hot_context": None
     }
     logical_route = route_from_state(state)
@@ -47,7 +45,7 @@ def test_supervisor_node_routes_to_executor():
         "task": "Normal task",
         "plan": None,
         "executor_output": None,
-        "approval": True,
+        "human_feedback": "approved",
         "hot_context": None
     }
     logical_route = route_from_state(state)
@@ -65,7 +63,6 @@ def test_supervisor_node_routes_to_architect():
         "task": "Normal task",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "hot_context": None,
         "router_escalated": True
     }

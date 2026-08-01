@@ -17,7 +17,6 @@ def make_state(**overrides: object) -> SimonState:
         "task": "do something normal",
         "plan": None,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }
@@ -186,9 +185,9 @@ def test_graph_rejection_returns_feedback_to_architect_and_pauses_again():
     assert snapshot.values["executor_output"] is None
 
 
-def test_graph_accepts_approval_alias():
+def test_graph_accepts_short_human_feedback_alias():
     graph, _, executor, dispatcher, _ = build_test_graph()
-    config = build_runtime_config("approval-alias")
+    config = build_runtime_config("feedback-alias")
 
     graph.invoke(make_state(), config=config)
     result = graph.invoke(Command(resume="y"), config=config)
@@ -255,22 +254,7 @@ def test_graph_tier1_native_tool_terminates_without_llm(tmp_path, monkeypatch):
     assert result["router_escalated"] is False
 
 
-def test_graph_legacy_approval_routes_directly_to_executor():
-    graph, architect, executor, dispatcher, _ = build_test_graph()
-    config = build_runtime_config("legacy-approval")
-    plan = ArchitectBrief(files=[], changes=[], verify_cmd="pytest")
 
-    visited = [
-        next(iter(step))
-        for step in graph.stream(
-            make_state(plan=plan, approval=True),
-            config=config,
-        )
-    ]
-
-    assert visited == ["planner", "supervisor", "executor", "supervisor"]
-    assert architect.feedback == []
-    assert executor.call_count == 1
 
 
 def test_graph_completed_output_terminates_without_executor():

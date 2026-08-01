@@ -49,10 +49,6 @@ def route_from_state(state: SimonState) -> Route:
     if isinstance(executor_output, str):
         return "end"
 
-    # legacy approval=True -> executor only when human_feedback is None
-    if state.get("approval") is True and human_feedback is None:
-        return "executor"
-
     # ArchitectBrief without a decision -> end
     if isinstance(state.get("plan"), ArchitectBrief):
         return "end"

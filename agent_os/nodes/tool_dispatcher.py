@@ -1,5 +1,6 @@
 import json
-from typing import Callable, Literal
+from collections.abc import Callable
+from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END

@@ -1,8 +1,5 @@
-import os
-from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from agent_os.schemas import EditFileResult
 from agent_os.tools.edit_file import edit_file
@@ -47,7 +44,7 @@ def test_edit_file_successful_overwrite(test_sandbox):
 
 
 def test_edit_file_nested_path_creation(test_sandbox):
-    result = edit_file.invoke({"path": "deep/nested/dir/file.txt", "content": "nested"})
+    edit_file.invoke({"path": "deep/nested/dir/file.txt", "content": "nested"})
 
     file_path = test_sandbox / "deep/nested/dir/file.txt"
     assert file_path.exists()

@@ -21,7 +21,10 @@ async def test_mcp_filesystem_integration(tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
 
-    with mock.patch.dict(os.environ, {"AGENT_OS_SANDBOX": str(sandbox)}):
+    with (
+        mock.patch("agent_os.mcp.Path.home", return_value=tmp_path),
+        mock.patch.dict(os.environ, {"AGENT_OS_SANDBOX": str(sandbox)}),
+    ):
         with anyio.fail_after(15):
             tools = await load_mcp_tools()
 

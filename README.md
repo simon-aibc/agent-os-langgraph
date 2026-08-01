@@ -1,216 +1,208 @@
-# agent-os-langgraph
+# Agent OS LangGraph
 
-Agent OS built with LangGraph.
+[![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
+![Tests: 182 passing](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)
+![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Production-style multi-agent orchestration built with LangGraph.
+Deterministic tools handle known work; ambiguous work escalates through an architect, human plan gate, and sandboxed executor.
+Typed state, durable SQLite checkpoints, MCP adapters, and an offline-tested streaming CLI demonstrate production engineering—not a tutorial chatbot.
 
-## Prerequisites
-- Python >= 3.11
-
-## Installation
-```bash
-python -m pip install -e ".[dev]"
+```mermaid
+flowchart TD
+    START(["START"]) --> planner["planner"] --> supervisor["supervisor"]
+    supervisor -->|"new task"| dispatcher["tool_dispatcher"]
+    dispatcher -->|"tool success"| END(["END"])
+    dispatcher -->|"low confidence or failure"| supervisor
+    supervisor -->|"escalated"| architect["architect"]
+    architect --> gate["human_gate"]
+    gate -->|"approved or rejected"| supervisor
+    supervisor -->|"approved"| executor["executor"]
+    supervisor -->|"rejected"| architect
+    executor --> supervisor
+    supervisor -->|"execution complete"| END
 ```
 
-## Usage
-
-Configure the three model roles in `.env` using [.env.example](.env.example),
-then start a workflow with one command:
+## 30-second quickstart
 
 ```bash
-agent-os "refactor the architect node to return a structured brief" \
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+
+# Deterministic Tier-1 path: no LLM or network required.
+agent-os "read_file README.md" --thread-id quickstart --sandbox .
+```
+
+Expected structure:
+
+```text
+[THREAD] quickstart
+[SUPERVISOR] → tool_dispatcher
+[TOOL] read_file({"path": "README.md"})
+[RESULT] # Agent OS LangGraph ...
+```
+
+For architect/executor workflows, copy [.env.example](.env.example) to `.env`,
+configure `LLM_ROUTER`, `LLM_ARCHITECT`, and `LLM_EXECUTOR`, then run:
+
+```bash
+agent-os "refactor the target module and add regression tests" \
+  --thread-id refactor-demo \
   --sandbox ./sandbox
 ```
 
-The equivalent module entrypoint is:
+At the plan gate the CLI pauses inline and accepts `approved`, `y`, or
+`rejected: <reason>`. A stopped process resumes from SQLite without repeating
+the original task:
 
 ```bash
-python -m agent_os "read_file README.md" --thread-id demo-read
+agent-os --resume --thread-id refactor-demo --sandbox ./sandbox
+# Equivalent entrypoint: python -m agent_os ...
 ```
 
-The CLI prints its generated thread ID and streams model tokens, supervisor
-routes, tool calls, and results. It never claims to expose private
-chain-of-thought. A deterministic tool run looks like this:
+## Architecture
 
-```text
-[THREAD] demo-read
-[SUPERVISOR] → tool_dispatcher
-[TOOL] read_file({"path": "README.md"})
-[RESULT] # agent-os-langgraph ...
-```
+- `SimonState` is a `TypedDict`; complex boundaries such as `ArchitectBrief`,
+  `RouterDecision`, and `ExecutorReport` are Pydantic models.
+- The supervisor uses explicit routing precedence. The dispatcher can terminate
+  directly on tool success or return to the supervisor for agent escalation.
+- The architect has read-only planning tools. Its brief reaches `human_gate`
+  before the executor agent can edit files or run verification commands.
+- LangGraph `interrupt()` plus a SQLite checkpointer preserves pending work by
+  `thread_id`, including across process restarts.
+- The CLI consumes `astream_events(version="v2")` and prints model tokens,
+  node routes, tool calls, and results—never private chain-of-thought.
 
-Plans pause inline for human review:
+See [docs/architecture.md](docs/architecture.md) for routing precedence,
+state rationale, trust boundaries, and the decision log. The approved product
+requirements are in [docs/PRD.md](docs/PRD.md).
 
-```text
-[SUPERVISOR] → architect
-[HUMAN] Review the proposed implementation plan. ...
-> approved
-[SUPERVISOR] → executor
-[SUPERVISOR] → __end__
-```
+## What each milestone demonstrates
 
-Use `--thread-id` when you need a stable workflow identifier. If the process
-stops at the human gate, resume the SQLite checkpoint without repeating the
-original task:
-
-```bash
-agent-os --resume --thread-id simon-20260801T143000Z-f8b1c2
-```
-
-Pressing Ctrl+C or closing stdin at the gate leaves the checkpoint intact and
-prints the exact resume command. Use `-v`/`--verbose` for node progress and
-tracebacks; normal output remains compact. `--sandbox <path>` overrides
-`AGENT_OS_SANDBOX` for the current CLI run.
-
-## Flow
-
-**R7a/R7b Cascading Tool Flow**:
-New tasks pass through the tool dispatcher before agent escalation. Plans still
-pause for human approval before the executor can run:
-```text
-START → planner → supervisor → tool_dispatcher
-                                  ├─ Tier 1/Tier 2 success → END
-                                  └─ Tier 3 escalation → supervisor → architect
-                                      → human_gate → supervisor → executor
-                                      → supervisor → END
-```
-
-## Tool Routing
-
-The dispatcher uses three progressively more expensive tiers:
-
-1. Tier 1 parses an explicit native command deterministically without an LLM.
-2. Tier 2 uses the `LLM_ROUTER` model to return a structured tool decision.
-3. Tier 3 sends decisions below `0.70` confidence back to the supervisor.
-
-Tier-1 commands use these formats:
-
-```text
-read <relative_path>
-write <relative_path> :: <content>
-bash <command and arguments>
-```
-
-### MCP Tool Ecosystem
-
-The registry combines three native tools with three optional MCP sources. Each
-MCP server may expose several tools; loaded names are prefixed as
-`mcp_<server>_<tool>` to avoid collisions.
-
-| Source | Kind | Capability |
+| Milestone | Implemented capability | Hiring signal |
 |---|---|---|
-| `read_file` | Native tool | Read a sandboxed file |
-| `write_file` | Native tool | Write a sandboxed file |
-| `bash` | Native tool | Run a bounded subprocess in the sandbox |
-| `filesystem` | MCP server | File operations from `@modelcontextprotocol/server-filesystem` |
-| `codegraph` | MCP server | Code intelligence from `codegraph serve --mcp` |
-| `gbrain` | MCP server | Tools exposed by an HTTP MCP endpoint |
+| R1 | Typed state and compiled graph skeleton | Understands LangGraph state and graph construction |
+| R2 | Conditional supervisor routing and bounded recursion | Designs deterministic control flow instead of prompt-only routing |
+| R3 | Read-only architect subgraph with structured brief | Separates planning from execution and tests agents offline |
+| R4 | Executor subgraph with path checks, `shell=False`, and timeouts | Treats tool execution as a security boundary |
+| R5 | Interrupt-driven human plan gate | Adds approval before agent-planned side effects |
+| R6 | SQLite checkpoints and restart/resume tests | Builds workflows that survive process failure |
+| R7 | Three-tier router, pluggable registry, and MCP adapters | Balances deterministic speed, model judgment, and extensibility |
+| R8 | Rich streaming CLI with durable resume | Delivers an operator-facing interface with explicit failure semantics |
 
-### MCP Configuration
+## Extending Agent OS
 
-| Environment variable | Default | Description |
-|---|---|---|
-| `MCP_FILESYSTEM_ENABLED` | `false` | Enable the stdio filesystem server; requires `AGENT_OS_SANDBOX`. |
-| `MCP_CODEGRAPH_ENABLED` | `false` | Enable the local CodeGraph MCP server. |
-| `MCP_GBRAIN_URL` | empty | Enable gbrain with an absolute HTTP(S) MCP URL. |
-| `AGENT_OS_SANDBOX` | `./sandbox` | Restrict the filesystem server to this root. `/` and the user home directory are rejected. |
+### Register a native tool
 
-### Loading Custom MCP Servers
-
-Applications load remote tools asynchronously, then inject the resulting
-synchronous registry into the dispatcher:
+`RegisteredSkill` accepts LangChain `BaseTool` objects or plain callables. A
+custom skill becomes available to the structured router without changing the
+dispatcher:
 
 ```python
-import asyncio
+from langchain_core.tools import tool
 
+from agent_os.default_registry import build_default_registry
+from agent_os.graph import build_graph
+from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
+from agent_os.skills import RegisteredSkill
+
+
+@tool
+def summarize(text: str) -> str:
+    """Return a compact summary."""
+    return text[:200]
+
+
+registry = build_default_registry()
+registry.register(RegisteredSkill("summarize", (), summarize))
+dispatcher = build_tool_dispatcher_node(registry=registry)
+custom_graph = build_graph(tool_dispatcher_node_impl=dispatcher)
+```
+
+### Load MCP tools
+
+```python
 from agent_os.default_registry import build_default_registry_with_mcp
 from agent_os.graph import build_graph
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
 
-CUSTOM_SERVERS = {
-    "docs": {
-        "transport": "http",
-        "url": "https://mcp.example.com/mcp",
-    }
-}
 
-
-async def build_custom_graph():
-    registry = await build_default_registry_with_mcp(
-        server_configs=CUSTOM_SERVERS,
-    )
+async def build_mcp_graph():
+    registry = await build_default_registry_with_mcp()
     dispatcher = build_tool_dispatcher_node(registry=registry)
     return build_graph(tool_dispatcher_node_impl=dispatcher)
-
-
-graph = asyncio.run(build_custom_graph())
 ```
 
-**Recursion Limit**:
-The default recursion limit is 7. `build_runtime_config()` applies this bound
-and the thread ID required by the default checkpointer:
-```python
-from agent_os.graph import graph
-from agent_os.routing import build_runtime_config
+Enable servers with `MCP_FILESYSTEM_ENABLED`, `MCP_CODEGRAPH_ENABLED`, and
+`MCP_GBRAIN_URL`. `MCP_CODEGRAPH_COMMAND` overrides the CodeGraph executable.
 
-config = build_runtime_config("my-thread-id")
-graph.invoke(state, config=config)
-```
+> `from agent_os.graph import graph` intentionally uses native tools only.
+> Environment flags do not auto-load MCP tools into that default graph; use the
+> asynchronous registry construction and dispatcher injection shown above.
 
-## State and Threading
-Every invocation of the default compiled graph must provide a non-empty
-`configurable.thread_id`. Use a unique ID per independent workflow and reuse
-that ID when resuming an interrupted workflow. A recommended scheme is one
-thread per user task using `<user>-<UTC timestamp>-<slug>`, for example
-`simon-20260801T143000Z-add-logging`.
+### Swap LLMs
 
-R6 stores checkpoints in SQLite at `AGENT_OS_CHECKPOINTS_DB` (default:
-`./checkpoints.db`). Rebuilding the graph in a new process with the same
-database path and thread ID restores the paused workflow:
+Model roles use provider/model strings from `.env`. Tests or applications may
+also inject any compatible `BaseChatModel` into `build_architect_agent()`,
+`build_executor_agent()`, or `build_tool_dispatcher_node()`.
 
-```python
-from langgraph.types import Command
+## Security and trust boundaries
 
-from agent_os.graph import build_graph
-from agent_os.routing import build_runtime_config
+- The HITL gate protects **agent-planned executor work**. Explicit Tier-1
+  commands such as `write_file ...` or `bash ...` are treated as direct user
+  instructions and execute without an additional approval prompt.
+- Native writes and subprocesses use `AGENT_OS_SANDBOX` (default `./sandbox`).
+  CLI `--sandbox` also constrains reads for that invocation. These are path/cwd
+  controls, not OS or container isolation.
+- Subprocesses use argument arrays, `shell=False`, captured output, and a
+  timeout. Untrusted models or commands still require a container.
+- The filesystem MCP server additionally requires its resolved root to be
+  strictly below the user home. Every enabled MCP server extends the trust
+  boundary and must be trusted.
+- SQLite checkpoints may contain tasks, messages, plans, tool results, and
+  file content. They are gitignored and should be protected as sensitive data.
+- Checkpoint deserialization allowlists application Pydantic types. CLI tool
+  arguments redact common credential fields before display.
+- CLI startup uses LiteLLM's local model-cost map, avoiding an incidental
+  metadata request before the workflow begins.
+- Bash and dispatcher output size caps remain deferred to R11.
 
-config = build_runtime_config("simon-20260801T143000Z-add-logging")
+## CLI exit codes
 
-# Process A pauses at human_gate and then exits.
-build_graph().invoke(state, config=config)
+| Code | Meaning |
+|---:|---|
+| `0` | Workflow completed successfully |
+| `1` | Workflow or graph execution failed |
+| `2` | Invalid CLI/configuration/resume request |
+| `130` | Interrupted with Ctrl+C; checkpoint preserved when available |
 
-# Process B starts later and resumes from SQLite.
-result = build_graph().invoke(Command(resume="approved"), config=config)
-```
-
-Tests may inject `InMemorySaver` through `build_graph(checkpointer=...)` when
-cross-process durability is not under test.
-
-## Testing
-
-The default suite is fully offline and deselects real MCP integrations:
+## Development and testing
 
 ```bash
+python -m ruff check .
 python -m pytest -W error
 ```
 
-To run real, opt-in MCP integration tests (requires appropriate local servers):
-```shell
+The default suite is offline and deselects real MCP integration tests. Run an
+enabled integration explicitly, for example:
+
+```bash
 MCP_FILESYSTEM_ENABLED=true \
-AGENT_OS_SANDBOX=./sandbox \
+AGENT_OS_SANDBOX="$HOME/agent-os-sandbox" \
 python -m pytest -m integration tests/test_mcp_integration.py
 ```
 
-## Security Caveats
-- Never commit `checkpoints.db` or its WAL files. Checkpoints can contain task
-  text, messages, plans, human feedback, and other sensitive workflow state.
-- `AGENT_OS_SANDBOX` enforces directory paths, not container-level executable
-  isolation. Use a container for untrusted models or commands.
-- stdio servers execute local binaries. For example, enabling the filesystem
-  server runs `npx` in the local process environment.
-- The filesystem MCP server is restricted to `AGENT_OS_SANDBOX`; other stdio
-  servers must be trusted not to execute arbitrary OS commands.
-- Enabled MCP servers extend the agent's trust boundary. Only configure URLs
-  or packages from trusted publishers.
-- Bash subprocess output is currently unbounded and needs a size cap for
-  production environments.
+CI runs Ruff and the offline test suite on Python 3.11 and 3.12.
+
+## Roadmap / v2 backlog
+
+- R10: record and embed an end-to-end demo.
+- R11: cap subprocess/dispatcher output, add budget hooks, trim messages, and
+  document token-economy measurements.
+- Run untrusted execution in a disposable container or microVM.
+- Add an optional web interface only after the CLI workflow is validated.
+
+Licensed under the [MIT License](LICENSE).

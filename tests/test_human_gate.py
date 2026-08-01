@@ -13,7 +13,6 @@ def make_state(plan: str | ArchitectBrief | None) -> SimonState:
         "task": "review this plan",
         "plan": plan,
         "executor_output": None,
-        "approval": None,
         "human_feedback": None,
         "hot_context": None,
     }

@@ -23,7 +23,6 @@ def test_executor_node_logic(mock_build_agent):
         "task": "do executor",
         "plan": brief,
         "executor_output": None,
-        "approval": True,
         "hot_context": None
     }
 
@@ -41,7 +40,6 @@ def test_executor_node_invalid_plan():
         "task": "do executor",
         "plan": "just a string",
         "executor_output": None,
-        "approval": True,
         "hot_context": None
     }
 

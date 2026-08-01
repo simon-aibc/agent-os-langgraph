@@ -36,7 +36,7 @@ def grep(query: str, path: str = ".") -> GrepResult:
 
     for fpath in files_to_search:
         try:
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open(fpath, encoding="utf-8") as f:
                 for i, line in enumerate(f, 1):
                     if query in line:
                         # try to get relative path from root, or just target_dir
