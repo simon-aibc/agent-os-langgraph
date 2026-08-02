@@ -1,10 +1,16 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from langchain_core.messages import HumanMessage
 
 from agent_os.nodes.architect import architect_node
 from agent_os.schemas import ArchitectBrief
 from agent_os.state import SimonState
+
+
+@pytest.fixture(autouse=True)
+def clear_cli_architect_backend(monkeypatch):
+    monkeypatch.delenv("LLM_ARCHITECT", raising=False)
 
 
 def make_state(human_feedback: str | None = None) -> SimonState:
@@ -58,3 +64,52 @@ def test_architect_node_feedback_handling(mock_build_agent):
         "rejected: bad plan!"
     )
     mock_agent.invoke.assert_called_with({"messages": [HumanMessage(content=expected_prompt)]})
+
+
+def test_architect_node_cli_backend_routing(monkeypatch):
+    """Test architect_node routes to CLI when LLM_ARCHITECT starts with cli/"""
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/codex")
+
+    brief = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
+    state = make_state()
+
+    with patch("agent_os.nodes.architect.build_cli_architect_invoker") as mock_build_invoker:
+        mock_invoker = MagicMock(return_value=brief)
+        mock_build_invoker.return_value = mock_invoker
+
+        result = architect_node(state)
+
+        mock_build_invoker.assert_called_once_with("codex")
+        mock_invoker.assert_called_once()
+        passed_state = mock_invoker.call_args[0][0]
+        # State passed to CLI invoker is copied and has trimmed messages
+        assert passed_state is not state
+        assert len(passed_state["messages"]) == 1
+        assert isinstance(passed_state["messages"][0], HumanMessage)
+        assert passed_state["messages"][0].content == "do architecture"
+        assert state["messages"] == []
+        assert result == {"plan": brief}
+
+
+def test_architect_node_cli_backend_routing_claude(monkeypatch):
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/claude-code")
+
+    brief = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
+    state = make_state("rejected: please fix")
+
+    with patch("agent_os.nodes.architect.build_cli_architect_invoker") as mock_build_invoker:
+        mock_invoker = MagicMock(return_value=brief)
+        mock_build_invoker.return_value = mock_invoker
+
+        architect_node(state)
+
+        mock_build_invoker.assert_called_once_with("claude-code")
+        passed_state = mock_invoker.call_args[0][0]
+        assert "rejected: please fix" in passed_state["messages"][0].content
+
+
+def test_architect_node_cli_unknown_backend(monkeypatch):
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/unknown-backend")
+
+    with pytest.raises(ValueError, match="Unsupported CLI architect backend"):
+        architect_node(make_state())
