@@ -1,12 +1,13 @@
 # agent-os-langgraph — Product Requirements Document
 
-- **Version:** 1.0 (shipped)
+- **Version:** 1.0.1 (patch)
 - **Author:** Simon (Tran Khai Minh) + Claude Code (drafter)
 - **Created:** 2026-08-01
 - **Shipped:** 2026-08-02 (R11 commit `641ca12`, tag `v1.0.0`)
+- **Patch v1.0.1:** 2026-08-02 — dogfood fixes for mid-run resume, bash exit propagation, Tier-1 multiline write docs, and transient LLM retry.
 - **Status:** SHIPPED — R1-R9 + R11 delivered; R10 (demo video) deferred to v1.1
 - **Repo:** https://github.com/simon-aibc/agent-os-langgraph
-- **Tests at v1.0:** 196 unit + 3 integration, `-W error` clean, Ruff clean, CI green on Python 3.11+3.12
+- **Tests at v1.0.1:** 200 unit + 3 integration, `-W error` clean, Ruff clean, CI green on Python 3.11+3.12
 - **Executors used:** Claude Code (architect/reviewer) + Codex CLI (task splitter + reviewer) + Antigravity IDE (implementer, courier: Simon)
 
 ---

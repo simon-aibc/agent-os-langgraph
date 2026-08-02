@@ -1,8 +1,47 @@
 import os
+import time
+from collections.abc import Callable
+from typing import TypeVar
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from langchain_litellm import ChatLiteLLM
+
+T = TypeVar("T")
+LLM_RETRY_BACKOFF_SECONDS = (2, 4, 8)
+
+
+def _is_retryable_llm_error(error: Exception) -> bool:
+    message = str(error).casefold()
+    retryable_markers = (
+        "429",
+        "rate limit",
+        "ratelimit",
+        "resource_exhausted",
+        "503",
+        "service unavailable",
+        "timeout",
+        "timed out",
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
+def invoke_with_llm_retry(operation: Callable[[], T]) -> T:
+    """Retry transient LLM provider failures with short exponential backoff."""
+    last_error: Exception | None = None
+    for delay in (0, *LLM_RETRY_BACKOFF_SECONDS):
+        if delay:
+            time.sleep(delay)
+        try:
+            return operation()
+        except Exception as error:
+            if not _is_retryable_llm_error(error):
+                raise
+            last_error = error
+
+    if last_error is None:
+        raise RuntimeError("LLM retry exhausted without an error")
+    raise last_error
 
 
 def prepare_system_prompt(prompt: str, llm: BaseChatModel) -> str | SystemMessage:

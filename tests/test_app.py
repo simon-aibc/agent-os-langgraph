@@ -6,6 +6,7 @@ import pytest
 from rich.console import Console
 
 from agent_os.cli.app import async_main
+from agent_os.schemas import ToolExecutionResult
 
 
 def make_console() -> tuple[Console, io.StringIO]:
@@ -37,6 +38,22 @@ class CompletedGraph:
         return completed_snapshot()
 
 
+class ToolFailureCompletedGraph(CompletedGraph):
+    async def aget_state(self, config):
+        return SimpleNamespace(
+            created_at="now",
+            values={
+                "tool_result": ToolExecutionResult(
+                    tool="bash",
+                    output="returncode=-1",
+                    success=False,
+                )
+            },
+            next=(),
+            tasks=(),
+        )
+
+
 @pytest.mark.anyio
 async def test_new_workflow_passes_state_config_and_v2_events():
     graph = CompletedGraph()
@@ -55,6 +72,20 @@ async def test_new_workflow_passes_state_config_and_v2_events():
     assert config["configurable"]["thread_id"] == "thread-1"
     assert version == "v2"
     assert "[THREAD] thread-1" in output.getvalue()
+
+
+@pytest.mark.anyio
+async def test_completed_tool_failure_returns_nonzero_exit():
+    console, output = make_console()
+
+    code = await async_main(
+        ["bash python", "--thread-id", "tool-failure"],
+        graph_factory=ToolFailureCompletedGraph,
+        console=console,
+    )
+
+    assert code == 1
+    assert "[THREAD] tool-failure" in output.getvalue()
 
 
 @pytest.mark.anyio
@@ -200,25 +231,38 @@ async def test_resume_rejects_completed_checkpoint():
 
 
 @pytest.mark.anyio
-async def test_resume_rejects_unsupported_pause():
-    class UnsupportedPauseGraph(CompletedGraph):
+async def test_resume_mid_run_continues_without_human_interrupt():
+    class MidRunGraph(CompletedGraph):
+        def __init__(self):
+            super().__init__()
+            self.stage = "paused"
+
         async def aget_state(self, config):
+            if self.stage == "done":
+                return completed_snapshot()
             return SimpleNamespace(
                 created_at="now",
-                values={"task": "paused"},
-                next=("worker",),
+                values={"task": "paused mid-model"},
+                next=("architect",),
                 tasks=(),
             )
 
+        async def astream_events(self, state, config, version):
+            self.calls.append((state, config, version))
+            self.stage = "done"
+            yield {"event": "unknown"}
+
+    graph = MidRunGraph()
     console, output = make_console()
     code = await async_main(
-        ["--resume", "--thread-id", "unsupported"],
-        graph_factory=UnsupportedPauseGraph,
+        ["--resume", "--thread-id", "mid-run"],
+        graph_factory=lambda: graph,
         console=console,
     )
 
-    assert code == 2
-    assert "without a resumable human gate" in output.getvalue()
+    assert code == 0
+    assert graph.calls[0][0] is None
+    assert "Resuming mid-run at node architect" in output.getvalue()
 
 
 @pytest.mark.anyio

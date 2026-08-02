@@ -15,6 +15,7 @@ from agent_os.llm import (
     get_architect_llm,
     get_executor_llm,
     get_router_llm,
+    invoke_with_llm_retry,
     prepare_system_prompt,
 )
 
@@ -136,3 +137,31 @@ def test_non_anthropic_system_prompt_remains_plain_text():
     prompt = prepare_system_prompt("system instructions", mock_llm)
 
     assert prompt == "system instructions"
+
+
+@patch("agent_os.llm.time.sleep")
+def test_invoke_with_llm_retry_retries_transient_rate_limits(mock_sleep):
+    operation = MagicMock(
+        side_effect=[
+            RuntimeError("429 RESOURCE_EXHAUSTED"),
+            RuntimeError("503 service unavailable"),
+            {"structured_response": "ok"},
+        ]
+    )
+
+    result = invoke_with_llm_retry(operation)
+
+    assert result == {"structured_response": "ok"}
+    assert operation.call_count == 3
+    assert [call.args[0] for call in mock_sleep.call_args_list] == [2, 4]
+
+
+@patch("agent_os.llm.time.sleep")
+def test_invoke_with_llm_retry_does_not_retry_non_transient_errors(mock_sleep):
+    operation = MagicMock(side_effect=ValueError("invalid structured response"))
+
+    with pytest.raises(ValueError, match="invalid structured response"):
+        invoke_with_llm_retry(operation)
+
+    operation.assert_called_once()
+    mock_sleep.assert_not_called()

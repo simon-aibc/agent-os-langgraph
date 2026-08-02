@@ -5,7 +5,7 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
-from agent_os.schemas import RouterDecision
+from agent_os.schemas import BashResult, RouterDecision
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.state import SimonState
 
@@ -124,9 +124,35 @@ def test_dispatcher_tool_failure():
     assert cmd.update["tool_result"].output == "Tool crashed"
 
 
+def test_dispatcher_bash_nonzero_returncode_marks_failure():
+    registry = SkillRegistry()
+    mock_handler = MagicMock(
+        return_value=BashResult(
+            args=["python"],
+            returncode=-1,
+            stdout="",
+            stderr="[Errno 2] No such file or directory: 'python'",
+            timed_out=False,
+        )
+    )
+    registry.register(
+        RegisteredSkill(name="bash", aliases=[], handler=mock_handler)
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=MagicMock())
+    cmd = node(make_state("bash python"))
+
+    assert cmd.goto == "__end__"
+    assert cmd.update["tool_result"].tool == "bash"
+    assert cmd.update["tool_result"].success is False
+    assert '"returncode": -1' in cmd.update["tool_result"].output
+    assert "No such file or directory" in cmd.update["tool_result"].output
+
+
 def test_dispatcher_invokes_real_langchain_tool(tmp_path, monkeypatch):
     target = tmp_path / "sample.txt"
     target.write_text("real tool output", encoding="utf-8")
+    monkeypatch.delenv("AGENT_OS_SANDBOX", raising=False)
     monkeypatch.chdir(tmp_path)
 
     command = build_tool_dispatcher_node()(make_state("read sample.txt"))

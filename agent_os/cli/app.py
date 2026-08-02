@@ -72,6 +72,19 @@ def _checkpoint_exists(snapshot: Any) -> bool:
     )
 
 
+def _next_node_name(snapshot: Any) -> str:
+    next_nodes = tuple(getattr(snapshot, "next", ()) or ())
+    return str(next_nodes[0]) if next_nodes else "unknown"
+
+
+def _completed_with_tool_failure(snapshot: Any) -> bool:
+    values = getattr(snapshot, "values", None) or {}
+    if not isinstance(values, dict):
+        return False
+    tool_result = values.get("tool_result")
+    return getattr(tool_result, "success", None) is False
+
+
 def _is_llm_configuration_error(error: ValueError) -> bool:
     message = str(error).lower()
     indicators = (
@@ -155,22 +168,21 @@ async def _run_graph(
             )
             return 2
         interrupt_prompt = _pending_interrupt(snapshot)
-        if interrupt_prompt is None:
-            formatter.print_error(
-                f"Workflow '{thread_id}' is paused without a resumable human gate."
-            )
-            return 2
-        try:
-            feedback = _read_feedback(interrupt_prompt, formatter, input_fn)
-        except KeyboardInterrupt:
-            formatter.print_error("Interrupted by Ctrl+C.")
-            _print_resume_hint(formatter, thread_id)
-            return 130
-        except EOFError:
-            formatter.print_error("Input closed while awaiting human feedback.")
-            _print_resume_hint(formatter, thread_id)
-            return 2
-        graph_input: object = Command(resume=feedback)
+        if interrupt_prompt is not None:
+            try:
+                feedback = _read_feedback(interrupt_prompt, formatter, input_fn)
+            except KeyboardInterrupt:
+                formatter.print_error("Interrupted by Ctrl+C.")
+                _print_resume_hint(formatter, thread_id)
+                return 130
+            except EOFError:
+                formatter.print_error("Input closed while awaiting human feedback.")
+                _print_resume_hint(formatter, thread_id)
+                return 2
+            graph_input: object = Command(resume=feedback)
+        else:
+            formatter.print_info(f"Resuming mid-run at node {_next_node_name(snapshot)}")
+            graph_input = None
     else:
         if task is None:
             raise AssertionError("A new workflow requires a task")
@@ -213,6 +225,8 @@ async def _run_graph(
             return 1
 
         if not getattr(snapshot, "next", ()):
+            if _completed_with_tool_failure(snapshot):
+                return 1
             return 0
 
         interrupt_prompt = _pending_interrupt(snapshot)

@@ -58,4 +58,5 @@ Thumbs.db
 # Logs
 *.log
 logs/
+DOGFOOD_LOG.md
 /sandbox/

@@ -234,6 +234,7 @@ def test_graph_skill_task_routes_to_tool_dispatcher():
 def test_graph_tier1_native_tool_terminates_without_llm(tmp_path, monkeypatch):
     target = tmp_path / "e2e.txt"
     target.write_text("tier one complete", encoding="utf-8")
+    monkeypatch.delenv("AGENT_OS_SANDBOX", raising=False)
     monkeypatch.chdir(tmp_path)
     graph = build_graph(checkpointer=InMemorySaver())
     config = build_runtime_config("tier-one-native-tool")
@@ -252,9 +253,6 @@ def test_graph_tier1_native_tool_terminates_without_llm(tmp_path, monkeypatch):
     assert result["tool_result"].success is True
     assert "tier one complete" in result["tool_result"].output
     assert result["router_escalated"] is False
-
-
-
 
 
 def test_graph_completed_output_terminates_without_executor():

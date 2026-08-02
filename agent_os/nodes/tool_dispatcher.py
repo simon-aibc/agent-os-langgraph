@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from agent_os.default_registry import build_default_registry, parse_tier1_request
 from agent_os.nodes.smart_router import classify_tool_request
 from agent_os.output_limits import DISPATCHER_OUTPUT_MAX_BYTES, truncate_utf8
-from agent_os.schemas import ToolExecutionResult
+from agent_os.schemas import BashResult, ToolExecutionResult
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.state import SimonState
 
@@ -57,7 +57,10 @@ def _invoke_skill(
             "tool_result": ToolExecutionResult(
                 tool=skill.name,
                 output=_serialize_tool_output(raw_output),
-                success=True,
+                success=not (
+                    isinstance(raw_output, BashResult)
+                    and raw_output.returncode not in (0, None)
+                ),
             ),
             "router_escalated": False,
         },

@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 182 passing](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)
+![Tests: 200 passing](https://img.shields.io/badge/tests-200%20passing-brightgreen.svg)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
 Production-style multi-agent orchestration built with LangGraph.
@@ -56,11 +56,29 @@ agent-os "refactor the target module and add regression tests" \
 
 At the plan gate the CLI pauses inline and accepts `approved`, `y`, or
 `rejected: <reason>`. A stopped process resumes from SQLite without repeating
-the original task:
+the original task. If the process stops mid-run outside a human gate, `--resume`
+continues from the next checkpointed node:
 
 ```bash
 agent-os --resume --thread-id refactor-demo --sandbox ./sandbox
 # Equivalent entrypoint: python -m agent_os ...
+```
+
+## Tier-1 Command Escaping
+
+Tier-1 `write` is intentionally simple: `write <path> :: <content>`. Shell
+quoting still happens before Agent OS sees the task, so multiline content needs
+command substitution or a source file.
+
+```bash
+# WRONG: writes literal backslash-n characters.
+agent-os "write foo.txt :: line1\nline2"
+
+# RIGHT: let the shell expand real newlines before Agent OS receives the task.
+agent-os "write foo.txt :: $(printf 'line1\nline2')"
+
+# RIGHT: write content from an existing template file.
+agent-os "write foo.txt :: $(cat template.txt)"
 ```
 
 ## Architecture
@@ -163,6 +181,7 @@ path; model-backed routing and agent steps are bounded explicitly.
 | 8K message trimming | Architect and Executor invocation histories are trimmed before model calls. |
 | Output caps | Bash streams are capped at 100KB each; serialized dispatcher results at 50KB total. |
 | Offline startup | CLI initialization uses LiteLLM's local cost map and avoids incidental provider calls. |
+| Transient retries | Architect and Executor calls retry 429, 503, and timeout errors with 2/4/8s backoff. |
 
 ### Illustrative benchmark
 
@@ -208,7 +227,7 @@ streamed execution remains v2.
 | Code | Meaning |
 |---:|---|
 | `0` | Workflow completed successfully |
-| `1` | Workflow or graph execution failed |
+| `1` | Workflow, graph execution, or Tier-1 tool execution failed |
 | `2` | Invalid CLI/configuration/resume request |
 | `130` | Interrupted with Ctrl+C; checkpoint preserved when available |
 
