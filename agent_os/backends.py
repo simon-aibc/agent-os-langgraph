@@ -184,7 +184,7 @@ class ClaudeCodeAdapter:
         return _check_cli_auth_status(
             self.binary_name,
             ["auth", "status"],
-            success_indicators=["logged in"],
+            success_indicators=["logged in", '"loggedin": true', '"loggedin":true'],
             unauth_indicators=["not logged in", "no active session", "authentication_failed"],
             unauth_detail="run: claude auth login",
         )
