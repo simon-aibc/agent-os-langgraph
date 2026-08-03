@@ -12,6 +12,7 @@ from rich.console import Console
 
 from agent_os.cli.formatter import EventFormatter
 from agent_os.cli.parser import format_event
+from agent_os.state import BackendBinding
 
 GraphFactory = Callable[[], Any]
 InputFunction = Callable[[str], str]
@@ -45,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
     run_parser.add_argument("--profile", help="Named configuration profile to use.")
+    run_parser.add_argument(
+        "--force-rebind",
+        action="store_true",
+        help="Replace a persisted backend binding when resuming.",
+    )
 
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
@@ -57,7 +63,10 @@ def _generate_thread_id() -> str:
     return f"{user}-{timestamp}-{uuid.uuid4().hex[:8]}"
 
 
-def _initial_state(task: str) -> dict[str, object]:
+def _initial_state(
+    task: str,
+    backend_binding: BackendBinding,
+) -> dict[str, object]:
     return {
         "messages": [("user", task)],
         "task": task,
@@ -65,6 +74,7 @@ def _initial_state(task: str) -> dict[str, object]:
         "executor_output": None,
         "human_feedback": None,
         "hot_context": None,
+        "backend_binding": backend_binding,
     }
 
 
@@ -86,6 +96,91 @@ def _checkpoint_exists(snapshot: Any) -> bool:
 def _next_node_name(snapshot: Any) -> str:
     next_nodes = tuple(getattr(snapshot, "next", ()) or ())
     return str(next_nodes[0]) if next_nodes else "unknown"
+
+
+def _render_binding(binding: BackendBinding) -> str:
+    return ", ".join(
+        (
+            f"router={binding.router!r}",
+            f"architect={binding.architect!r}",
+            f"executor={binding.executor!r}",
+            f"profile_name={binding.profile_name!r}",
+            f"sandbox_root={binding.sandbox_root!r}",
+        )
+    )
+
+
+async def _prepare_resume_binding(
+    graph: Any,
+    config: dict[str, object],
+    snapshot: Any,
+    current: BackendBinding,
+    force_rebind: bool,
+    registry: Any,
+    formatter: EventFormatter,
+) -> tuple[Any | None, int | None]:
+    from agent_os.bindings import binding_conflicts, validate_backend_binding
+
+    values = getattr(snapshot, "values", None) or {}
+    raw_persisted = values.get("backend_binding") if isinstance(values, dict) else None
+    resume_node = _next_node_name(snapshot)
+
+    if raw_persisted is None:
+        if not force_rebind:
+            formatter.print_error(
+                "This checkpoint has no persisted backend binding (created before "
+                "R1.2e). Resuming without an explicit backend selection is not "
+                "safe. Pass --force-rebind to attach the current binding and "
+                "continue. Prior backend selection is not inferred."
+            )
+            return None, 2
+        try:
+            validate_backend_binding(current, registry)
+        except ValueError as error:
+            formatter.print_error(f"Cannot force backend rebind: {error}")
+            return None, 2
+        formatter.print_warning(
+            "Attaching current backend binding to a legacy checkpoint (no prior "
+            f"binding present). New binding: {_render_binding(current)}. Current "
+            f"resume node: {resume_node}."
+        )
+    else:
+        try:
+            persisted = BackendBinding.model_validate(raw_persisted)
+        except ValueError as error:
+            formatter.print_error(f"Persisted backend binding is invalid: {error}")
+            return None, 2
+        changes = binding_conflicts(persisted, current)
+        if not changes:
+            return snapshot, None
+        if not force_rebind:
+            rendered_changes = "; ".join(
+                f"{field}: {old!r} -> {new!r}"
+                for field, (old, new) in changes.items()
+            )
+            formatter.print_error(
+                "Backend binding conflict. Persisted binding: "
+                f"{_render_binding(persisted)}. Conflicting effective overrides: "
+                f"{rendered_changes}. Edit the environment or profile to match, "
+                "or pass --force-rebind."
+            )
+            return None, 2
+        try:
+            validate_backend_binding(current, registry)
+        except ValueError as error:
+            formatter.print_error(f"Cannot force backend rebind: {error}")
+            return None, 2
+        formatter.print_warning("Forcing backend rebind:")
+        for field, (old, new) in changes.items():
+            formatter.print_warning(f"{field}: {old!r} -> {new!r}")
+        formatter.print_warning(f"Current resume node: {resume_node}")
+
+    if resume_node == "executor":
+        formatter.print_warning(
+            "Partial edits may exist in the sandbox. Inspect before continuing."
+        )
+    await graph.aupdate_state(config, {"backend_binding": current})
+    return await graph.aget_state(config), None
 
 
 def _completed_with_tool_failure(snapshot: Any) -> bool:
@@ -159,6 +254,9 @@ async def _run_graph(
     formatter: EventFormatter,
     input_fn: InputFunction,
     thread_id: str,
+    backend_binding: BackendBinding,
+    force_rebind: bool,
+    registry: Any,
 ) -> int:
     from langgraph.types import Command
 
@@ -178,6 +276,18 @@ async def _run_graph(
                 f"Workflow '{thread_id}' is already finished and cannot be resumed."
             )
             return 2
+        snapshot, binding_exit = await _prepare_resume_binding(
+            graph,
+            config,
+            snapshot,
+            backend_binding,
+            force_rebind,
+            registry,
+            formatter,
+        )
+        if binding_exit is not None:
+            return binding_exit
+        assert snapshot is not None
         interrupt_prompt = _pending_interrupt(snapshot)
         if interrupt_prompt is not None:
             try:
@@ -197,7 +307,7 @@ async def _run_graph(
     else:
         if task is None:
             raise AssertionError("A new workflow requires a task")
-        graph_input = _initial_state(task)
+        graph_input = _initial_state(task, backend_binding)
 
     while True:
         try:
@@ -293,6 +403,9 @@ async def async_main(
     if args.resume and not args.thread_id:
         formatter.print_error("--thread-id is required when using --resume.")
         return 2
+    if args.force_rebind and not args.resume:
+        formatter.print_error("--force-rebind flag requires --resume.")
+        return 2
     if not args.resume and not args.task:
         formatter.print_error("Task is required for a new workflow.")
         return 2
@@ -313,8 +426,8 @@ async def async_main(
 
         profile_name, _ = select_profile_name(cli_name, env_name, file_default)
         resolved_prof = None
+        registry = build_default_registry()
         if profile_name is not None:
-            registry = build_default_registry()
             resolved_prof = resolve_profile(
                 profile_file,
                 profile_name,
@@ -352,6 +465,9 @@ async def async_main(
     os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
     try:
+        from agent_os.bindings import resolve_backend_binding
+
+        backend_binding = resolve_backend_binding(profile_name)
         if graph_factory is not None:
             graph = graph_factory()
             return await _run_graph(
@@ -362,6 +478,9 @@ async def async_main(
                 formatter=formatter,
                 input_fn=input_fn,
                 thread_id=thread_id,
+                backend_binding=backend_binding,
+                force_rebind=args.force_rebind,
+                registry=registry,
             )
 
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -385,6 +504,9 @@ async def async_main(
                 formatter=formatter,
                 input_fn=input_fn,
                 thread_id=thread_id,
+                backend_binding=backend_binding,
+                force_rebind=args.force_rebind,
+                registry=registry,
             )
     except KeyboardInterrupt:
         formatter.print_error("Interrupted by Ctrl+C.")

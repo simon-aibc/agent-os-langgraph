@@ -17,6 +17,7 @@ from agent_os.schemas import (
     RouterDecision,
     ToolExecutionResult,
 )
+from agent_os.state import BackendBinding
 
 CHECKPOINT_DB_ENV = "AGENT_OS_CHECKPOINTS_DB"
 DEFAULT_CHECKPOINT_DB = "./checkpoints.db"
@@ -30,6 +31,7 @@ CHECKPOINT_MODEL_TYPES = (
     ReadFileResult,
     RouterDecision,
     ToolExecutionResult,
+    BackendBinding,
 )
 
 

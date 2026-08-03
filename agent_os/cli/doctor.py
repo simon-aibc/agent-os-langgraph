@@ -8,6 +8,7 @@ from agent_os import profiles as profile_config
 from agent_os.backends import build_default_registry
 from agent_os.checkpoints import DEFAULT_CHECKPOINT_DB
 from agent_os.sandbox import get_sandbox_root
+from agent_os.state import BackendBinding
 
 
 def run_doctor(json_output: bool) -> tuple[int, str]:
@@ -18,24 +19,41 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     adapters_info: list[dict[str, Any]] = []
 
     for _, adapter in registry.items():
-
-        # Binary check without subprocess
-        import shutil
-        binary_path = shutil.which(adapter.binary_name)
-
-        if binary_path is None:
-            auth_status = {"status": "unknown", "detail": f"Binary '{adapter.binary_name}' not found on PATH."}
-        else:
+        is_stub = getattr(adapter, "stub", False)
+        if is_stub:
+            binary_path = None
             status_obj = adapter.authentication_status()
-            auth_status = {"status": status_obj.status, "detail": status_obj.detail}
+            auth_status = {
+                "status": status_obj.status,
+                "detail": status_obj.detail,
+            }
+        else:
+            # Binary check without invoking the adapter.
+            import shutil
 
-        adapters_info.append({
-            "name": adapter.name,
-            "binary_name": adapter.binary_name,
-            "supported_roles": sorted(list(adapter.supported_roles)),
-            "binary_path": binary_path,
-            "auth_status": auth_status
-        })
+            binary_path = shutil.which(adapter.binary_name)
+            if binary_path is None:
+                auth_status = {
+                    "status": "unknown",
+                    "detail": f"Binary '{adapter.binary_name}' not found on PATH.",
+                }
+            else:
+                status_obj = adapter.authentication_status()
+                auth_status = {
+                    "status": status_obj.status,
+                    "detail": status_obj.detail,
+                }
+
+        adapters_info.append(
+            {
+                "name": adapter.name,
+                "binary_name": adapter.binary_name,
+                "supported_roles": sorted(adapter.supported_roles),
+                "binary_path": binary_path,
+                "auth_status": auth_status,
+                "stub": is_stub,
+            }
+        )
 
     profile_name_val = None
     profile_source = None
@@ -101,6 +119,13 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         "exists": cp_exists,
         "writable": cp_writable
     }
+    backend_binding = BackendBinding(
+        router=resolved_config["router"],
+        architect=resolved_config["architect"],
+        executor=resolved_config["executor"],
+        profile_name=profile_name_val,
+        sandbox_root=resolved_config["sandbox"],
+    )
 
     # Validate configured config
     for role in ["architect", "executor"]:
@@ -112,6 +137,13 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
             if not adapter_info:
                 warnings.append(f"Configured {role} backend '{backend_str}' is not registered.")
                 exit_code = 1
+                continue
+
+            if adapter_info["stub"]:
+                warnings.append(
+                    f"Configured {role} backend '{backend_name}' is a "
+                    "not-yet-supported stub; workflows will fail on invocation."
+                )
                 continue
 
             if role not in adapter_info["supported_roles"]:
@@ -128,12 +160,26 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
             elif adapter_info["auth_status"]["status"] == "unknown":
                 warnings.append(f"Configured {role} backend '{backend_str}' auth status is unknown.")
 
+    router_backend = resolved_config["router"]
+    if router_backend and router_backend.startswith("cli/"):
+        router_name = router_backend[4:]
+        router_info = next(
+            (adapter for adapter in adapters_info if adapter["name"] == router_name),
+            None,
+        )
+        if router_info and router_info["stub"]:
+            warnings.append(
+                f"Configured router backend '{router_name}' is a "
+                "not-yet-supported stub; workflows will fail on invocation."
+            )
+
     report = {
         "registered_adapters": adapters_info,
         "resolved_config": resolved_config,
         "profile": profile_name_val,
         "profile_source": profile_source,
         "checkpoints_db": checkpoints_db,
+        "backend_binding": backend_binding.model_dump(),
         "warnings": warnings
     }
 
@@ -146,11 +192,21 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     lines.append("-------------------")
     if not adapters_info:
         lines.append("none")
-    for ad in adapters_info:
+    for ad in (item for item in adapters_info if not item["stub"]):
         lines.append(f"- {ad['name']} ({ad['binary_name']})")
         lines.append(f"  Roles : {', '.join(ad['supported_roles'])}")
         lines.append(f"  Binary: {ad['binary_path'] or 'missing'}")
         lines.append(f"  Auth  : {ad['auth_status']['status']} ({ad['auth_status']['detail']})")
+
+    candidates = [item for item in adapters_info if item["stub"]]
+    if candidates:
+        lines.append("")
+        lines.append("Candidate adapters (not-yet-supported)")
+        lines.append("--------------------------------------")
+        for ad in candidates:
+            lines.append(f"- {ad['name']}")
+            lines.append(f"  Roles : {', '.join(ad['supported_roles'])}")
+            lines.append(f"  Status: {ad['auth_status']['detail']}")
 
     lines.append("")
     lines.append("Resolved config")
@@ -170,6 +226,12 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     lines.append(f"Path    : {checkpoints_db['path']}")
     lines.append(f"Exists  : {'yes' if checkpoints_db['exists'] else 'no'}")
     lines.append(f"Writable: {'yes' if checkpoints_db['writable'] else 'no'}")
+
+    lines.append("")
+    lines.append("Backend binding")
+    lines.append("---------------")
+    for key, value in backend_binding.model_dump().items():
+        lines.append(f"{key}: {value if value is not None else 'null'}")
 
     lines.append("")
     lines.append("Warnings")

@@ -17,7 +17,7 @@ from agent_os.state import SimonState
 
 
 def test_simon_state_keys():
-    """SimonState exposes six required and two optional dispatch keys."""
+    """SimonState exposes six required and three optional persisted keys."""
     # TypedDict.__annotations__ gives the keys and types
     expected_required_keys = {
         "messages",
@@ -27,13 +27,18 @@ def test_simon_state_keys():
         "human_feedback",
         "hot_context",
     }
-    expected_all_keys = expected_required_keys | {"tool_result", "router_escalated"}
+    expected_all_keys = expected_required_keys | {
+        "tool_result",
+        "router_escalated",
+        "backend_binding",
+    }
     assert set(SimonState.__annotations__.keys()) == expected_all_keys
     # TypedDict fields are required unless declared with NotRequired.
     # Note: TypedDict.__required_keys__ excludes fields declared as NotRequired.
     assert set(SimonState.__required_keys__) == expected_required_keys
     assert "tool_result" not in SimonState.__required_keys__
     assert "router_escalated" not in SimonState.__required_keys__
+    assert "backend_binding" not in SimonState.__required_keys__
 
 
 def test_simon_state_validation_success():

@@ -213,7 +213,12 @@ existing subscription, subject to the provider's plan and rate limits.
 | Codex only | `cli/codex` | `cli/codex` | Yes |
 | Claude Code + Codex | `cli/claude-code` | `cli/codex` | Yes |
 | API-backed models | LiteLLM-compatible model | LiteLLM-compatible model | Yes |
-| Hermes or Antigravity CLI | — | — | Not yet; requires a delegator adapter |
+| Antigravity (candidate) | — | — | Not yet |
+| Hermes CLI | — | — | Not yet; requires a delegator adapter |
+
+The Antigravity adapter registers as a not-yet-supported stub; see
+[docs/v1.2-portability.md](docs/v1.2-portability.md) for its acceptance
+criteria.
 
 The router is configured independently. It can use a local Ollama model or any
 LiteLLM-compatible structured-output model; it does not require the same

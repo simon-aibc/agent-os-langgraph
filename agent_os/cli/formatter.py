@@ -32,6 +32,7 @@ class EventFormatter:
 
     def __init__(self, console: Console | None = None) -> None:
         self.console = console if console is not None else Console()
+        self.warning_console = console if console is not None else Console(stderr=True)
         self._stream_open = False
 
     def finish_stream(self) -> None:
@@ -88,6 +89,12 @@ class EventFormatter:
 
     def print_error(self, message: str) -> None:
         self._print_labeled("ERROR", message, "bold red")
+
+    def print_warning(self, message: str) -> None:
+        self.finish_stream()
+        text = Text("[WARNING] ", style="bold yellow")
+        text.append(message)
+        self.warning_console.print(text)
 
     def print_human_prompt(self, message: str) -> None:
         self._print_labeled("HUMAN", message, "bold green")
