@@ -18,24 +18,41 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     adapters_info: list[dict[str, Any]] = []
 
     for _, adapter in registry.items():
-
-        # Binary check without subprocess
-        import shutil
-        binary_path = shutil.which(adapter.binary_name)
-
-        if binary_path is None:
-            auth_status = {"status": "unknown", "detail": f"Binary '{adapter.binary_name}' not found on PATH."}
-        else:
+        is_stub = getattr(adapter, "stub", False)
+        if is_stub:
+            binary_path = None
             status_obj = adapter.authentication_status()
-            auth_status = {"status": status_obj.status, "detail": status_obj.detail}
+            auth_status = {
+                "status": status_obj.status,
+                "detail": status_obj.detail,
+            }
+        else:
+            # Binary check without invoking the adapter.
+            import shutil
 
-        adapters_info.append({
-            "name": adapter.name,
-            "binary_name": adapter.binary_name,
-            "supported_roles": sorted(list(adapter.supported_roles)),
-            "binary_path": binary_path,
-            "auth_status": auth_status
-        })
+            binary_path = shutil.which(adapter.binary_name)
+            if binary_path is None:
+                auth_status = {
+                    "status": "unknown",
+                    "detail": f"Binary '{adapter.binary_name}' not found on PATH.",
+                }
+            else:
+                status_obj = adapter.authentication_status()
+                auth_status = {
+                    "status": status_obj.status,
+                    "detail": status_obj.detail,
+                }
+
+        adapters_info.append(
+            {
+                "name": adapter.name,
+                "binary_name": adapter.binary_name,
+                "supported_roles": sorted(adapter.supported_roles),
+                "binary_path": binary_path,
+                "auth_status": auth_status,
+                "stub": is_stub,
+            }
+        )
 
     profile_name_val = None
     profile_source = None
@@ -114,6 +131,13 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
                 exit_code = 1
                 continue
 
+            if adapter_info["stub"]:
+                warnings.append(
+                    f"Configured {role} backend '{backend_name}' is a "
+                    "not-yet-supported stub; workflows will fail on invocation."
+                )
+                continue
+
             if role not in adapter_info["supported_roles"]:
                 warnings.append(f"Configured {role} backend '{backend_str}' does not support role '{role}'.")
                 exit_code = 1
@@ -127,6 +151,19 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
                 exit_code = 1
             elif adapter_info["auth_status"]["status"] == "unknown":
                 warnings.append(f"Configured {role} backend '{backend_str}' auth status is unknown.")
+
+    router_backend = resolved_config["router"]
+    if router_backend and router_backend.startswith("cli/"):
+        router_name = router_backend[4:]
+        router_info = next(
+            (adapter for adapter in adapters_info if adapter["name"] == router_name),
+            None,
+        )
+        if router_info and router_info["stub"]:
+            warnings.append(
+                f"Configured router backend '{router_name}' is a "
+                "not-yet-supported stub; workflows will fail on invocation."
+            )
 
     report = {
         "registered_adapters": adapters_info,
@@ -146,11 +183,21 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     lines.append("-------------------")
     if not adapters_info:
         lines.append("none")
-    for ad in adapters_info:
+    for ad in (item for item in adapters_info if not item["stub"]):
         lines.append(f"- {ad['name']} ({ad['binary_name']})")
         lines.append(f"  Roles : {', '.join(ad['supported_roles'])}")
         lines.append(f"  Binary: {ad['binary_path'] or 'missing'}")
         lines.append(f"  Auth  : {ad['auth_status']['status']} ({ad['auth_status']['detail']})")
+
+    candidates = [item for item in adapters_info if item["stub"]]
+    if candidates:
+        lines.append("")
+        lines.append("Candidate adapters (not-yet-supported)")
+        lines.append("--------------------------------------")
+        for ad in candidates:
+            lines.append(f"- {ad['name']}")
+            lines.append(f"  Roles : {', '.join(ad['supported_roles'])}")
+            lines.append(f"  Status: {ad['auth_status']['detail']}")
 
     lines.append("")
     lines.append("Resolved config")

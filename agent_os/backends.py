@@ -36,6 +36,7 @@ class BackendAdapter(Protocol):
     name: str
     binary_name: str
     supported_roles: frozenset[BackendRole]
+    stub: bool = False
 
     def build_invoker(self, role: BackendRole) -> BackendInvoker: ...
 
@@ -84,6 +85,19 @@ class BackendRegistry:
                 f"Supported roles: {supported}"
             )
         return adapter
+
+
+class NotYetSupportedError(RuntimeError):
+    """Raised when a discoverable candidate adapter cannot be invoked yet."""
+
+
+ANTIGRAVITY_NOT_SUPPORTED_MESSAGE = (
+    "Antigravity backend is not yet supported. Two acceptance criteria must "
+    "be met before this adapter ships: (1) documented noninteractive "
+    "invocation form with parseable output; (2) enforceable permission mode "
+    "equivalent to Claude plan/acceptEdits or Codex read-only/workspace-write. "
+    "See docs/v1.2-portability.md v1.2 or this adapter's docstring for updates."
+)
 
 
 def _check_cli_auth_status(
@@ -139,6 +153,7 @@ class ClaudeCodeAdapter:
     name = "claude-code"
     binary_name = "claude"
     supported_roles = frozenset({"architect", "executor"})
+    stub = False
 
     def build_invoker(self, role: BackendRole) -> BackendInvoker:
         if role not in self.supported_roles:
@@ -211,6 +226,7 @@ class CodexAdapter:
     name = "codex"
     binary_name = "codex"
     supported_roles = frozenset({"architect", "executor"})
+    stub = False
 
     def build_invoker(self, role: BackendRole) -> BackendInvoker:
         if role not in self.supported_roles:
@@ -269,12 +285,43 @@ class CodexAdapter:
         )
 
 
+class AntigravityAdapter:
+    """Candidate adapter gated on a stable CLI and enforceable permissions."""
+
+    name = "antigravity"
+    binary_name = "antigravity"
+    supported_roles = frozenset({"architect", "executor"})
+    stub = True
+
+    def build_invoker(self, role: BackendRole) -> BackendInvoker:
+        if role not in self.supported_roles:
+            raise ValueError(
+                f"Backend adapter '{self.name}' does not support role '{role}'"
+            )
+
+        def invoker(state: SimonState) -> BackendArtifact:
+            del state
+            raise NotYetSupportedError(ANTIGRAVITY_NOT_SUPPORTED_MESSAGE)
+
+        return invoker
+
+    def authentication_status(self) -> AuthStatus:
+        return AuthStatus(
+            status="unknown",
+            detail=(
+                "Antigravity adapter is a candidate stub; auth check not "
+                "implemented until acceptance criteria are met."
+            ),
+        )
+
+
 def build_default_registry() -> BackendRegistry:
     """Build the built-in registry without mutable global state."""
 
     registry = BackendRegistry()
     registry.register(ClaudeCodeAdapter())
     registry.register(CodexAdapter())
+    registry.register(AntigravityAdapter())
     return registry
 
 

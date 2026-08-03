@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agent_os.backends import AuthStatus, BackendRegistry
+from agent_os.backends import AntigravityAdapter, AuthStatus, BackendRegistry
 from agent_os.cli.doctor import run_doctor
 
 
@@ -12,6 +12,7 @@ class MockAdapter:
     name = "mock"
     binary_name = "mock-bin"
     supported_roles = frozenset({"architect", "executor"})
+    stub = False
 
     def build_invoker(self, role: str) -> Callable:
         return lambda state: None
@@ -56,6 +57,7 @@ def test_doctor_healthy(tmp_path):
         "checkpoints_db",
         "warnings"
     ]
+    assert data["registered_adapters"][0]["stub"] is False
 
 
 def test_doctor_missing_binary(monkeypatch):
@@ -158,6 +160,70 @@ def test_doctor_human_output():
     assert "Checkpoints DB" in output
     assert "Warnings" in output
     assert "STATUS: OK" in output
+
+
+def _registry_with_antigravity():
+    registry = BackendRegistry()
+    registry.register(MockAdapter())
+    registry.register(AntigravityAdapter())
+    return registry
+
+
+def test_doctor_reports_antigravity_candidate_without_binary_probe(monkeypatch):
+    monkeypatch.setattr(
+        "agent_os.cli.doctor.build_default_registry",
+        _registry_with_antigravity,
+    )
+    which = MagicMock(side_effect=lambda name: f"/fake/{name}")
+    monkeypatch.setattr("shutil.which", which)
+
+    exit_code, raw_json = run_doctor(json_output=True)
+    data = json.loads(raw_json)
+    candidate = next(
+        item for item in data["registered_adapters"]
+        if item["name"] == "antigravity"
+    )
+
+    assert exit_code == 0
+    assert candidate["stub"] is True
+    assert candidate["binary_path"] is None
+    assert candidate["supported_roles"] == ["architect", "executor"]
+    assert candidate["auth_status"]["status"] == "unknown"
+    assert all(call.args[0] != "antigravity" for call in which.call_args_list)
+
+    _, human_output = run_doctor(json_output=False)
+    assert "Candidate adapters (not-yet-supported)" in human_output
+    assert "- antigravity" in human_output
+
+
+def test_configured_antigravity_is_warning_not_failure(monkeypatch):
+    monkeypatch.setattr(
+        "agent_os.cli.doctor.build_default_registry",
+        _registry_with_antigravity,
+    )
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/antigravity")
+
+    exit_code, output = run_doctor(json_output=False)
+
+    assert exit_code == 0
+    assert "not-yet-supported stub" in output
+    assert "STATUS: OK" in output
+
+
+def test_configured_antigravity_does_not_mask_other_failure(monkeypatch):
+    monkeypatch.setattr(
+        "agent_os.cli.doctor.build_default_registry",
+        _registry_with_antigravity,
+    )
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/antigravity")
+    monkeypatch.setenv("LLM_EXECUTOR", "cli/missing")
+
+    exit_code, output = run_doctor(json_output=False)
+
+    assert exit_code == 1
+    assert "not-yet-supported stub" in output
+    assert "not registered" in output
+    assert "STATUS: FAIL" in output
 
 
 def test_doctor_reports_effective_profile_config(monkeypatch, tmp_path):
