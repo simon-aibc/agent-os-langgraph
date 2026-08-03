@@ -8,6 +8,7 @@ from agent_os import profiles as profile_config
 from agent_os.backends import build_default_registry
 from agent_os.checkpoints import DEFAULT_CHECKPOINT_DB
 from agent_os.sandbox import get_sandbox_root
+from agent_os.state import BackendBinding
 
 
 def run_doctor(json_output: bool) -> tuple[int, str]:
@@ -118,6 +119,13 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         "exists": cp_exists,
         "writable": cp_writable
     }
+    backend_binding = BackendBinding(
+        router=resolved_config["router"],
+        architect=resolved_config["architect"],
+        executor=resolved_config["executor"],
+        profile_name=profile_name_val,
+        sandbox_root=resolved_config["sandbox"],
+    )
 
     # Validate configured config
     for role in ["architect", "executor"]:
@@ -171,6 +179,7 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         "profile": profile_name_val,
         "profile_source": profile_source,
         "checkpoints_db": checkpoints_db,
+        "backend_binding": backend_binding.model_dump(),
         "warnings": warnings
     }
 
@@ -217,6 +226,12 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     lines.append(f"Path    : {checkpoints_db['path']}")
     lines.append(f"Exists  : {'yes' if checkpoints_db['exists'] else 'no'}")
     lines.append(f"Writable: {'yes' if checkpoints_db['writable'] else 'no'}")
+
+    lines.append("")
+    lines.append("Backend binding")
+    lines.append("---------------")
+    for key, value in backend_binding.model_dump().items():
+        lines.append(f"{key}: {value if value is not None else 'null'}")
 
     lines.append("")
     lines.append("Warnings")

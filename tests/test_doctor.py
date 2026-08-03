@@ -55,9 +55,17 @@ def test_doctor_healthy(tmp_path):
         "profile",
         "profile_source",
         "checkpoints_db",
+        "backend_binding",
         "warnings"
     ]
     assert data["registered_adapters"][0]["stub"] is False
+    assert data["backend_binding"] == {
+        "router": data["resolved_config"]["router"],
+        "architect": "cli/mock",
+        "executor": "cli/mock",
+        "profile_name": None,
+        "sandbox_root": data["resolved_config"]["sandbox"],
+    }
 
 
 def test_doctor_missing_binary(monkeypatch):
@@ -158,6 +166,7 @@ def test_doctor_human_output():
     assert "Resolved config" in output
     assert "Profile: none" in output
     assert "Checkpoints DB" in output
+    assert "Backend binding" in output
     assert "Warnings" in output
     assert "STATUS: OK" in output
 
@@ -251,6 +260,9 @@ def test_doctor_reports_effective_profile_config(monkeypatch, tmp_path):
     assert data["resolved_config"]["architect"] is None
     assert data["resolved_config"]["executor"] is None
     assert data["resolved_config"]["sandbox"].endswith("profile-sandbox")
+    assert data["backend_binding"]["profile_name"] == "profile"
+    assert data["backend_binding"]["router"] == "ollama/profile"
+    assert data["backend_binding"]["sandbox_root"].endswith("profile-sandbox")
 
 
 def test_doctor_does_not_invoke_llm(monkeypatch):

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from rich.console import Console
 
+from agent_os.bindings import resolve_backend_binding
 from agent_os.cli.app import async_main
 from agent_os.schemas import ToolExecutionResult
 
@@ -147,7 +148,10 @@ class InterruptGraph:
         task = SimpleNamespace(interrupts=(interrupt,))
         return SimpleNamespace(
             created_at="now",
-            values={"task": "existing"},
+            values={
+                "task": "existing",
+                "backend_binding": resolve_backend_binding(None),
+            },
             next=("human_gate",),
             tasks=(task,),
         )
@@ -242,7 +246,10 @@ async def test_resume_mid_run_continues_without_human_interrupt():
                 return completed_snapshot()
             return SimpleNamespace(
                 created_at="now",
-                values={"task": "paused mid-model"},
+                values={
+                    "task": "paused mid-model",
+                    "backend_binding": resolve_backend_binding(None),
+                },
                 next=("architect",),
                 tasks=(),
             )
@@ -412,6 +419,7 @@ async def test_resume_from_preexisting_sqlite_checkpoint(tmp_path, monkeypatch):
         "executor_output": None,
         "human_feedback": None,
         "hot_context": None,
+        "backend_binding": resolve_backend_binding(None),
     }
 
     async with AsyncSqliteSaver.from_conn_string(str(database)) as first_saver:
