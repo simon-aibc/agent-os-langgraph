@@ -44,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show node progress and tracebacks.",
     )
     run_parser.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
+    run_parser.add_argument("--profile", help="Named configuration profile to use.")
 
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
@@ -299,7 +300,51 @@ async def async_main(
     thread_id = args.thread_id or _generate_thread_id()
     formatter.print_thread_id(thread_id)
 
-    previous_sandbox = os.environ.get("AGENT_OS_SANDBOX")
+    # Resolve profile
+    from agent_os.backends import build_default_registry
+    from agent_os.profiles import load_profiles, resolve_profile, select_profile_name
+    from agent_os.sandbox import get_sandbox_root
+
+    try:
+        profile_file = load_profiles()
+        cli_name = args.profile
+        env_name = os.getenv("AGENT_OS_PROFILE")
+        file_default = profile_file.default
+
+        profile_name, _ = select_profile_name(cli_name, env_name, file_default)
+        resolved_prof = None
+        if profile_name is not None:
+            registry = build_default_registry()
+            resolved_prof = resolve_profile(
+                profile_file,
+                profile_name,
+                registry,
+                get_sandbox_root().resolve()
+            )
+    except Exception as e:
+        formatter.print_error(f"Profile error: {e}")
+        return 2
+
+    previous_env = {
+        "LLM_ROUTER": os.environ.get("LLM_ROUTER"),
+        "LLM_ARCHITECT": os.environ.get("LLM_ARCHITECT"),
+        "LLM_EXECUTOR": os.environ.get("LLM_EXECUTOR"),
+        "AGENT_OS_SANDBOX": os.environ.get("AGENT_OS_SANDBOX"),
+    }
+
+    if resolved_prof is not None:
+        profile_env = {
+            "LLM_ROUTER": resolved_prof.router,
+            "LLM_ARCHITECT": resolved_prof.architect,
+            "LLM_EXECUTOR": resolved_prof.executor,
+            "AGENT_OS_SANDBOX": resolved_prof.sandbox,
+        }
+        for key, value in profile_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
     if args.sandbox:
         os.environ["AGENT_OS_SANDBOX"] = args.sandbox
 
@@ -351,11 +396,11 @@ async def async_main(
             traceback.print_exc(file=formatter.console.file)
         return 2
     finally:
-        if args.sandbox:
-            if previous_sandbox is None:
-                os.environ.pop("AGENT_OS_SANDBOX", None)
+        for k, v in previous_env.items():
+            if v is None:
+                os.environ.pop(k, None)
             else:
-                os.environ["AGENT_OS_SANDBOX"] = previous_sandbox
+                os.environ[k] = v
 
 
 def main(argv: list[str] | None = None) -> int:
