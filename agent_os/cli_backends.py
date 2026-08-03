@@ -157,6 +157,7 @@ def run_cli_command(
         result = subprocess.run(
             cmd,
             cwd=sandbox_root,
+            stdin=subprocess.DEVNULL,
             shell=False,
             capture_output=True,
             text=True,

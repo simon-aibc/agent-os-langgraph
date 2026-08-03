@@ -50,6 +50,9 @@ def test_agent_nodes_trim_messages_before_invocation(
     monkeypatch: pytest.MonkeyPatch,
     node_name: str,
 ) -> None:
+    # Keep this unit test offline even when the developer's .env selects CLI backends.
+    monkeypatch.delenv("LLM_ARCHITECT", raising=False)
+    monkeypatch.delenv("LLM_EXECUTOR", raising=False)
     history = _large_history()
     original = list(history)
     mock_agent = MagicMock()

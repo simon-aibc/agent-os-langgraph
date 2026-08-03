@@ -51,6 +51,7 @@ def test_sandbox_cwd_enforcement(monkeypatch, tmp_path):
     kwargs = mock_run.call_args.kwargs
     assert command_args == ["/fake/path/fake_bin", "arg"]
     assert kwargs["cwd"] == sandbox.resolve()
+    assert kwargs["stdin"] == subprocess.DEVNULL
     assert kwargs["shell"] is False
 
 
