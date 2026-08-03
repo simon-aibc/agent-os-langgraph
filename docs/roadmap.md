@@ -38,28 +38,46 @@ tests/ generic fixtures        sandbox/ working files
 
 ## Planned milestones
 
-### v1.2 — Pluggable skill packages
+### v1.2 — Backend portability
+
+- Introduce a `BackendAdapter` registry so architect and executor roles can
+  target additional CLI or API providers without touching graph code.
+- Add an `agent-os doctor` command that reports installed binaries,
+  authentication status, and configured roles in a machine-readable format.
+- Support named configuration profiles that select router, architect,
+  executor, and sandbox defaults in one switch.
+- Add `ROUTER_MODE=direct-escalation` to bypass Tier-2 structured routing when
+  the operator has already chosen an architect-first workflow.
+- Persist the resolved backend selection inside the SQLite checkpoint so a
+  resumed thread continues on the same provider it started with.
+- Add a candidate Antigravity CLI adapter behind the registry once its
+  noninteractive output and permission contract can be enforced.
+
+### v1.3 — Pluggable skill packages and Hermes bridge
 
 - Load skills from package folders with documented metadata and handler
   contracts.
 - Support multiple `AGENT_OS_SKILL_DIRS` outside the repository.
 - Ship generic example skills and collision diagnostics.
 - Keep personal workflow implementations private by default.
+- Expose Agent OS as an execution engine that an outer orchestrator such as
+  Hermes can call over a stable interface, rather than embedding a peer agent
+  inside the graph.
 
-### v1.3 — Vault memory adapter
+### v1.4 — Vault memory adapter
 
 - Read a vault path from configuration without assuming a private layout.
 - Inject bounded hot context at architect boundaries.
 - Route vault mutations through an explicit approval policy.
 - Add provenance and retention controls for persisted context.
 
-### v1.4 — User context profiles
+### v1.5 — User context profiles
 
 - Compose public prompt defaults with private user and standards files.
 - Define size limits and precedence rules for injected context.
 - Add redacted diagnostics showing which context sources were loaded.
 
-### v1.5 — Interactive REPL and TUI
+### v1.6 — Interactive REPL and TUI
 
 - Persistent `agent-os chat` sessions.
 - Session list, resume, inspect, and delete commands.
@@ -106,12 +124,13 @@ Maintained through GitHub settings:
 
 ## Ordering by return on effort
 
-1. v1.2 skill packages — unlock reusable workflows.
-2. v1.3 vault adapter — unlock continuity.
-3. v1.5 REPL/TUI — improve daily interaction.
-4. v1.4 context profiles — deepen personalization after boundaries are proven.
-5. v2.0 ambient interfaces — add mobile and scheduled entry points.
-6. v2.1 deployment — harden for broader use.
+1. v1.2 portability — unlock provider choice and configuration profiles.
+2. v1.3 skill packages and Hermes bridge — unlock reusable workflows.
+3. v1.4 vault adapter — unlock continuity.
+4. v1.6 REPL/TUI — improve daily interaction.
+5. v1.5 context profiles — deepen personalization after boundaries are proven.
+6. v2.0 ambient interfaces — add mobile and scheduled entry points.
+7. v2.1 deployment — harden for broader use.
 
 Milestones remain small and independently reviewable. Public features must not
 require or reveal a particular user's private vault, credentials, or workflows.
