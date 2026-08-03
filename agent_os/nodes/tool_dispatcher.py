@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from agent_os.default_registry import build_default_registry, parse_tier1_request
 from agent_os.nodes.smart_router import classify_tool_request
 from agent_os.output_limits import DISPATCHER_OUTPUT_MAX_BYTES, truncate_utf8
+from agent_os.routing import get_router_mode
 from agent_os.schemas import BashResult, ToolExecutionResult
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.state import SimonState
@@ -87,6 +88,8 @@ def build_tool_dispatcher_node(
             )
 
         if decision is None:
+            if get_router_mode() == "direct-escalation":
+                return _escalate()
             try:
                 decision = classify_tool_request(
                     task,

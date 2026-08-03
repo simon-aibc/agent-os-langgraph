@@ -1,3 +1,4 @@
+import os
 from typing import Literal
 
 from langgraph.graph import END
@@ -6,6 +7,7 @@ from agent_os.schemas import ArchitectBrief, ExecutorReport
 from agent_os.state import SimonState
 
 Route = Literal["architect", "executor", "tool", "end"]
+RouterMode = Literal["cascade", "direct-escalation"]
 
 ROUTE_TO_NODE: dict[str, str] = {
     "architect": "architect",
@@ -17,6 +19,17 @@ ROUTE_TO_NODE: dict[str, str] = {
 # Six executed nodes plus LangGraph's final termination superstep.
 DEFAULT_RECURSION_LIMIT = 7
 DEFAULT_RUNTIME_CONFIG = {"recursion_limit": DEFAULT_RECURSION_LIMIT}
+
+
+def get_router_mode() -> RouterMode:
+    """Return the configured dispatcher mode, preserving cascade by default."""
+    value = os.getenv("ROUTER_MODE", "cascade").strip().lower()
+    if value not in ("cascade", "direct-escalation"):
+        raise ValueError(
+            "Invalid ROUTER_MODE value "
+            f"'{value}'. Expected 'cascade' or 'direct-escalation'."
+        )
+    return value
 
 
 def build_runtime_config(thread_id: str) -> dict[str, object]:
