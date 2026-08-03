@@ -52,6 +52,7 @@ def test_doctor_healthy(tmp_path):
         "registered_adapters",
         "resolved_config",
         "profile",
+        "profile_source",
         "checkpoints_db",
         "warnings"
     ]
@@ -157,6 +158,33 @@ def test_doctor_human_output():
     assert "Checkpoints DB" in output
     assert "Warnings" in output
     assert "STATUS: OK" in output
+
+
+def test_doctor_reports_effective_profile_config(monkeypatch, tmp_path):
+    config_root = tmp_path / "xdg" / "agent-os"
+    config_root.mkdir(parents=True)
+    (config_root / "profiles.toml").write_text(
+        'default = "profile"\n\n'
+        '[profile.profile]\n'
+        'router = "ollama/profile"\n'
+        'sandbox = "./profile-sandbox"\n',
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_root.parent))
+    monkeypatch.delenv("AGENT_OS_PROFILE", raising=False)
+    monkeypatch.setenv("LLM_ROUTER", "old/router")
+    monkeypatch.setenv("LLM_ARCHITECT", "old/architect")
+    monkeypatch.setenv("LLM_EXECUTOR", "old/executor")
+
+    exit_code, output = run_doctor(json_output=True)
+    data = json.loads(output)
+
+    assert exit_code == 0
+    assert data["profile"] == "profile"
+    assert data["profile_source"] == "default"
+    assert data["resolved_config"]["router"] == "ollama/profile"
+    assert data["resolved_config"]["architect"] is None
+    assert data["resolved_config"]["executor"] is None
+    assert data["resolved_config"]["sandbox"].endswith("profile-sandbox")
 
 
 def test_doctor_does_not_invoke_llm(monkeypatch):

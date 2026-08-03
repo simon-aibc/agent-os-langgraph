@@ -77,6 +77,28 @@ def test_protocol_shape_and_auth_status() -> None:
     assert adapter.authentication_status().status == "unknown"
 
 
+def test_registry_items_stable_sort() -> None:
+    registry = BackendRegistry()
+    adapter1 = FakeAdapter()
+    adapter2 = ArchitectOnlyAdapter()
+
+    registry.register(adapter1)
+    registry.register(adapter2)
+
+    items = registry.items()
+    assert isinstance(items, tuple)
+    assert len(items) == 2
+
+    # "architect-only" sorts before "fake"
+    assert items[0][0] == "architect-only"
+    assert items[0][1] is adapter2
+    assert items[1][0] == "fake"
+    assert items[1][1] is adapter1
+
+    # Test stability
+    assert registry.items() == items
+
+
 def test_claude_adapter_auth_missing_binary(monkeypatch) -> None:
     from agent_os.backends import ClaudeCodeAdapter
     monkeypatch.setattr("shutil.which", lambda _: None)
@@ -106,6 +128,27 @@ def test_claude_adapter_auth_success(monkeypatch) -> None:
     adapter = ClaudeCodeAdapter()
     status = adapter.authentication_status()
     assert status.status == "ok"
+
+
+def test_claude_adapter_auth_json_unauthenticated(monkeypatch) -> None:
+    import subprocess
+
+    from agent_os.backends import ClaudeCodeAdapter
+
+    monkeypatch.setattr("shutil.which", lambda _: "/fake/claude")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout='{ "loggedIn": false, "authMethod": "none" }',
+            stderr="",
+        ),
+    )
+
+    status = ClaudeCodeAdapter().authentication_status()
+    assert status.status == "unauthenticated"
 
 
 def test_claude_adapter_auth_unauthenticated(monkeypatch) -> None:

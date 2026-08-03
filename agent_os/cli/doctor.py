@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from agent_os import profiles as profile_config
 from agent_os.backends import build_default_registry
 from agent_os.checkpoints import DEFAULT_CHECKPOINT_DB
 from agent_os.sandbox import get_sandbox_root
@@ -16,9 +17,7 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     registry = build_default_registry()
     adapters_info: list[dict[str, Any]] = []
 
-    for name in registry.names:
-        # resolve directly from private dict since resolve() validates role
-        adapter = registry._adapters[name]
+    for _, adapter in registry.items():
 
         # Binary check without subprocess
         import shutil
@@ -38,12 +37,41 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
             "auth_status": auth_status
         })
 
-    resolved_config = {
-        "router": os.getenv("LLM_ROUTER"),
-        "architect": os.getenv("LLM_ARCHITECT"),
-        "executor": os.getenv("LLM_EXECUTOR"),
-        "sandbox": str(get_sandbox_root().resolve())
-    }
+    profile_name_val = None
+    profile_source = None
+    resolved_profile = None
+    try:
+        profile_file = profile_config.load_profiles()
+        profile_name_val, profile_source = profile_config.select_profile_name(
+            None,
+            os.getenv("AGENT_OS_PROFILE"),
+            profile_file.default,
+        )
+        if profile_name_val is not None:
+            resolved_profile = profile_config.resolve_profile(
+                profile_file,
+                profile_name_val,
+                registry,
+                get_sandbox_root().resolve(),
+            )
+    except Exception as error:
+        warnings.append(f"Profile error: {error}")
+        exit_code = 1
+
+    if resolved_profile is None:
+        resolved_config = {
+            "router": os.getenv("LLM_ROUTER"),
+            "architect": os.getenv("LLM_ARCHITECT"),
+            "executor": os.getenv("LLM_EXECUTOR"),
+            "sandbox": str(get_sandbox_root().resolve()),
+        }
+    else:
+        resolved_config = {
+            "router": resolved_profile.router,
+            "architect": resolved_profile.architect,
+            "executor": resolved_profile.executor,
+            "sandbox": resolved_profile.sandbox,
+        }
 
     checkpoint_env = os.getenv("AGENT_OS_CHECKPOINTS_DB")
     cp_path_str = checkpoint_env if checkpoint_env is not None else DEFAULT_CHECKPOINT_DB
@@ -103,7 +131,8 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     report = {
         "registered_adapters": adapters_info,
         "resolved_config": resolved_config,
-        "profile": None,
+        "profile": profile_name_val,
+        "profile_source": profile_source,
         "checkpoints_db": checkpoints_db,
         "warnings": warnings
     }
@@ -130,7 +159,10 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         lines.append(f"{k.capitalize()}: {v if v is not None else 'null'}")
 
     lines.append("")
-    lines.append("Profile: none")
+    if profile_name_val:
+        lines.append(f"Profile: {profile_name_val} (via {profile_source})")
+    else:
+        lines.append("Profile: none")
 
     lines.append("")
     lines.append("Checkpoints DB")
