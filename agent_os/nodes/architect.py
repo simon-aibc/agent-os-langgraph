@@ -25,7 +25,7 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
         # Pass a copied state containing trimmed messages; do not mutate input state
         copied_state = dict(state)
         copied_state["messages"] = trimmed
-        brief = invoker(copied_state)
+        brief = invoke_with_llm_retry(lambda: invoker(copied_state))
         return {"plan": brief}
 
     agent = build_architect_agent()
