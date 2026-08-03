@@ -75,3 +75,96 @@ def test_protocol_shape_and_auth_status() -> None:
     assert adapter.binary_name == "fake-cli"
     assert adapter.supported_roles == frozenset({"architect", "executor"})
     assert adapter.authentication_status().status == "unknown"
+
+
+def test_claude_adapter_auth_missing_binary(monkeypatch) -> None:
+    from agent_os.backends import ClaudeCodeAdapter
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    adapter = ClaudeCodeAdapter()
+    status = adapter.authentication_status()
+    assert status.status == "unknown"
+    assert "not found on PATH" in status.detail
+
+
+def test_claude_adapter_auth_success(monkeypatch) -> None:
+    import subprocess
+
+    from agent_os.backends import ClaudeCodeAdapter
+
+    monkeypatch.setattr("shutil.which", lambda _: "/fake/claude")
+
+    def fake_run(*args, **kwargs):
+        assert kwargs["stdin"] is subprocess.DEVNULL
+        assert kwargs["shell"] is False
+        assert kwargs["timeout"] == 5.0
+        assert "TEST_API_KEY" not in kwargs["env"]
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="You are logged in.", stderr="")
+
+    monkeypatch.setenv("TEST_API_KEY", "secret-value")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = ClaudeCodeAdapter()
+    status = adapter.authentication_status()
+    assert status.status == "ok"
+
+
+def test_claude_adapter_auth_unauthenticated(monkeypatch) -> None:
+    import subprocess
+
+    from agent_os.backends import ClaudeCodeAdapter
+
+    monkeypatch.setattr("shutil.which", lambda _: "/fake/claude")
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="authentication_failed")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = ClaudeCodeAdapter()
+    status = adapter.authentication_status()
+    assert status.status == "unauthenticated"
+    assert "claude auth login" in status.detail
+
+
+def test_codex_adapter_auth_missing_binary(monkeypatch) -> None:
+    from agent_os.backends import CodexAdapter
+    monkeypatch.setattr("shutil.which", lambda _: None)
+    adapter = CodexAdapter()
+    status = adapter.authentication_status()
+    assert status.status == "unknown"
+    assert "not found on PATH" in status.detail
+
+
+def test_codex_adapter_auth_success(monkeypatch) -> None:
+    import subprocess
+
+    from agent_os.backends import CodexAdapter
+
+    monkeypatch.setattr("shutil.which", lambda _: "/fake/codex")
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="Authenticated as user", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = CodexAdapter()
+    status = adapter.authentication_status()
+    assert status.status == "ok"
+
+
+def test_codex_adapter_auth_unauthenticated(monkeypatch) -> None:
+    import subprocess
+
+    from agent_os.backends import CodexAdapter
+
+    monkeypatch.setattr("shutil.which", lambda _: "/fake/codex")
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="oauth session expired")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    adapter = CodexAdapter()
+    status = adapter.authentication_status()
+    assert status.status == "unauthenticated"
+    assert "codex login" in status.detail

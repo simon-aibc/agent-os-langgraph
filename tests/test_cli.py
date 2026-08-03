@@ -190,5 +190,35 @@ def test_installed_console_script_help():
 
     assert result.returncode == 0
     assert "Run the Agent OS LangGraph workflow" in result.stdout
+
+
+def test_installed_console_script_help_run():
+    console_script = Path(sys.executable).with_name("agent-os")
+    result = subprocess.run(
+        [str(console_script), "run", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0
     assert "--thread-id" in result.stdout
+
     assert "--resume" in result.stdout
+
+def test_doctor_mode_dispatch(monkeypatch, capsys):
+    # Mock at the source module
+    import agent_os.cli.doctor
+    from agent_os.cli.app import main
+    monkeypatch.setattr(agent_os.cli.doctor, "run_doctor", lambda json_output: (0, "DOCTOR OK"))
+
+    result = main(["doctor"])
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "DOCTOR OK" in captured.out
+
+    result2 = main(["doctor", "--json"])
+    assert result2 == 0
+    captured2 = capsys.readouterr()
+    assert "DOCTOR OK" in captured2.out

@@ -9,6 +9,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ValidationError
 
 from agent_os.cli_backends import (
+    build_safe_subprocess_env,
     parse_claude_stream_json,
     parse_codex_output_file,
     run_cli_command,
@@ -81,6 +82,53 @@ class BackendRegistry:
         return adapter
 
 
+def _check_cli_auth_status(
+    binary: str,
+    args: list[str],
+    success_indicators: list[str],
+    unauth_indicators: list[str],
+    unauth_detail: str,
+) -> AuthStatus:
+    import shutil
+    import subprocess
+
+    from agent_os.cli_backends import _coerce_text, _redact_secrets_in_text
+
+    binary_path = shutil.which(binary)
+    if not binary_path:
+        return AuthStatus(status="unknown", detail=f"Binary '{binary}' not found on PATH.")
+
+    try:
+        result = subprocess.run(
+            [binary_path] + args,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=5.0,
+            shell=False,
+            env=build_safe_subprocess_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return AuthStatus(status="unknown", detail=f"Command '{binary}' timed out during auth check.")
+    except Exception as e:
+        return AuthStatus(status="unknown", detail=f"Subprocess error: {type(e).__name__}")
+
+    output = _coerce_text(result.stdout) + "\n" + _coerce_text(result.stderr)
+    lower_output = output.lower()
+
+    if any(ind in lower_output for ind in unauth_indicators):
+        return AuthStatus(status="unauthenticated", detail=unauth_detail)
+
+    if result.returncode == 0 and any(ind in lower_output for ind in success_indicators):
+        return AuthStatus(status="ok", detail="Authenticated")
+
+    excerpt = _redact_secrets_in_text(output[:200].replace("\n", " ").strip())
+    return AuthStatus(
+        status="unknown",
+        detail=f"Exit {result.returncode}, unrecognized output. Excerpt: {excerpt}"
+    )
+
+
 class ClaudeCodeAdapter:
     """Claude Code adapter with role-specific permission modes."""
 
@@ -133,7 +181,13 @@ class ClaudeCodeAdapter:
         return invoker
 
     def authentication_status(self) -> AuthStatus:
-        return AuthStatus(status="unknown", detail="Authentication checks are deferred to doctor.")
+        return _check_cli_auth_status(
+            self.binary_name,
+            ["auth", "status"],
+            success_indicators=["logged in", '"loggedin": true', '"loggedin":true'],
+            unauth_indicators=["not logged in", "no active session", "authentication_failed"],
+            unauth_detail="run: claude auth login",
+        )
 
 
 class CodexAdapter:
@@ -191,7 +245,13 @@ class CodexAdapter:
         return invoker
 
     def authentication_status(self) -> AuthStatus:
-        return AuthStatus(status="unknown", detail="Authentication checks are deferred to doctor.")
+        return _check_cli_auth_status(
+            self.binary_name,
+            ["login", "status"],
+            success_indicators=["logged in", "authenticated"],
+            unauth_indicators=["not logged in", "oauth session expired", "invalid_api_key", "unauthorized"],
+            unauth_detail="run: codex login",
+        )
 
 
 def build_default_registry() -> BackendRegistry:

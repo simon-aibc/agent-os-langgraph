@@ -23,20 +23,30 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-os",
         description="Run the Agent OS LangGraph workflow.",
     )
-    parser.add_argument("task", nargs="?", help="Task description for a new workflow.")
-    parser.add_argument("--thread-id", help="Thread ID to create or resume.")
-    parser.add_argument(
+    subparsers = parser.add_subparsers(dest="command")
+
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run a workflow.",
+        description="Run the Agent OS LangGraph workflow.",
+    )
+    run_parser.add_argument("task", nargs="?", help="Task description for a new workflow.")
+    run_parser.add_argument("--thread-id", help="Thread ID to create or resume.")
+    run_parser.add_argument(
         "--resume",
         action="store_true",
         help="Resume an interrupted workflow.",
     )
-    parser.add_argument(
+    run_parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
         help="Show node progress and tracebacks.",
     )
-    parser.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
+    run_parser.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
+
+    doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
+    doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
     return parser
 
 
@@ -258,7 +268,22 @@ async def async_main(
     console: Console | None = None,
 ) -> int:
     """Parse arguments, construct the graph lazily, and run one workflow."""
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # Normalize argv: if first meaningful token isn't "run" or "doctor", prepend "run"
+    # This also routes naked -h/--help to 'run --help' to preserve legacy help visibility.
+    if not argv or argv[0] not in ("run", "doctor"):
+        argv = ["run"] + argv
+
     args = build_parser().parse_args(argv)
+
+    if args.command == "doctor":
+        from agent_os.cli.doctor import run_doctor
+        exit_code, output = run_doctor(args.json_output)
+        print(output)
+        return exit_code
+
     formatter = EventFormatter(console=console)
 
     if args.resume and args.task:
