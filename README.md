@@ -4,11 +4,16 @@
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
 ![Tests: 263 passing](https://img.shields.io/badge/tests-263%20passing-brightgreen.svg)
+[![Release](https://img.shields.io/github/v/release/simon-aibc/agent-os-langgraph)](https://github.com/simon-aibc/agent-os-langgraph/releases/latest)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
 Production-style multi-agent orchestration built with LangGraph.
 Deterministic tools handle known work; ambiguous work escalates through an architect, human plan gate, and sandboxed executor.
 Typed state, durable SQLite checkpoints, MCP adapters, and an offline-tested streaming CLI demonstrate production engineering—not a tutorial chatbot.
+
+**Current release:** [v1.1.2](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.1.2) ·
+[Changelog](CHANGELOG.md) · [Product specification](docs/PRD.md) ·
+[Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
 
 ```mermaid
 flowchart TD
@@ -28,6 +33,9 @@ flowchart TD
 ## 30-second quickstart
 
 ```bash
+git clone https://github.com/simon-aibc/agent-os-langgraph.git
+cd agent-os-langgraph
+
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
@@ -44,6 +52,28 @@ Expected structure:
 [TOOL] read_file({"path": "README.md"})
 [RESULT] # Agent OS LangGraph ...
 ```
+
+### End-to-end coding workflow
+
+A semantic task misses the deterministic tool path, produces a read-only plan,
+pauses for approval, and only then allows the executor to edit and verify:
+
+```text
+$ agent-os "add type hints to math_util.py and verify it compiles" \
+    --thread-id type-hints-demo --sandbox ./sandbox
+
+[THREAD] type-hints-demo
+[SUPERVISOR] → tool_dispatcher
+[SUPERVISOR] → architect
+[HUMAN] Review the proposed implementation plan.
+> approved
+[SUPERVISOR] → executor
+[SUPERVISOR] → __end__
+```
+
+The checkpoint remains resumable if the process is interrupted before the
+final node. Provider subprocesses do not expose private reasoning; the CLI
+shows graph transitions, tool boundaries, and validated result contracts.
 
 For architect/executor workflows, copy [.env.example](.env.example) to `.env`,
 configure `LLM_ROUTER`, `LLM_ARCHITECT`, and `LLM_EXECUTOR`, then run:
@@ -110,6 +140,10 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 | R6 | SQLite checkpoints and restart/resume tests | Builds workflows that survive process failure |
 | R7 | Three-tier router, pluggable registry, and MCP adapters | Balances deterministic speed, model judgment, and extensibility |
 | R8 | Rich streaming CLI with durable resume | Delivers an operator-facing interface with explicit failure semantics |
+| R9 | Public documentation, CI, lint, and repo hardening | Treats maintainability and presentation as product requirements |
+| R11 | Prompt caching, trimming, retries, and output caps | Makes model cost and retained data explicit boundaries |
+| v1.0.1 | Resume, Bash status, write docs, and retry fixes | Converts dogfood findings into regression-tested patches |
+| v1.1.x | Claude Code and Codex CLI delegators | Integrates subscription agents without pretending they are raw chat models |
 
 ## Extending Agent OS
 
@@ -173,6 +207,18 @@ Agent OS can delegate work to installed subscription tools instead of making
 direct per-token API calls. This avoids separate API billing by using an
 existing subscription, subject to the provider's plan and rate limits.
 
+| Available access | Architect | Executor | Supported |
+|---|---|---|:---:|
+| Claude Code only | `cli/claude-code` | `cli/claude-code` | Yes |
+| Codex only | `cli/codex` | `cli/codex` | Yes |
+| Claude Code + Codex | `cli/claude-code` | `cli/codex` | Yes |
+| API-backed models | LiteLLM-compatible model | LiteLLM-compatible model | Yes |
+| Hermes or Antigravity CLI | — | — | Not yet; requires a delegator adapter |
+
+The router is configured independently. It can use a local Ollama model or any
+LiteLLM-compatible structured-output model; it does not require the same
+provider as the architect or executor.
+
 ```bash
 # Check authentication before invoking agent-os.
 claude auth status
@@ -215,6 +261,17 @@ also invokes roles sequentially. A typical architect/executor turn takes roughly
 > are defense-in-depth—not OS or container isolation. They do not guarantee
 > untrusted code cannot touch external paths. Use a container or microVM for
 > untrusted workloads.
+
+### CLI backend troubleshooting
+
+- **Authentication failure:** run `claude auth login` or `codex login` outside
+  Agent OS, then repeat the task or resume its checkpoint.
+- **Partial executor failure:** inspect the sandbox before resuming. Agent OS
+  never automatically retries a side-effectful CLI executor.
+- **Completed thread cannot resume:** use a new `--thread-id`; completed graphs
+  have no pending node.
+- **Provider binary missing:** confirm `claude` or `codex` is on `PATH` in the
+  same shell that launches `agent-os`.
 
 ## Token Economy
 
@@ -300,11 +357,20 @@ python -m pytest -m integration tests/test_mcp_integration.py
 
 CI runs Ruff and the offline test suite on Python 3.11 and 3.12.
 
-## Roadmap / v2 backlog
+See [CHANGELOG.md](CHANGELOG.md) for release history. External integration
+tests remain opt-in so a fresh clone never requires paid provider access.
 
-- R10: record and embed an end-to-end demo.
-- Add durable, process-safe LiteLLM daily-budget accounting and enforcement.
-- Run untrusted execution in a disposable container or microVM.
-- Add an optional web interface only after the CLI workflow is validated.
+## Roadmap
+
+Next milestones cover pluggable skill packages, local vault memory, context
+profiles, an interactive TUI, and isolated deployment. Hermes and Antigravity
+CLI adapters are candidates only after their noninteractive output and
+permission contracts can be enforced.
+
+See [docs/roadmap.md](docs/roadmap.md) for sequencing, public/private boundaries,
+and the complete backlog.
+
+Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities
+privately according to [SECURITY.md](SECURITY.md).
 
 Licensed under the [MIT License](LICENSE).

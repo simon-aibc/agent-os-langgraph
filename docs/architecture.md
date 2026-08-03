@@ -92,7 +92,7 @@ implements three progressively more expensive paths:
    is parsed for the native `read_file`, `write_file`, and `bash` contracts.
 2. **Structured model:** unresolved text is classified into a
    `RouterDecision` against the injected registry catalog.
-3. **Escalation:** confidence below `0.70`, an unknown tool, parser failure, or
+3. **Escalation:** confidence below `0.80`, an unknown tool, parser failure, or
    tool exception returns to the supervisor with `router_escalated=True`.
 
 A successful tool invocation stores `ToolExecutionResult` and goes directly to
@@ -196,6 +196,12 @@ The delegator flow is:
 4. The delegator parses the payload and validates it as `ArchitectBrief` or
    `ExecutorReport`.
 
+Codex uses OpenAI strict structured outputs. Before writing a Codex schema,
+`strict_json_schema()` recursively marks every object with
+`additionalProperties: false` and includes every property in `required`,
+including object definitions under `$defs`. Claude receives the original
+Pydantic schema because its CLI contract does not require this transformation.
+
 The Architect uses Claude `plan` or Codex `read-only` mode, so transient
 failures can be retried without replaying writes. The Executor uses Claude
 `acceptEdits` or Codex `workspace-write`. It is never auto-retried: a provider
@@ -206,6 +212,11 @@ Before starting a child process, the shared runner removes credential-like
 environment variables. Error excerpts redact known secret values and common
 credential patterns. The runner fixes `cwd` and rejects known expansion or
 bypass arguments such as `--add-dir`, `--cd`, and `--dangerously-*`.
+
+Child stdin is connected to `DEVNULL`, so a workflow cannot perform an
+interactive OAuth login. Known authentication failures are classified with
+backend-specific guidance; users authenticate with `claude auth login` or
+`codex login` before starting or resuming the graph.
 
 These controls reduce accidental exposure and trivial configuration escapes;
 they are not an OS sandbox or container boundary. Untrusted workloads still
@@ -225,3 +236,4 @@ require external isolation.
 | Async CLI over the same graph | Enables event streaming without duplicating orchestration | Requires an async SQLite saver in the CLI boundary |
 | No chain-of-thought display | Streams observable outputs without presenting hidden reasoning | Operators see contracts and events, not private model deliberation |
 | Delegate to subscription CLIs instead of wrapping them as chat models | Preserves each CLI's native agent loop and structured-output contract | Adds process startup latency and no visibility into the CLI's internal reasoning stream |
+| Transform schemas only at the Codex boundary | Satisfies OpenAI strict output requirements without changing Claude payload semantics | Provider-specific schema behavior needs dedicated contract tests |
