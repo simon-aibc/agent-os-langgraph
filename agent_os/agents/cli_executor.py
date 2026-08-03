@@ -78,7 +78,7 @@ def build_cli_executor_invoker(backend: str) -> Callable[[SimonState], ExecutorR
         else:
             with tempfile.TemporaryDirectory(prefix="agent-os-codex-") as temp_dir:
                 out_path = Path(temp_dir) / "last-message.json"
-                with write_schema_file(ExecutorReport) as schema_path:
+                with write_schema_file(ExecutorReport, strict=True) as schema_path:
                     args = [
                         "exec",
                         "--sandbox",

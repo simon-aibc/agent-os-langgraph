@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 255 passing](https://img.shields.io/badge/tests-255%20passing-brightgreen.svg)
+![Tests: 263 passing](https://img.shields.io/badge/tests-263%20passing-brightgreen.svg)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
 Production-style multi-agent orchestration built with LangGraph.
@@ -174,12 +174,24 @@ direct per-token API calls. This avoids separate API billing by using an
 existing subscription, subject to the provider's plan and rate limits.
 
 ```bash
-# The 'claude' and 'codex' binaries must be installed and authenticated
+# Check authentication before invoking agent-os.
+claude auth status
+codex login status
+
+# Authenticate first when either status check fails.
+claude auth login
+codex login
+
 export LLM_ARCHITECT=cli/claude-code
 export LLM_EXECUTOR=cli/codex
 
 agent-os "refactor the target module" --thread-id cli-demo
 ```
+
+> **Authentication note:** Backend subprocesses receive `stdin=DEVNULL`, so
+> they cannot complete an interactive login or re-authentication during a
+> workflow. Automatic token refresh may still work when the CLI supports it;
+> otherwise authenticate outside Agent OS before starting the workflow.
 
 The delegators apply fixed permission modes and reject known access-expansion
 arguments:

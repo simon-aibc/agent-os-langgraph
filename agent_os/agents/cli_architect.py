@@ -132,7 +132,7 @@ def build_cli_architect_invoker(
         else:
             with tempfile.TemporaryDirectory(prefix="agent-os-codex-") as temp_dir:
                 temp_output = Path(temp_dir) / "last-message.json"
-                with write_schema_file(ArchitectBrief) as schema_path:
+                with write_schema_file(ArchitectBrief, strict=True) as schema_path:
                     args = [
                         "exec",
                         "--sandbox",

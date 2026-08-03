@@ -56,7 +56,7 @@ def test_dispatcher_tier2_high_confidence():
     mock_structured = MagicMock()
     mock_llm.with_structured_output.return_value = mock_structured
     mock_structured.invoke.return_value = RouterDecision(
-        tool="custom_tool", confidence=0.70, arguments={"a": 1}
+        tool="custom_tool", confidence=0.80, arguments={"a": 1}
     )
 
     node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
@@ -77,7 +77,7 @@ def test_dispatcher_tier3_low_confidence():
     mock_structured = MagicMock()
     mock_llm.with_structured_output.return_value = mock_structured
     mock_structured.invoke.return_value = RouterDecision(
-        tool="custom_tool", confidence=0.69, arguments={"a": 1}
+        tool="custom_tool", confidence=0.79, arguments={"a": 1}
     )
 
     node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
@@ -227,3 +227,29 @@ def test_dispatcher_output_truncation():
     retained = output[match.end():]
     assert len(output.encode("utf-8")) <= 50 * 1024
     assert int(match.group(1)) == len(large_output.encode()) - len(retained.encode())
+
+
+def test_dispatcher_tier2_missing_arguments_escalates_safely():
+    registry = SkillRegistry()
+
+    def my_write(path: str, content: str):
+        pass
+
+    registry.register(RegisteredSkill(name="write_file", aliases=[], handler=my_write))
+
+    mock_llm = MagicMock()
+    mock_structured = MagicMock()
+    mock_llm.with_structured_output.return_value = mock_structured
+
+    # LLM returns a tool but omits the required 'content' argument
+    mock_structured.invoke.return_value = RouterDecision(
+        tool="write_file", confidence=0.99, arguments={"path": "file.txt"}
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=mock_llm)
+    cmd = node(make_state("write to file.txt"))
+
+    assert cmd.goto == "supervisor"
+    assert cmd.update["router_escalated"] is True
+    assert cmd.update["tool_result"].tool == "write_file"
+    assert cmd.update["tool_result"].success is False

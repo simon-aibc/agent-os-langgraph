@@ -14,7 +14,7 @@ from agent_os.schemas import BashResult, ToolExecutionResult
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.state import SimonState
 
-ROUTER_CONFIDENCE_THRESHOLD = 0.70
+ROUTER_CONFIDENCE_THRESHOLD = 0.80
 DispatcherCommand = Command[Literal["supervisor", "__end__"]]
 
 

@@ -34,6 +34,9 @@ def test_classify_tool_request_high_confidence():
     assert "- my_tool" in system_prompt
     assert "input schemas" in system_prompt
     assert "x" in system_prompt
+    assert '"add docstring to X"' in system_prompt
+    assert "tool: null" in system_prompt
+    assert "required arguments are missing" in system_prompt
 
 
 def test_classify_tool_request_unknown_tool_rejection():

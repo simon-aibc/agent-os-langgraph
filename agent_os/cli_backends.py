@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import re
@@ -30,7 +31,11 @@ _FORBIDDEN_CLI_ARG_PREFIXES = tuple(
 
 
 class CliBackendError(Exception):
-    """Base exception for CLI backend failures."""
+    """Base exception for CLI execution failures."""
+
+
+class CliBackendAuthenticationError(CliBackendError):
+    """Raised when a CLI backend fails due to authentication issues."""
 
 
 class CliBackendTimeout(CliBackendError):
@@ -120,10 +125,46 @@ def _validate_cli_args(args: list[str]) -> None:
             raise CliBackendError("CLI permission mode 'bypassPermissions' is forbidden")
 
 
+def strict_json_schema(schema_model: type[BaseModel]) -> dict[str, Any]:
+    """
+    Generate a strict JSON schema where every object node requires all its
+    properties and forbids additional properties. This is required by the
+    OpenAI structured output backend (used by Codex).
+    """
+    schema_dict = copy.deepcopy(schema_model.model_json_schema())
+
+    def visit(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                visit(item)
+        elif isinstance(node, dict):
+            for value in node.values():
+                visit(value)
+
+            properties = node.get("properties")
+            is_object = node.get("type") == "object" or isinstance(
+                properties, dict
+            )
+            if is_object:
+                node["additionalProperties"] = False
+                node["required"] = (
+                    list(properties) if isinstance(properties, dict) else []
+                )
+
+    visit(schema_dict)
+    return schema_dict
+
+
 @contextmanager
-def write_schema_file(schema_model: type[BaseModel]) -> Iterator[Path]:
+def write_schema_file(
+    schema_model: type[BaseModel], *, strict: bool = False
+) -> Iterator[Path]:
     """Context manager to write a Pydantic schema to a temporary JSON file."""
-    schema_dict = schema_model.model_json_schema()
+    if strict:
+        schema_dict = strict_json_schema(schema_model)
+    else:
+        schema_dict = schema_model.model_json_schema()
+
     # We create the temp file in the system temp directory, not the repo root
     fd, temp_path_str = tempfile.mkstemp(suffix=".json", text=True)
     temp_path = Path(temp_path_str)
@@ -174,7 +215,34 @@ def run_cli_command(
         ) from e
 
     if result.returncode != 0:
-        stderr_excerpt = _redact_secrets_in_text(_coerce_text(result.stderr)[-1000:])
+        stderr_text = _coerce_text(result.stderr)
+        stderr_excerpt = _redact_secrets_in_text(stderr_text[-1000:])
+
+        # Check for authentication errors
+        auth_indicators = [
+            "authentication_failed",
+            "oauth session expired",
+            "invalid_api_key",
+            "not logged in",
+            "authentication required",
+            "unauthorized",
+        ]
+
+        lower_stderr = stderr_text.lower()
+        if any(indicator in lower_stderr for indicator in auth_indicators):
+            if binary == "claude":
+                guidance = "Run `claude auth login` before starting agent-os."
+            elif binary == "codex":
+                guidance = "Run `codex login` before starting agent-os."
+            else:
+                guidance = f"Authenticate {binary} before starting agent-os."
+
+            raise CliBackendAuthenticationError(
+                f"Command '{binary}' failed due to authentication. "
+                f"{guidance} Subprocesses are noninteractive and cannot complete login. "
+                f"Stderr excerpt: {stderr_excerpt}"
+            )
+
         raise CliBackendError(
             f"Command '{binary}' failed with return code {result.returncode}. "
             f"Stderr excerpt: {stderr_excerpt}"

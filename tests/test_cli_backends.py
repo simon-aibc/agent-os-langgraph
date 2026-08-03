@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel
 
 from agent_os.cli_backends import (
+    CliBackendAuthenticationError,
     CliBackendError,
     CliBackendTimeout,
     build_safe_subprocess_env,
@@ -170,6 +171,51 @@ def test_nonzero_subprocess_handling(monkeypatch, tmp_path):
         assert "failed with return code 1" in err_str
         assert "super_secret_string" not in err_str
         assert "[REDACTED]" in err_str
+
+
+def test_authentication_subprocess_handling(tmp_path):
+    with (
+        patch("shutil.which", return_value="/fake/path/claude"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["claude"],
+            returncode=1,
+            stdout="",
+            stderr="authentication_failed: please login again",
+        )
+
+        with pytest.raises(CliBackendAuthenticationError) as exc_info:
+            run_cli_command("claude", ["arg"])
+
+        err_str = str(exc_info.value)
+        assert "failed due to authentication" in err_str
+        assert "Run `claude auth login`" in err_str
+        assert "authentication_failed" in err_str
+
+
+def test_codex_authentication_guidance_redacts_secret(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-value")
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(tmp_path))
+
+    with (
+        patch("shutil.which", return_value="/fake/path/codex"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["codex"],
+            returncode=1,
+            stdout="",
+            stderr="invalid_api_key=secret-value",
+        )
+
+        with pytest.raises(CliBackendAuthenticationError) as exc_info:
+            run_cli_command("codex", ["exec", "task"])
+
+    error = str(exc_info.value)
+    assert "Run `codex login`" in error
+    assert "secret-value" not in error
+    assert "[REDACTED]" in error
 
 
 def test_codex_output_parser_success(tmp_path):

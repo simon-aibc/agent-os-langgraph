@@ -10,11 +10,18 @@ ROUTER_PROMPT = """You are a routing agent. Classify the user's intent into one 
 Available tools and input schemas:
 {tool_list}
 
+Examples:
+- "read X" / "cat X" → tool: read_file, arguments: {{"path": "X"}}
+- "write X :: content" → tool: write_file, arguments: {{"path": "X", "content": "content"}}
+- "create X with Y" → tool: write_file (only if you can extract the exact path and complete file content)
+- "add docstring to X" / "add type hints to X" / "refactor X" → tool: null, arguments: {{}} (Semantic coding work must escalate)
+
 Rules:
 1. Select only a listed tool and extract arguments matching its schema.
 2. Return confidence from 0.0 to 1.0.
-3. If no tool is suitable or confidence is low, set tool to null.
+3. If no tool is suitable, if it requires semantic coding/reasoning, or if you cannot extract complete required arguments, set tool to null.
 4. Never invent tools or execute argument strings.
+5. Never select a tool when required arguments are missing.
 """
 
 

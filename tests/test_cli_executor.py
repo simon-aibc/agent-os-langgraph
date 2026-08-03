@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -74,6 +75,9 @@ def test_build_cli_executor_invoker_claude_success(monkeypatch, tmp_path):
         assert "--verbose" in args
         assert "--add-dir" not in args
         assert "--dangerously-skip-permissions" not in args
+        schema = json.loads(args[args.index("--json-schema") + 1])
+        assert schema["title"] == "ExecutorReport"
+        assert "additionalProperties" not in schema
 
 
 def test_build_cli_executor_invoker_claude_invalid_payload(monkeypatch, tmp_path):
@@ -163,6 +167,9 @@ def test_build_cli_executor_invoker_codex_success(monkeypatch, tmp_path):
         idx_schema = args.index("--output-schema")
         schema_file = args[idx_schema + 1]
         assert os.path.exists(schema_file)
+        schema = json.loads(Path(schema_file).read_text(encoding="utf-8"))
+        assert schema["additionalProperties"] is False
+        assert schema["required"] == list(schema["properties"])
 
         idx_output = args.index("--output-last-message")
         output_file = args[idx_output + 1]
