@@ -1,0 +1,206 @@
+"""Backend adapter contracts, registry, and built-in CLI adapters."""
+
+import json
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Literal, Protocol
+
+from pydantic import BaseModel, ValidationError
+
+from agent_os.cli_backends import (
+    parse_claude_stream_json,
+    parse_codex_output_file,
+    run_cli_command,
+    write_schema_file,
+)
+from agent_os.schemas import ArchitectBrief, ExecutorReport
+from agent_os.state import SimonState
+
+BackendRole = Literal["architect", "executor"]
+BackendArtifact = ArchitectBrief | ExecutorReport
+BackendInvoker = Callable[[SimonState], BackendArtifact]
+
+
+class AuthStatus(BaseModel):
+    """Safe, structured authentication status for an adapter."""
+
+    status: Literal["ok", "unauthenticated", "unknown"]
+    detail: str = ""
+
+
+class BackendAdapter(Protocol):
+    """Contract implemented by providers that can serve graph roles."""
+
+    name: str
+    binary_name: str
+    supported_roles: frozenset[BackendRole]
+
+    def build_invoker(self, role: BackendRole) -> BackendInvoker: ...
+
+    def authentication_status(self) -> AuthStatus: ...
+
+
+class BackendRegistry:
+    """Resolve registered adapters by normalized backend name and role."""
+
+    def __init__(self) -> None:
+        self._adapters: dict[str, BackendAdapter] = {}
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Return registered names in stable order for diagnostics."""
+
+        return tuple(sorted(self._adapters))
+
+    def register(self, adapter: BackendAdapter) -> None:
+        """Register an adapter, rejecting backend-name collisions."""
+
+        name = adapter.name.strip()
+        if not name:
+            raise ValueError("Backend adapter name must not be empty.")
+        if name in self._adapters:
+            raise ValueError(f"Backend adapter name already registered: {name}")
+        self._adapters[name] = adapter
+
+    def resolve(self, role: BackendRole, name: str) -> BackendAdapter:
+        """Resolve an adapter and verify that it supports the requested role."""
+
+        adapter = self._adapters.get(name)
+        if adapter is None:
+            registered = ", ".join(self.names) or "(none)"
+            raise ValueError(
+                f"Unknown backend adapter '{name}'. Registered adapters: {registered}"
+            )
+        if role not in adapter.supported_roles:
+            supported = ", ".join(sorted(adapter.supported_roles)) or "none"
+            raise ValueError(
+                f"Backend adapter '{name}' does not support role '{role}'. "
+                f"Supported roles: {supported}"
+            )
+        return adapter
+
+
+class ClaudeCodeAdapter:
+    """Claude Code adapter with role-specific permission modes."""
+
+    name = "claude-code"
+    binary_name = "claude"
+    supported_roles = frozenset({"architect", "executor"})
+
+    def build_invoker(self, role: BackendRole) -> BackendInvoker:
+        if role not in self.supported_roles:
+            raise ValueError(f"Backend adapter '{self.name}' does not support role '{role}'")
+
+        def invoker(state: SimonState) -> BackendArtifact:
+            if role == "architect":
+                from agent_os.agents.cli_architect import _build_architect_prompt
+
+                model = ArchitectBrief
+                prompt = _build_architect_prompt(state)
+                permission_mode = "plan"
+            else:
+                from agent_os.agents.cli_executor import build_executor_prompt
+
+                plan = state.get("plan")
+                if not isinstance(plan, ArchitectBrief):
+                    raise ValueError("State 'plan' must be an ArchitectBrief instance.")
+                model = ExecutorReport
+                prompt = build_executor_prompt(plan)
+                permission_mode = "acceptEdits"
+
+            args = [
+                "-p",
+                prompt,
+                "--permission-mode",
+                permission_mode,
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--json-schema",
+                json.dumps(model.model_json_schema()),
+            ]
+            result = run_cli_command(self.binary_name, args)
+            parsed = parse_claude_stream_json(result.stdout)
+            try:
+                return model.model_validate(parsed)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"Failed to validate {self.name} structured output as "
+                    f"{model.__name__}. The payload did not match the required schema."
+                ) from exc
+
+        return invoker
+
+    def authentication_status(self) -> AuthStatus:
+        return AuthStatus(status="unknown", detail="Authentication checks are deferred to doctor.")
+
+
+class CodexAdapter:
+    """Codex adapter with strict schemas and role-specific sandbox modes."""
+
+    name = "codex"
+    binary_name = "codex"
+    supported_roles = frozenset({"architect", "executor"})
+
+    def build_invoker(self, role: BackendRole) -> BackendInvoker:
+        if role not in self.supported_roles:
+            raise ValueError(f"Backend adapter '{self.name}' does not support role '{role}'")
+
+        def invoker(state: SimonState) -> BackendArtifact:
+            if role == "architect":
+                from agent_os.agents.cli_architect import _build_architect_prompt
+
+                model = ArchitectBrief
+                prompt = _build_architect_prompt(state)
+                sandbox_mode = "read-only"
+            else:
+                from agent_os.agents.cli_executor import build_executor_prompt
+
+                plan = state.get("plan")
+                if not isinstance(plan, ArchitectBrief):
+                    raise ValueError("State 'plan' must be an ArchitectBrief instance.")
+                model = ExecutorReport
+                prompt = build_executor_prompt(plan)
+                sandbox_mode = "workspace-write"
+
+            with tempfile.TemporaryDirectory(prefix="agent-os-codex-") as temp_dir:
+                output_path = Path(temp_dir) / "last-message.json"
+                with write_schema_file(model, strict=True) as schema_path:
+                    args = [
+                        "exec",
+                        "--sandbox",
+                        sandbox_mode,
+                        "--output-schema",
+                        str(schema_path),
+                        "--output-last-message",
+                        str(output_path),
+                        prompt,
+                    ]
+                    run_cli_command(self.binary_name, args)
+                parsed = parse_codex_output_file(output_path)
+
+            try:
+                return model.model_validate(parsed)
+            except ValidationError as exc:
+                raise ValueError(
+                    f"Failed to validate {self.name} structured output as "
+                    f"{model.__name__}. The payload did not match the required schema."
+                ) from exc
+
+        return invoker
+
+    def authentication_status(self) -> AuthStatus:
+        return AuthStatus(status="unknown", detail="Authentication checks are deferred to doctor.")
+
+
+def build_default_registry() -> BackendRegistry:
+    """Build the built-in registry without mutable global state."""
+
+    registry = BackendRegistry()
+    registry.register(ClaudeCodeAdapter())
+    registry.register(CodexAdapter())
+    return registry
+
+
+get_default_backend_registry = build_default_registry

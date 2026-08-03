@@ -132,7 +132,7 @@ def test_build_cli_architect_invoker_claude_success(monkeypatch, tmp_path):
     invoker = build_cli_architect_invoker("claude-code")
     state = {"task": "test", "human_feedback": None}
 
-    with patch("agent_os.agents.cli_architect.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         # Mock run_cli_command returning stream-json style payload
         mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"files": ["f"], "changes": ["c"], "verify_cmd": "v"}}')
         brief = invoker(state)
@@ -164,7 +164,7 @@ def test_build_cli_architect_invoker_codex_success(monkeypatch, tmp_path):
             json.dump({"files": ["f2"], "changes": ["c2"], "verify_cmd": "v2"}, f)
         return MagicMock()
 
-    with patch("agent_os.agents.cli_architect.run_cli_command", side_effect=mock_run_command):
+    with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
         brief = invoker(state)
 
         assert isinstance(brief, ArchitectBrief)
@@ -185,7 +185,7 @@ def test_build_cli_architect_invoker_claude_security_contract(monkeypatch, tmp_p
     invoker = build_cli_architect_invoker("claude-code")
     state = {"task": "test", "human_feedback": None}
 
-    with patch("agent_os.agents.cli_architect.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"files": [], "changes": [], "verify_cmd": ""}}')
         invoker(state)
 
@@ -245,7 +245,7 @@ def test_build_cli_architect_invoker_codex_security_contract(monkeypatch, tmp_pa
 
         return MagicMock()
 
-    with patch("agent_os.agents.cli_architect.run_cli_command", side_effect=mock_run_command):
+    with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
         invoker(state)
 
     # Temporary files should be removed
@@ -272,7 +272,7 @@ def test_build_cli_architect_invoker_codex_temp_cleanup_on_exception(monkeypatch
         output_file = args[args.index("--output-last-message") + 1]
         raise RuntimeError("CLI failed")
 
-    with patch("agent_os.agents.cli_architect.run_cli_command", side_effect=mock_run_command):
+    with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
         with pytest.raises(RuntimeError):
             invoker(state)
 
@@ -291,7 +291,7 @@ def test_build_cli_architect_invoker_invalid_payload(monkeypatch, tmp_path):
     invoker = build_cli_architect_invoker("claude-code")
     state = {"task": "test", "human_feedback": None}
 
-    with patch("agent_os.agents.cli_architect.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         # Missing required fields
         mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"files": []}}')
 
@@ -312,7 +312,7 @@ def test_build_cli_architect_invoker_invalid_json_is_redacted(monkeypatch, tmp_p
     monkeypatch.setenv("TEST_API_KEY", "secret-value")
     invoker = build_cli_architect_invoker("claude-code")
 
-    with patch("agent_os.agents.cli_architect.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         mock_run.return_value = MagicMock(stdout="invalid api_key=secret-value")
         with pytest.raises(ValueError, match="No valid JSON payload") as exc_info:
             invoker({"task": "test", "human_feedback": None})
