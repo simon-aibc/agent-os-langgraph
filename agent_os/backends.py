@@ -54,6 +54,10 @@ class BackendRegistry:
 
         return tuple(sorted(self._adapters))
 
+    def items(self) -> tuple[tuple[str, BackendAdapter], ...]:
+        """Return registered names and adapters in stable order."""
+        return tuple((name, self._adapters[name]) for name in self.names)
+
     def register(self, adapter: BackendAdapter) -> None:
         """Register an adapter, rejecting backend-name collisions."""
 
@@ -184,8 +188,19 @@ class ClaudeCodeAdapter:
         return _check_cli_auth_status(
             self.binary_name,
             ["auth", "status"],
-            success_indicators=["logged in", '"loggedin": true', '"loggedin":true'],
-            unauth_indicators=["not logged in", "no active session", "authentication_failed"],
+            success_indicators=[
+                "logged in",
+                '"loggedin": true',
+                '"loggedin":true',
+            ],
+            unauth_indicators=[
+                "not logged in",
+                "no active session",
+                "authentication_failed",
+                '"loggedin": false',
+                '"loggedin":false',
+                '"authmethod": "none"',
+            ],
             unauth_detail="run: claude auth login",
         )
 

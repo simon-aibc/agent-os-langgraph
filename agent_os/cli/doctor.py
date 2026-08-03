@@ -16,9 +16,7 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     registry = build_default_registry()
     adapters_info: list[dict[str, Any]] = []
 
-    for name in registry.names:
-        # resolve directly from private dict since resolve() validates role
-        adapter = registry._adapters[name]
+    for _, adapter in registry.items():
 
         # Binary check without subprocess
         import shutil
