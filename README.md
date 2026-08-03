@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 200 passing](https://img.shields.io/badge/tests-200%20passing-brightgreen.svg)
+![Tests: 255 passing](https://img.shields.io/badge/tests-255%20passing-brightgreen.svg)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
 Production-style multi-agent orchestration built with LangGraph.
@@ -167,6 +167,43 @@ Model roles use provider/model strings from `.env`. Tests or applications may
 also inject any compatible `BaseChatModel` into `build_architect_agent()`,
 `build_executor_agent()`, or `build_tool_dispatcher_node()`.
 
+## Using subscription CLI tools
+
+Agent OS can delegate work to installed subscription tools instead of making
+direct per-token API calls. This avoids separate API billing by using an
+existing subscription, subject to the provider's plan and rate limits.
+
+```bash
+# The 'claude' and 'codex' binaries must be installed and authenticated
+export LLM_ARCHITECT=cli/claude-code
+export LLM_EXECUTOR=cli/codex
+
+agent-os "refactor the target module" --thread-id cli-demo
+```
+
+The delegators apply fixed permission modes and reject known access-expansion
+arguments:
+
+- **Architect modes:** Claude uses `plan` mode; Codex uses `read-only` mode.
+- **Executor modes:** Claude uses `acceptEdits`; Codex uses `workspace-write`.
+- The shared runner rejects cwd overrides, `--add-dir`, and dangerous bypass
+  flags.
+
+The read-only CLI Architect may retry transient network or rate-limit failures.
+The side-effectful CLI Executor never auto-retries because partial edits may
+already exist in the sandbox; its error tells the operator to inspect the
+working tree before resuming.
+
+Compared with direct API calls, subscription CLIs have process startup overhead
+and do not expose their internal reasoning stream to Agent OS. The current graph
+also invokes roles sequentially. A typical architect/executor turn takes roughly
+15–30 seconds, but latency varies by task, provider, and subscription limits.
+
+> **Security note:** CLI argument guards, a fixed `cwd`, and permission modes
+> are defense-in-depth—not OS or container isolation. They do not guarantee
+> untrusted code cannot touch external paths. Use a container or microVM for
+> untrusted workloads.
+
 ## Token Economy
 
 Every LLM call is a cost boundary. Deterministic tools form the free, fast
@@ -181,7 +218,7 @@ path; model-backed routing and agent steps are bounded explicitly.
 | 8K message trimming | Architect and Executor invocation histories are trimmed before model calls. |
 | Output caps | Bash streams are capped at 100KB each; serialized dispatcher results at 50KB total. |
 | Offline startup | CLI initialization uses LiteLLM's local cost map and avoids incidental provider calls. |
-| Transient retries | Architect and Executor calls retry 429, 503, and timeout errors with 2/4/8s backoff. |
+| Transient retries | API Architect/Executor calls and the read-only CLI Architect retry 429, 503, and timeout errors with 2/4/8s backoff; the CLI Executor does not. |
 
 ### Illustrative benchmark
 
@@ -191,6 +228,8 @@ measured SLAs.
 - **Tier 1 (Deterministic)** = $0 / ~0ms LLM latency
 - **Tier 2 (Structured LLM)** = ~$0.0002 / ~200ms
 - **Tier 3 (Agent Escalation)** = ~$0.01 / ~2s
+- **Subscription CLI (Claude/Codex)** = $0 marginal cost / ~15–30s per
+  architect/executor turn (approximate; varies by task and provider limits)
 
 ### Output limits
 

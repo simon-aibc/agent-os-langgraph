@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-os-langgraph"
-version = "0.1.0"
-description = "Agent OS built with LangGraph"
+version = "1.1.0"
+description = "Deterministic multi-agent orchestration built with LangGraph."
 requires-python = ">=3.11"
 dependencies = [
     "langgraph==1.2.9",
@@ -34,7 +34,7 @@ dev = [
 [tool.pytest.ini_options]
 addopts = "-m 'not integration'"
 markers = [
-    "integration: requires explicitly enabled local MCP services",
+    "integration: requires explicitly enabled external services or CLI tools",
 ]
 
 [tool.ruff]

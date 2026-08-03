@@ -177,6 +177,40 @@ Agent OS treats each model invocation as a cost boundary:
   `build_graph()` for deterministic tests or deployment-specific behavior.
 - Use `InMemorySaver` for isolated tests and SQLite for durable workflows.
 
+### CLI delegator backends
+
+Agent OS supports `claude` (Claude Code) and `codex` (Codex CLI) as
+subscription-backed Architect and Executor implementations. These CLIs are
+agents with their own reasoning loops and native tools, not raw chat models.
+Wrapping one in `BaseChatModel` would create an agent-inside-agent boundary and
+would not produce the tool-call protocol expected by LangChain agents. Agent OS
+therefore invokes each CLI as a delegator subprocess.
+
+The delegator flow is:
+
+1. The graph node passes a bounded state view to the CLI delegator.
+2. The delegator starts the process in `AGENT_OS_SANDBOX` with fixed permission
+   arguments.
+3. Claude emits stream JSON; Codex writes its last structured message to a
+   temporary file.
+4. The delegator parses the payload and validates it as `ArchitectBrief` or
+   `ExecutorReport`.
+
+The Architect uses Claude `plan` or Codex `read-only` mode, so transient
+failures can be retried without replaying writes. The Executor uses Claude
+`acceptEdits` or Codex `workspace-write`. It is never auto-retried: a provider
+failure can occur after edits but before the final report, so the node warns
+that partial sandbox changes may exist.
+
+Before starting a child process, the shared runner removes credential-like
+environment variables. Error excerpts redact known secret values and common
+credential patterns. The runner fixes `cwd` and rejects known expansion or
+bypass arguments such as `--add-dir`, `--cd`, and `--dangerously-*`.
+
+These controls reduce accidental exposure and trivial configuration escapes;
+they are not an OS sandbox or container boundary. Untrusted workloads still
+require external isolation.
+
 ## Decision log
 
 | Decision | Rationale | Trade-off |
@@ -190,3 +224,4 @@ Agent OS treats each model invocation as a cost boundary:
 | Remove boolean `approval` | Rejection reasons belong in one normalized feedback field | Old checkpoints containing only `approval` are not migrated |
 | Async CLI over the same graph | Enables event streaming without duplicating orchestration | Requires an async SQLite saver in the CLI boundary |
 | No chain-of-thought display | Streams observable outputs without presenting hidden reasoning | Operators see contracts and events, not private model deliberation |
+| Delegate to subscription CLIs instead of wrapping them as chat models | Preserves each CLI's native agent loop and structured-output contract | Adds process startup latency and no visibility into the CLI's internal reasoning stream |
