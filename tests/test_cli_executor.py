@@ -56,7 +56,7 @@ def test_build_cli_executor_invoker_claude_success(monkeypatch, tmp_path):
     plan = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
     state = {"plan": plan}
 
-    with patch("agent_os.agents.cli_executor.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         mock_run.return_value = MagicMock(
             stdout='{"type": "result", "structured_output": {"success": true, "diff": "d", "verify_output": "vo"}}'
         )
@@ -89,7 +89,7 @@ def test_build_cli_executor_invoker_claude_invalid_payload(monkeypatch, tmp_path
     plan = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
     state = {"plan": plan}
 
-    with patch("agent_os.agents.cli_executor.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         # Missing required fields
         mock_run.return_value = MagicMock(
             stdout='{"type": "result", "structured_output": {"success": true}}'
@@ -115,7 +115,7 @@ def test_build_cli_executor_invoker_claude_invalid_json_is_redacted(
     invoker = build_cli_executor_invoker("claude-code")
     plan = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
 
-    with patch("agent_os.agents.cli_executor.run_cli_command") as mock_run:
+    with patch("agent_os.backends.run_cli_command") as mock_run:
         mock_run.return_value = MagicMock(stdout="invalid api_key=secret-value")
         with pytest.raises(ValueError, match="No valid JSON payload") as exc_info:
             invoker({"plan": plan})
@@ -131,7 +131,7 @@ def test_cli_executor_does_not_retry_transient_failure(monkeypatch, tmp_path):
     plan = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
 
     with patch(
-        "agent_os.agents.cli_executor.run_cli_command",
+        "agent_os.backends.run_cli_command",
         side_effect=CliBackendError("503 service unavailable"),
     ) as mock_run:
         with pytest.raises(CliBackendError, match="503"):
@@ -180,7 +180,7 @@ def test_build_cli_executor_invoker_codex_success(monkeypatch, tmp_path):
         return MagicMock()
 
     with patch(
-        "agent_os.agents.cli_executor.run_cli_command", side_effect=mock_run_command
+        "agent_os.backends.run_cli_command", side_effect=mock_run_command
     ):
         report = invoker(state)
 
@@ -212,7 +212,7 @@ def test_build_cli_executor_invoker_codex_invalid_payload(monkeypatch, tmp_path)
         return MagicMock()
 
     with patch(
-        "agent_os.agents.cli_executor.run_cli_command", side_effect=mock_run_command
+        "agent_os.backends.run_cli_command", side_effect=mock_run_command
     ):
         with pytest.raises(ValueError) as exc_info:
             invoker(state)
@@ -240,7 +240,7 @@ def test_build_cli_executor_invoker_codex_temp_cleanup_on_exception(
         raise CliBackendError("503 service unavailable")
 
     with patch(
-        "agent_os.agents.cli_executor.run_cli_command",
+        "agent_os.backends.run_cli_command",
         side_effect=mock_run_command,
     ) as mock_run:
         with pytest.raises(CliBackendError, match="503"):

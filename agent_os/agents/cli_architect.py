@@ -1,17 +1,8 @@
-import json
 import os
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from pydantic import ValidationError
-
-from agent_os.cli_backends import (
-    parse_claude_stream_json,
-    parse_codex_output_file,
-    run_cli_command,
-    write_schema_file,
-)
+from agent_os.backends import get_default_backend_registry
 from agent_os.sandbox import get_sandbox_root
 from agent_os.schemas import ArchitectBrief
 from agent_os.state import SimonState
@@ -104,54 +95,8 @@ def build_cli_architect_invoker(
     Supported backends: 'claude-code', 'codex'.
     """
 
-    if backend not in ("claude-code", "codex"):
-        raise ValueError(
-            f"Unsupported CLI architect backend: {backend}. "
-            "Must be 'claude-code' or 'codex'."
-        )
-
-    def invoker(state: SimonState) -> ArchitectBrief:
-        prompt = _build_architect_prompt(state)
-
-        if backend == "claude-code":
-            schema_str = json.dumps(ArchitectBrief.model_json_schema())
-            args = [
-                "-p",
-                prompt,
-                "--permission-mode",
-                "plan",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--json-schema",
-                schema_str,
-            ]
-            result = run_cli_command("claude", args)
-            parsed_json = parse_claude_stream_json(result.stdout)
-
-        else:
-            with tempfile.TemporaryDirectory(prefix="agent-os-codex-") as temp_dir:
-                temp_output = Path(temp_dir) / "last-message.json"
-                with write_schema_file(ArchitectBrief, strict=True) as schema_path:
-                    args = [
-                        "exec",
-                        "--sandbox",
-                        "read-only",
-                        "--output-schema",
-                        str(schema_path),
-                        "--output-last-message",
-                        str(temp_output),
-                        prompt,
-                    ]
-                    run_cli_command("codex", args)
-                parsed_json = parse_codex_output_file(temp_output)
-
-        try:
-            return ArchitectBrief.model_validate(parsed_json)
-        except ValidationError as exc:
-            raise ValueError(
-                f"Failed to validate {backend} structured output as ArchitectBrief. "
-                "The payload did not match the required schema."
-            ) from exc
-
-    return invoker
+    try:
+        adapter = get_default_backend_registry().resolve("architect", backend)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported CLI architect backend: {backend}. {exc}") from exc
+    return adapter.build_invoker("architect")
