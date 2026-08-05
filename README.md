@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 285 passing](https://img.shields.io/badge/tests-285%20passing-brightgreen.svg)
+![Tests: 343 passing](https://img.shields.io/badge/tests-343%20passing-brightgreen.svg)
 [![Release](https://img.shields.io/github/v/release/simon-aibc/agent-os-langgraph)](https://github.com/simon-aibc/agent-os-langgraph/releases/latest)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 

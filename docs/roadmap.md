@@ -17,7 +17,7 @@ Released 2026-08-05:
 - token trimming, prompt caching, retries, and retained-output caps;
 - Claude Code and Codex subscription CLI delegators;
 - strict Codex JSON schemas and actionable CLI authentication failures;
-- 285 offline tests plus opt-in external integration tests;
+- 343 offline tests plus opt-in external integration tests;
 - `BackendAdapter` Protocol and registry for pluggable LLM providers;
 - `agent-os doctor` system diagnostics and TOML profile loader;
 - `ROUTER_MODE=direct-escalation` for architect-first workflows;

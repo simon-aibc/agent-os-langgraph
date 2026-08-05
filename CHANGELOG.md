@@ -8,16 +8,17 @@ for public releases.
 ### Added
 
 - `BackendAdapter` Protocol and `BackendRegistry` with collision detection and role validation.
-- `ClaudeCodeAdapter` and `CodexAdapter` migrated from hardcoded logic.
-- `agent-os doctor` command for system diagnostics (human-readable and JSON output).
-- TOML profile loader supporting inheritance and local overrides (`[profile.local]`).
-- `ROUTER_MODE=direct-escalation` to bypass Tier-2 routing for architect-first workflows.
-- Checkpoint `BackendBinding` persistence for resume conflict detection and `--force-rebind`.
-- Configurable Antigravity stub adapter for future testing.
+- Migrate `ClaudeCodeAdapter` and `CodexAdapter` off hardcoded factory branches onto the registry.
+- Real authentication status checks for the Claude Code and Codex CLI adapters via dedicated read-only subprocess probes.
+- `agent-os doctor` subcommand with human-readable table and JSON output covering registered adapters, resolved configuration, checkpoint reachability, warnings, and a health verdict.
+- TOML profile loader at `$XDG_CONFIG_HOME/agent-os/profiles.toml` with single-parent one-level `extends` inheritance, secret-key refusal, and precedence resolution `--profile > AGENT_OS_PROFILE > file default > env`.
+- `ROUTER_MODE=direct-escalation` to skip Tier-2 structured routing entirely for architect-first workflows; default remains `cascade`.
+- Checkpoint `BackendBinding` persistence with resume-time effective-value conflict detection, legacy-checkpoint handling, and `--force-rebind` escape hatch that always warns.
+- Antigravity CLI adapter registered as a not-yet-supported stub gated on documented noninteractive invocation and enforceable permission modes; surfaces in `agent-os doctor` under a candidate grouping.
 
 ### Validation
 
-- 285 offline tests pass with warnings treated as errors.
+- 343 offline tests pass with warnings treated as errors.
 - Comprehensive smoke used the Claude Code CLI adapter for both architect and executor roles; Codex adapter coverage is verified by the offline test suite through the shared registry code path.
 
 ## [1.1.2] — 2026-08-03
@@ -83,6 +84,7 @@ for public releases.
 - Prompt caching, message trimming, and retained-output caps.
 - Python 3.11/3.12 CI, Ruff, warnings-as-errors tests, and MIT license.
 
+[1.2.0]: https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.2.0
 [1.1.2]: https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.1.2
 [1.1.1]: https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.1.1
 [1.1.0]: https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.1.0
