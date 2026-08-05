@@ -4,9 +4,9 @@ Vision: **a generic, local-first multi-agent orchestrator that can grow from a
 portfolio-quality coding workflow into a personal daily driver without putting
 private context in the public repository.**
 
-## Current state — v1.1.2
+## Current state — v1.2.0
 
-Released 2026-08-03:
+Released 2026-08-05:
 
 - typed LangGraph state and explicit supervisor routing;
 - three-tier dispatcher with a `0.80` structured-routing threshold;
@@ -17,7 +17,11 @@ Released 2026-08-03:
 - token trimming, prompt caching, retries, and retained-output caps;
 - Claude Code and Codex subscription CLI delegators;
 - strict Codex JSON schemas and actionable CLI authentication failures;
-- 263 offline tests plus opt-in external integration tests.
+- 343 offline tests plus opt-in external integration tests;
+- `BackendAdapter` Protocol and registry for pluggable LLM providers;
+- `agent-os doctor` system diagnostics and TOML profile loader;
+- `ROUTER_MODE=direct-escalation` for architect-first workflows;
+- checkpoint `BackendBinding` persistence and `--force-rebind`.
 
 See [`CHANGELOG.md`](../CHANGELOG.md) for shipped patch details.
 
@@ -38,20 +42,7 @@ tests/ generic fixtures        sandbox/ working files
 
 ## Planned milestones
 
-### v1.2 — Backend portability
 
-- Introduce a `BackendAdapter` registry so architect and executor roles can
-  target additional CLI or API providers without touching graph code.
-- Add an `agent-os doctor` command that reports installed binaries,
-  authentication status, and configured roles in a machine-readable format.
-- Support named configuration profiles that select router, architect,
-  executor, and sandbox defaults in one switch.
-- Add `ROUTER_MODE=direct-escalation` to bypass Tier-2 structured routing when
-  the operator has already chosen an architect-first workflow.
-- Persist the resolved backend selection inside the SQLite checkpoint so a
-  resumed thread continues on the same provider it started with.
-- Add a candidate Antigravity CLI adapter behind the registry once its
-  noninteractive output and permission contract can be enforced.
 
 ### v1.3 — Pluggable skill packages and Hermes bridge
 
@@ -124,8 +115,7 @@ Maintained through GitHub settings:
 
 ## Ordering by return on effort
 
-1. v1.2 portability — unlock provider choice and configuration profiles.
-2. v1.3 skill packages and Hermes bridge — unlock reusable workflows.
+1. v1.3 skill packages and Hermes bridge — unlock reusable workflows.
 3. v1.4 vault adapter — unlock continuity.
 4. v1.6 REPL/TUI — improve daily interaction.
 5. v1.5 context profiles — deepen personalization after boundaries are proven.
