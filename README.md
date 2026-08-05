@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 263 passing](https://img.shields.io/badge/tests-263%20passing-brightgreen.svg)
+![Tests: 285 passing](https://img.shields.io/badge/tests-285%20passing-brightgreen.svg)
 [![Release](https://img.shields.io/github/v/release/simon-aibc/agent-os-langgraph)](https://github.com/simon-aibc/agent-os-langgraph/releases/latest)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
@@ -11,7 +11,7 @@ Production-style multi-agent orchestration built with LangGraph.
 Deterministic tools handle known work; ambiguous work escalates through an architect, human plan gate, and sandboxed executor.
 Typed state, durable SQLite checkpoints, MCP adapters, and an offline-tested streaming CLI demonstrate production engineering—not a tutorial chatbot.
 
-**Current release:** [v1.1.2](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.1.2) ·
+**Current release:** [v1.2.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.2.0) ·
 [Changelog](CHANGELOG.md) · [Product specification](docs/PRD.md) ·
 [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
 
@@ -144,6 +144,7 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 | R11 | Prompt caching, trimming, retries, and output caps | Makes model cost and retained data explicit boundaries |
 | v1.0.1 | Resume, Bash status, write docs, and retry fixes | Converts dogfood findings into regression-tested patches |
 | v1.1.x | Claude Code and Codex CLI delegators | Integrates subscription agents without pretending they are raw chat models |
+| v1.2.x | Backend portability and profiles | Resolves tight coupling via an explicit BackendAdapter Protocol |
 
 ## Extending Agent OS
 

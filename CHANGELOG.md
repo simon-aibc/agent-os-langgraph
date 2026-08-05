@@ -3,6 +3,23 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [1.2.0] — 2026-08-05
+
+### Added
+
+- `BackendAdapter` Protocol and `BackendRegistry` with collision detection and role validation.
+- `ClaudeCodeAdapter` and `CodexAdapter` migrated from hardcoded logic.
+- `agent-os doctor` command for system diagnostics (human-readable and JSON output).
+- TOML profile loader supporting inheritance and local overrides (`[profile.local]`).
+- `ROUTER_MODE=direct-escalation` to bypass Tier-2 routing for architect-first workflows.
+- Checkpoint `BackendBinding` persistence for resume conflict detection and `--force-rebind`.
+- Configurable Antigravity stub adapter for future testing.
+
+### Validation
+
+- 285 offline tests pass with warnings treated as errors.
+- Comprehensive smoke used the Claude Code CLI adapter for both architect and executor roles; Codex adapter coverage is verified by the offline test suite through the shared registry code path.
+
 ## [1.1.2] — 2026-08-03
 
 ### Fixed
