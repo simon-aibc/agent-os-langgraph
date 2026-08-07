@@ -19,6 +19,13 @@ class HotContextConfig(BaseModel):
     sources: list[str] = Field(default_factory=lambda: ["hot.md", "AI/Memory/*.md"])
 
 
+class SummaryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    threshold_tokens: int = 8000
+    keep_recent_n: int = 6
+    model: str | None = None
+
+
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -30,6 +37,7 @@ class Profile(BaseModel):
     description: str = ""
     extends: str | None = None
     hot_context: HotContextConfig | None = None
+    summary: SummaryConfig | None = None
 
 
 class ProfileFile(BaseModel):
@@ -46,6 +54,7 @@ class ResolvedProfile(BaseModel):
     executor: str | None = None
     sandbox: str
     hot_context: HotContextConfig
+    summary: SummaryConfig
 
 
 def _reject_secrets(data: Any, path: str = "") -> None:
@@ -184,7 +193,7 @@ def resolve_profile(
     # Apply child overrides
     child = profile_file.profiles[name]
     child_set = child.model_fields_set
-    for field in ("router", "architect", "executor", "sandbox", "hot_context"):
+    for field in ("router", "architect", "executor", "sandbox", "hot_context", "summary"):
         if field in child_set:
             resolved_data[field] = getattr(child, field)
             
@@ -218,4 +227,5 @@ def resolve_profile(
         executor=resolved_data.get("executor"),
         sandbox=resolved_data["sandbox"],
         hot_context=resolved_data.get("hot_context") or HotContextConfig(),
+        summary=resolved_data.get("summary") or SummaryConfig(),
     )

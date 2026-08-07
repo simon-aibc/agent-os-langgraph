@@ -1,7 +1,7 @@
+import contextlib
 import datetime as dt
 import os
 import sqlite3
-import contextlib
 from typing import Any
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB

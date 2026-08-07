@@ -41,7 +41,7 @@ def test_architect_node_logic(mock_build_agent):
     mock_agent.invoke.assert_called_once_with(
         {"messages": [HumanMessage(content="do architecture")]}
     )
-    assert result == {"plan": brief, "hot_context": ""}
+    assert result == {"plan": brief, "hot_context": "", "conversation_summary": None, "messages": []}
 
 
 @patch("agent_os.nodes.architect.build_architect_agent")
@@ -99,7 +99,7 @@ def test_architect_node_cli_backend_routing(monkeypatch):
         assert isinstance(passed_state["messages"][0], HumanMessage)
         assert passed_state["messages"][0].content == "do architecture"
         assert state["messages"] == []
-        assert result == {"plan": brief, "hot_context": ""}
+        assert result == {"plan": brief, "hot_context": "", "conversation_summary": None, "messages": []}
 
 
 def test_architect_node_cli_backend_routing_claude(monkeypatch):
@@ -155,7 +155,7 @@ def test_architect_node_cli_retry_transient_error(monkeypatch):
             result = architect_node(state)
 
         assert call_count == 2
-        assert result == {"plan": brief, "hot_context": ""}
+        assert result == {"plan": brief, "hot_context": "", "conversation_summary": None, "messages": []}
 
 
 def test_architect_node_cli_no_retry_permanent_error(monkeypatch):
