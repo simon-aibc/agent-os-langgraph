@@ -252,3 +252,84 @@ def test_gbrain_real_smoke():
     note = gbrain.read_note(hit["ref"])
     assert note["content"]
     assert isinstance(note["links"], list)
+
+
+def test_markdown_write_create(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    md = MarkdownVaultConnector(str(vault))
+    
+    res = md.write_note("new_note", "Hello World", mode="create")
+    assert res.committed is True
+    assert res.mode == "create"
+    assert res.ref == "new_note.md"
+    
+    content = (vault / "new_note.md").read_text(encoding="utf-8")
+    assert content == "Hello World"
+
+
+def test_markdown_write_create_conflict(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "existing.md").write_text("old", encoding="utf-8")
+    md = MarkdownVaultConnector(str(vault))
+    
+    with pytest.raises(FileExistsError):
+        md.write_note("existing.md", "new", mode="create")
+
+
+def test_markdown_write_append(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    md = MarkdownVaultConnector(str(vault))
+    
+    md.write_note("log.md", "Line 1", mode="append")
+    md.write_note("log.md", "Line 2", mode="append")
+    
+    content = (vault / "log.md").read_text(encoding="utf-8")
+    assert content == "Line 1\nLine 2"
+
+
+def test_markdown_write_overwrite(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "file.md").write_text("old data", encoding="utf-8")
+    md = MarkdownVaultConnector(str(vault))
+    
+    res = md.write_note("file.md", "new data", mode="overwrite")
+    assert res.committed is True
+    
+    content = (vault / "file.md").read_text(encoding="utf-8")
+    assert content == "new data"
+
+
+def test_markdown_write_frontmatter_roundtrip(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    md = MarkdownVaultConnector(str(vault))
+    
+    md.write_note("doc", "Body text", frontmatter={"title": "Doc Title", "agent": "test"}, mode="create")
+    
+    note = md.read_note("doc.md")
+    assert note["frontmatter"]["title"] == "Doc Title"
+    assert note["frontmatter"]["agent"] == "test"
+    assert note["content"] == "---\ntitle: Doc Title\nagent: test\n---\n\nBody text"
+    
+def test_markdown_write_sandbox_escape(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    md = MarkdownVaultConnector(str(vault))
+    
+    with pytest.raises(ValueError, match="Path traversal"):
+        md.write_note("../evil", "hack", mode="create")
+
+def test_writable_memory_protocol(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    md = MarkdownVaultConnector(str(vault))
+    
+    assert hasattr(md, "write_note")
+    assert hasattr(md, "describe_write_side_effect")
+    
+    gbrain = GbrainConnector()
+    assert not hasattr(gbrain, "write_note")
