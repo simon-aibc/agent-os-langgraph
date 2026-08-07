@@ -60,6 +60,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("--profile", help="Named configuration profile to use.")
     p_chat.add_argument("--force-rebind", action="store_true", help="Replace a persisted backend binding when resuming.")
 
+    p_sessions = subparsers.add_parser("sessions", help="Manage chat sessions")
+    s_sub = p_sessions.add_subparsers(dest="session_command")
+    s_sub.add_parser("list", help="List all sessions")
+    
+    s_inspect = s_sub.add_parser("inspect", help="Inspect a session")
+    s_inspect.add_argument("thread_id", help="Thread ID")
+    
+    s_delete = s_sub.add_parser("delete", help="Delete a session")
+    s_delete.add_argument("thread_id", help="Thread ID")
+    
+    s_resume = s_sub.add_parser("resume", help="Resume a session")
+    s_resume.add_argument("thread_id", help="Thread ID")
+
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
     return parser
@@ -513,6 +526,14 @@ async def _chat_loop(
                 _print_resume_hint(formatter, thread_id)
                 return 2
             graph_input = Command(resume=feedback)
+
+        from agent_os.sessions import upsert_session
+        title = None
+        if not _checkpoint_exists(snapshot) and isinstance(graph_input, dict) and "messages" in graph_input:
+            msg = graph_input["messages"][0]
+            content = msg[1] if isinstance(msg, tuple) else msg.content
+            title = content[:50] + ("..." if len(content) > 50 else "")
+        upsert_session(thread_id, title)
             
     return 0
 
@@ -528,12 +549,61 @@ async def async_main(
     if argv is None:
         argv = sys.argv[1:]
 
-    # Normalize argv: if first meaningful token isn't "run", "doctor", or "chat", prepend "run"
+    # Normalize argv: if first meaningful token isn't "run", "doctor", "chat", or "sessions", prepend "run"
     # This also routes naked -h/--help to 'run --help' to preserve legacy help visibility.
-    if not argv or argv[0] not in ("run", "doctor", "chat"):
+    if not argv or argv[0] not in ("run", "doctor", "chat", "sessions"):
         argv = ["run"] + argv
 
     args = build_parser().parse_args(argv)
+
+    if args.command == "sessions":
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+        from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
+        from agent_os.sessions import delete_session, get_session, list_sessions
+        
+        formatter = EventFormatter(console=console)
+        if args.session_command == "list":
+            sessions = list_sessions()
+            for s in sessions:
+                formatter.print_info(f"ID: {s['thread_id']} | Turns: {s['turn_count']} | Last: {s['last_turn_at'][:16]} | {s['title']}")
+            return 0
+        elif args.session_command == "resume":
+            # Delegate to chat
+            args.command = "chat"
+            args.resume = True
+            args.thread_id = args.thread_id
+            args.task = None
+            args.verbose = False
+            args.sandbox = None
+            args.profile = None
+            args.force_rebind = False
+        elif args.session_command == "inspect":
+            session = get_session(args.thread_id)
+            if not session:
+                formatter.print_error(f"Session {args.thread_id} not found in index.")
+                return 1
+            formatter.print_info(f"Session: {args.thread_id}")
+            formatter.print_info(f"Title: {session['title']}")
+            formatter.print_info(f"Turns: {session['turn_count']}")
+            return 0
+        elif args.session_command == "delete":
+            session = get_session(args.thread_id)
+            if not session:
+                formatter.print_error(f"Session {args.thread_id} not found.")
+                return 1
+            formatter.print_human_prompt(f"Are you sure you want to delete session '{args.thread_id}'? This will permanently delete the checkpoint. (y/N)")
+            ans = input_fn("> ")
+            if ans.lower() in ("y", "yes"):
+                database_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
+                async with AsyncSqliteSaver.from_conn_string(database_path) as saver:
+                    await saver.adelete_thread(args.thread_id)
+                delete_session(args.thread_id)
+                formatter.print_info(f"Session {args.thread_id} deleted.")
+                return 0
+            else:
+                formatter.print_info("Deletion cancelled.")
+                return 0
 
     if args.command == "doctor":
         from agent_os.cli.doctor import run_doctor
