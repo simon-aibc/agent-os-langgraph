@@ -61,6 +61,9 @@ dev = [
 
 [tool.pytest.ini_options]
 addopts = "-m 'not integration'"
+filterwarnings = [
+    "error",
+]
 markers = [
     "integration: requires explicitly enabled external services or CLI tools",
 ]

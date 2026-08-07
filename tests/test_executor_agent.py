@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from agent_os.agents.executor import build_executor_agent
-from agent_os.schemas import ExecutorReport
+from agent_os.schemas import CodingResult
 from agent_os.tools import bash, edit_file, run_tests
 
 
@@ -22,10 +22,10 @@ def test_build_executor_agent_factory(mock_create):
     kwargs = mock_create.call_args.kwargs
     assert kwargs["model"] == mock_llm
     assert kwargs["tools"] == [edit_file, bash, run_tests]
-    assert kwargs["response_format"] == ExecutorReport
+    assert kwargs["response_format"] == CodingResult
     assert "executor_react_agent" in kwargs.get("name", "")
     assert "sandbox" in kwargs["system_prompt"].lower()
-    assert "architectbrief" in kwargs["system_prompt"].lower()
+    assert "planartifact" in kwargs["system_prompt"].lower()
     assert "diff" in kwargs["system_prompt"].lower()
 
 
@@ -41,11 +41,11 @@ class DeterministicFakeExecutorLLM(BaseChatModel):
             content="",
             tool_calls=[
                 {
-                    "name": "ExecutorReport",
+                    "name": "CodingResult",
                     "args": {
                         "diff": "mock diff",
                         "verify_output": "mock verify",
-                        "success": True,
+                        "status": "completed",
                     },
                     "id": "executor-report-1",
                     "type": "tool_call",
@@ -71,7 +71,7 @@ def test_executor_agent_e2e_fake_llm():
 
     assert "structured_response" in result
     report = result["structured_response"]
-    assert isinstance(report, ExecutorReport)
+    assert isinstance(report, CodingResult)
     assert report.diff == "mock diff"
     assert report.verify_output == "mock verify"
-    assert report.success is True
+    assert report.status == "completed"

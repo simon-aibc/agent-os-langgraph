@@ -5,7 +5,12 @@ from agent_os.agents.executor import build_executor_agent
 from agent_os.cli_backends import CliBackendError
 from agent_os.llm import invoke_with_llm_retry
 from agent_os.messages import trim_agent_messages
-from agent_os.schemas import ArchitectBrief, ExecutorReport
+from agent_os.schemas import (
+    ArchitectBrief,
+    ExecutionResult,
+    ExecutorReport,
+    PlanArtifact,
+)
 from agent_os.state import SimonState
 
 
@@ -17,8 +22,8 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
     Returns ExecutorReport in executor_output.
     """
     plan = state.get("plan")
-    if not isinstance(plan, ArchitectBrief):
-        raise ValueError("Executor requires an ArchitectBrief plan.")
+    if not isinstance(plan, (ArchitectBrief, PlanArtifact)):
+        raise ValueError("Executor requires a PlanArtifact or ArchitectBrief plan.")
 
     user_message = f"Please execute this ArchitectBrief:\n{plan.model_dump_json()}"
     trimmed = trim_agent_messages(state.get("messages", []), user_message)
@@ -46,8 +51,8 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
     result = invoke_with_llm_retry(lambda: agent.invoke({"messages": trimmed}))
 
     if "structured_response" not in result or not isinstance(
-        result["structured_response"], ExecutorReport
+        result["structured_response"], (ExecutorReport, ExecutionResult)
     ):
-        raise ValueError("Executor agent failed to return a valid ExecutorReport.")
+        raise ValueError("Executor agent failed to return a valid ExecutionResult or ExecutorReport.")
 
     return {"executor_output": result["structured_response"]}

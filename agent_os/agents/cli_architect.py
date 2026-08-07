@@ -4,7 +4,7 @@ from pathlib import Path
 
 from agent_os.backends import get_default_backend_registry
 from agent_os.sandbox import get_sandbox_root
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import PlanArtifact
 from agent_os.state import SimonState
 
 MAX_INVENTORY_FILES = 1000
@@ -82,14 +82,14 @@ def _build_architect_prompt(state: SimonState) -> str:
     if feedback and feedback.startswith("rejected:"):
         prompt += f"Previous plan was rejected with feedback:\n{feedback}\n\n"
 
-    prompt += "Please analyze the task and return a structured plan matching the ArchitectBrief schema. Do not execute any code directly."
+    prompt += "Please analyze the task and return a structured plan matching the CodingPlan schema. Do not execute any code directly."
 
     return prompt
 
 
 def build_cli_architect_invoker(
     backend: str,
-) -> Callable[[SimonState], ArchitectBrief]:
+) -> Callable[[SimonState], PlanArtifact]:
     """
     Returns a callable that executes the CLI architect node logic for a specific backend.
     Supported backends: 'claude-code', 'codex'.

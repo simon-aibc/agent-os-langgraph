@@ -3,7 +3,12 @@ from typing import Literal
 
 from langgraph.graph import END
 
-from agent_os.schemas import ArchitectBrief, ExecutorReport
+from agent_os.schemas import (
+    ArchitectBrief,
+    ExecutionResult,
+    ExecutorReport,
+    PlanArtifact,
+)
 from agent_os.state import SimonState
 
 Route = Literal["architect", "executor", "tool", "end"]
@@ -46,8 +51,12 @@ def route_from_state(state: SimonState) -> Route:
     executor_output = state.get("executor_output")
     human_feedback = state.get("human_feedback")
 
-    # a. successful ExecutorReport -> end
-    if isinstance(executor_output, ExecutorReport) and executor_output.success is True:
+    # a. successful ExecutorReport or generic ExecutionResult -> end
+    if isinstance(executor_output, ExecutionResult):
+        if getattr(executor_output, "status", None) == "completed" or getattr(executor_output, "success", None) is True:
+            return "end"
+    # Legacy check for ExecutorReport before it becomes a subclass
+    elif isinstance(executor_output, ExecutorReport) and executor_output.success is True:
         return "end"
 
     # b. human_feedback == "approved" -> executor
@@ -62,8 +71,8 @@ def route_from_state(state: SimonState) -> Route:
     if isinstance(executor_output, str):
         return "end"
 
-    # ArchitectBrief without a decision -> end
-    if isinstance(state.get("plan"), ArchitectBrief):
+    # PlanArtifact without a decision -> end
+    if isinstance(state.get("plan"), (PlanArtifact, ArchitectBrief)):
         return "end"
 
     # When router_escalated is True, supervisor must route to architect

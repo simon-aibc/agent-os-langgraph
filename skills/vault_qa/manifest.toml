@@ -1,0 +1,9 @@
+[skill]
+name = "vault_qa"
+version = "0.1.0"
+description = "Hỏi đáp kiến thức từ Second Brain (Vault) thông qua MemoryConnector"
+
+[[skill.handlers]]
+match = ["hỏi vault", "vault qa", "tra cứu"]
+entrypoint = "handlers:vault_qa"
+connectors = ["memory"]

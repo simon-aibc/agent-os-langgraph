@@ -5,7 +5,7 @@ from agent_os.routing import (
     build_runtime_config,
     route_from_state,
 )
-from agent_os.schemas import ArchitectBrief, ExecutorReport
+from agent_os.schemas import ArchitectBrief, CodingPlan, CodingResult, ExecutorReport
 
 
 def test_default_runtime_config_allows_workflow_termination():
@@ -29,6 +29,16 @@ def test_successful_executor_report_routes_to_end():
         "task": "A normal task",
         "plan": None,
         "executor_output": ExecutorReport(diff="done", verify_output="ok", success=True),
+        "hot_context": None,
+    }
+    assert route_from_state(state) == "end"
+
+def test_successful_coding_result_routes_to_end():
+    state = {
+        "messages": [],
+        "task": "A normal task",
+        "plan": None,
+        "executor_output": CodingResult(status="completed", diff="done", verify_output="ok"),
         "hot_context": None,
     }
     assert route_from_state(state) == "end"
@@ -128,6 +138,24 @@ def test_architect_brief_without_feedback_routes_to_end():
         "messages": [],
         "task": "do something",
         "plan": ArchitectBrief(
+            files=["demo.py"],
+            changes=["add logging"],
+            verify_cmd="pytest",
+        ),
+        "executor_output": None,
+        "human_feedback": None,
+        "hot_context": None,
+    }
+
+    assert route_from_state(state) == "end"
+
+
+def test_coding_plan_without_feedback_routes_to_end():
+    state = {
+        "messages": [],
+        "task": "do something",
+        "plan": CodingPlan(
+            summary="test",
             files=["demo.py"],
             changes=["add logging"],
             verify_cmd="pytest",

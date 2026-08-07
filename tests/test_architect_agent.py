@@ -42,7 +42,7 @@ class DeterministicFakeLLM(BaseChatModel):
             content="",
             tool_calls=[
                 {
-                    "name": "ArchitectBrief",
+                    "name": "CodingPlan",
                     "args": {
                         "files": ["src/app.py"],
                         "changes": ["Fix bug"],

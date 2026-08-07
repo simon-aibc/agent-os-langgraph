@@ -90,7 +90,7 @@ def test_build_architect_prompt_basic(monkeypatch, tmp_path):
     assert "Task:\ndo work" in prompt
     assert "- code.py" in prompt
     assert "rejected:" not in prompt
-    assert "ArchitectBrief" in prompt
+    assert "CodingPlan" in prompt
 
 
 def test_build_architect_prompt_rejection_feedback(monkeypatch, tmp_path):
@@ -123,7 +123,7 @@ def test_build_cli_architect_invoker_claude_success(monkeypatch, tmp_path):
     from unittest.mock import MagicMock
 
     from agent_os.agents.cli_architect import build_cli_architect_invoker
-    from agent_os.schemas import ArchitectBrief
+    from agent_os.schemas import CodingPlan
 
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
@@ -134,10 +134,11 @@ def test_build_cli_architect_invoker_claude_success(monkeypatch, tmp_path):
 
     with patch("agent_os.backends.run_cli_command") as mock_run:
         # Mock run_cli_command returning stream-json style payload
-        mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"files": ["f"], "changes": ["c"], "verify_cmd": "v"}}')
+        mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"summary": "s", "files": ["f"], "changes": ["c"], "verify_cmd": "v"}}')
         brief = invoker(state)
 
-        assert isinstance(brief, ArchitectBrief)
+        assert isinstance(brief, CodingPlan)
+        assert brief.summary == "s"
         assert brief.files == ["f"]
         assert brief.verify_cmd == "v"
 
@@ -146,7 +147,7 @@ def test_build_cli_architect_invoker_codex_success(monkeypatch, tmp_path):
     import json
 
     from agent_os.agents.cli_architect import build_cli_architect_invoker
-    from agent_os.schemas import ArchitectBrief
+    from agent_os.schemas import CodingPlan
 
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
@@ -161,13 +162,14 @@ def test_build_cli_architect_invoker_codex_success(monkeypatch, tmp_path):
         idx = args.index("--output-last-message")
         out_path = args[idx + 1]
         with open(out_path, "w") as f:
-            json.dump({"files": ["f2"], "changes": ["c2"], "verify_cmd": "v2"}, f)
+            json.dump({"summary": "s2", "files": ["f2"], "changes": ["c2"], "verify_cmd": "v2"}, f)
         return MagicMock()
 
     with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
         brief = invoker(state)
 
-        assert isinstance(brief, ArchitectBrief)
+        assert isinstance(brief, CodingPlan)
+        assert brief.summary == "s2"
         assert brief.files == ["f2"]
         assert brief.verify_cmd == "v2"
 
@@ -186,7 +188,7 @@ def test_build_cli_architect_invoker_claude_security_contract(monkeypatch, tmp_p
     state = {"task": "test", "human_feedback": None}
 
     with patch("agent_os.backends.run_cli_command") as mock_run:
-        mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"files": [], "changes": [], "verify_cmd": ""}}')
+        mock_run.return_value = MagicMock(stdout='{"type": "result", "structured_output": {"summary": "s", "files": [], "changes": [], "verify_cmd": ""}}')
         invoker(state)
 
         args = mock_run.call_args.args[1]
@@ -199,7 +201,7 @@ def test_build_cli_architect_invoker_claude_security_contract(monkeypatch, tmp_p
         # Claude must receive the inline JSON schema
         assert "--json-schema" in args
         schema = json.loads(args[args.index("--json-schema") + 1])
-        assert schema["title"] == "ArchitectBrief"
+        assert schema["title"] == "CodingPlan"
         assert "additionalProperties" not in schema
 
 
@@ -241,7 +243,7 @@ def test_build_cli_architect_invoker_codex_security_contract(monkeypatch, tmp_pa
         output_file = args[idx_output + 1]
 
         with open(output_file, "w") as f:
-            json.dump({"files": [], "changes": [], "verify_cmd": ""}, f)
+            json.dump({"summary": "s", "files": [], "changes": [], "verify_cmd": ""}, f)
 
         return MagicMock()
 
@@ -298,7 +300,7 @@ def test_build_cli_architect_invoker_invalid_payload(monkeypatch, tmp_path):
         with pytest.raises(ValueError) as exc_info:
             invoker(state)
 
-        assert "Failed to validate claude-code structured output as ArchitectBrief" in str(exc_info.value)
+        assert "Failed to validate claude-code structured output as CodingPlan" in str(exc_info.value)
         # Should not leak raw payload in validation error message
         assert "structured_output" not in str(exc_info.value).lower()
 

@@ -7,12 +7,17 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from agent_os.schemas import (
+    ActionProposal,
     ArchitectBrief,
     BashResult,
+    CodingPlan,
+    CodingResult,
     EditFileResult,
+    ExecutionResult,
     ExecutorReport,
     GrepMatch,
     GrepResult,
+    PlanArtifact,
     ReadFileResult,
     RouterDecision,
     ToolExecutionResult,
@@ -32,6 +37,11 @@ CHECKPOINT_MODEL_TYPES = (
     RouterDecision,
     ToolExecutionResult,
     BackendBinding,
+    PlanArtifact,
+    ExecutionResult,
+    CodingPlan,
+    CodingResult,
+    ActionProposal,
 )
 
 

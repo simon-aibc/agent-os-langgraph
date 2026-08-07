@@ -1,6 +1,6 @@
 from langgraph.types import interrupt
 
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import ArchitectBrief, PlanArtifact
 from agent_os.state import SimonState
 
 
@@ -27,8 +27,8 @@ def normalize_human_feedback(value: object) -> str:
 
 def human_gate_node(state: SimonState) -> dict[str, str]:
     plan = state.get("plan")
-    if not isinstance(plan, ArchitectBrief):
-        raise ValueError("human_gate_node requires an ArchitectBrief in state['plan']")
+    if not isinstance(plan, (ArchitectBrief, PlanArtifact)):
+        raise ValueError("human_gate_node requires a PlanArtifact or ArchitectBrief in state['plan']")
 
     prompt = (
         "Review the proposed implementation plan.\n\n"

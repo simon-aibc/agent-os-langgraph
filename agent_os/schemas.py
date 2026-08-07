@@ -1,10 +1,6 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
-
-
-class ArchitectBrief(BaseModel):
-    files: list[str]
-    changes: list[str]
-    verify_cmd: str
 
 
 class ReadFileResult(BaseModel):
@@ -21,11 +17,6 @@ class GrepMatch(BaseModel):
 class GrepResult(BaseModel):
     matches: list[GrepMatch]
 
-
-class ExecutorReport(BaseModel):
-    diff: str
-    verify_output: str
-    success: bool
 
 
 class EditFileResult(BaseModel):
@@ -56,3 +47,49 @@ class ToolExecutionResult(BaseModel):
     tool: str
     output: str
     success: bool
+
+
+class ActionProposal(BaseModel):
+    tool: str
+    arguments: dict[str, object] = Field(default_factory=dict)
+    reason: str = ""
+    side_effect: Literal["none", "read", "write", "network", "payment"] = "none"
+
+
+class PlanArtifact(BaseModel):
+    summary: str = ""
+    steps: list[str] = Field(default_factory=list)
+    proposed_actions: list[ActionProposal] = Field(default_factory=list)
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
+class ExecutionResult(BaseModel):
+    status: Literal["completed", "failed", "cancelled", "waiting"]
+    outputs: dict[str, object] = Field(default_factory=dict)
+    artifacts: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    usage: dict[str, float] = Field(default_factory=dict)
+
+    @property
+    def success(self) -> bool:
+        return self.status == "completed"
+
+
+class CodingPlan(PlanArtifact):
+    files: list[str]
+    changes: list[str]
+    verify_cmd: str
+
+
+class CodingResult(ExecutionResult):
+    diff: str = ""
+    verify_output: str = ""
+
+
+ArchitectBrief = CodingPlan
+
+class ExecutorReport(CodingResult):
+    def __init__(self, **data):
+        if "success" in data and "status" not in data:
+            data["status"] = "completed" if data.pop("success") else "failed"
+        super().__init__(**data)
