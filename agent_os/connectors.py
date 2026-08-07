@@ -139,6 +139,17 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
             res[k.strip()] = v.strip()
     return res
 
+def _serialize_markdown_with_frontmatter(content: str, frontmatter: dict[str, Any]) -> str:
+    if not frontmatter:
+        return content
+    fm_lines = ["---"]
+    for k, v in frontmatter.items():
+        fm_lines.append(f"{k}: {v}")
+    fm_lines.append("---")
+    fm_lines.append("")
+    fm_lines.append(content)
+    return "\n".join(fm_lines)
+
 class MarkdownVaultConnector(MemoryConnector):
     def __init__(self, root_path: str):
         self.root_path = Path(root_path).resolve()
@@ -178,13 +189,7 @@ class MarkdownVaultConnector(MemoryConnector):
             
         final_content = content
         if mode in ("create", "overwrite") and frontmatter:
-            fm_lines = ["---"]
-            for k, v in frontmatter.items():
-                fm_lines.append(f"{k}: {v}")
-            fm_lines.append("---")
-            fm_lines.append("")
-            fm_lines.append(content)
-            final_content = "\n".join(fm_lines)
+            final_content = _serialize_markdown_with_frontmatter(content, frontmatter)
             
         if mode == "append":
             file_exists = path.exists() and path.stat().st_size > 0
@@ -401,3 +406,42 @@ class GbrainConnector(MemoryConnector):
                         "title": page.get("title")
                     })
         return results
+
+    def describe_write_side_effect(self, ref: str, mode: str) -> str:
+        return f"put_page to gbrain slug '{ref}' (upsert)"
+
+    def write_note(
+        self,
+        ref: str,
+        content: str,
+        frontmatter: dict[str, Any] | None = None,
+        mode: Literal["create", "append", "overwrite"] = "create",
+    ) -> MemoryWriteResult:
+        if mode == "append":
+            raise NotImplementedError("GbrainConnector does not support append mode natively yet. Use read then overwrite.")
+            
+        if not ref.startswith("agentos/"):
+            ref = f"agentos/{ref}"
+            
+        merged_fm = {}
+        if frontmatter:
+            merged_fm.update(frontmatter)
+            
+        import datetime
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        
+        merged_fm.setdefault("agent", "agent-os")
+        merged_fm.setdefault("created", now)
+        merged_fm.setdefault("via", "agent-os-v1.4")
+        merged_fm.setdefault("source", "default")
+        
+        final_content = _serialize_markdown_with_frontmatter(content, merged_fm)
+        
+        self._call_rpc("tools/call", {"name": "put_page", "arguments": {"slug": ref, "content": final_content}})
+        
+        return MemoryWriteResult(
+            ref=ref,
+            mode=mode,
+            bytes_written=len(final_content.encode("utf-8")),
+            committed=True
+        )
