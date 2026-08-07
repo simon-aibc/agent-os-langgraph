@@ -644,12 +644,17 @@ async def async_main(
 
     if args.command == "brief":
         import datetime
+
+        from agent_os.backends import build_default_registry
         from agent_os.brief import generate_brief, write_brief
         from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
-        from agent_os.sessions import list_sessions
-        from agent_os.backends import build_default_registry
-        from agent_os.profiles import load_profiles, resolve_profile, select_profile_name
+        from agent_os.profiles import (
+            load_profiles,
+            resolve_profile,
+            select_profile_name,
+        )
         from agent_os.sandbox import get_sandbox_root
+        from agent_os.sessions import list_sessions
         
         # 1. Resolve connector
         connector_name = args.connector or os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
