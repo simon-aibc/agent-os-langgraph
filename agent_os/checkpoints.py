@@ -17,6 +17,7 @@ from agent_os.schemas import (
     ExecutorReport,
     GrepMatch,
     GrepResult,
+    MemoryWriteProposal,
     PlanArtifact,
     ReadFileResult,
     RouterDecision,
@@ -42,6 +43,7 @@ CHECKPOINT_MODEL_TYPES = (
     CodingPlan,
     CodingResult,
     ActionProposal,
+    MemoryWriteProposal,
 )
 
 
