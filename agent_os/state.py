@@ -48,6 +48,7 @@ class SimonState(TypedDict):
     executor_output: ResultField
     human_feedback: str | None
     hot_context: str | None
+    conversation_summary: NotRequired[str | None]
 
     # R7a fields
     tool_result: NotRequired[ToolExecutionResult | None]

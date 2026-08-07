@@ -52,6 +52,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace a persisted backend binding when resuming.",
     )
 
+    p_chat = subparsers.add_parser("chat", help="Start an interactive conversational loop")
+    p_chat.add_argument("--thread-id", help="Thread ID to persist checkpoint state. Generated if absent.")
+    p_chat.add_argument("--resume", action="store_true", help="Resume from the last checkpoint.")
+    p_chat.add_argument("-v", "--verbose", action="store_true", help="Show node progress.")
+    p_chat.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
+    p_chat.add_argument("--profile", help="Named configuration profile to use.")
+    p_chat.add_argument("--force-rebind", action="store_true", help="Replace a persisted backend binding when resuming.")
+
+    p_sessions = subparsers.add_parser("sessions", help="Manage chat sessions")
+    s_sub = p_sessions.add_subparsers(dest="session_command")
+    s_sub.add_parser("list", help="List all sessions")
+    
+    s_inspect = s_sub.add_parser("inspect", help="Inspect a session")
+    s_inspect.add_argument("thread_id", help="Thread ID")
+    
+    s_delete = s_sub.add_parser("delete", help="Delete a session")
+    s_delete.add_argument("thread_id", help="Thread ID")
+    
+    s_resume = s_sub.add_parser("resume", help="Resume a session")
+    s_resume.add_argument("thread_id", help="Thread ID")
+
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
     return parser
@@ -74,6 +95,7 @@ def _initial_state(
         "executor_output": None,
         "human_feedback": None,
         "hot_context": None,
+        "conversation_summary": None,
         "backend_binding": backend_binding,
     }
 
@@ -370,6 +392,182 @@ async def _run_graph(
             return 2
         graph_input = Command(resume=feedback)
 
+async def _chat_loop(
+    graph: Any,
+    *,
+    resume: bool,
+    verbose: bool,
+    formatter: EventFormatter,
+    input_fn: InputFunction,
+    thread_id: str,
+    backend_binding: BackendBinding,
+    force_rebind: bool,
+    registry: Any,
+) -> int:
+    from langchain_core.messages import HumanMessage
+    from langgraph.types import Command
+
+    from agent_os.routing import build_runtime_config
+
+    config = build_runtime_config(thread_id)
+
+    if resume:
+        snapshot = await graph.aget_state(config)
+        if not _checkpoint_exists(snapshot):
+            formatter.print_error(f"Checkpoint not found for thread '{thread_id}'.")
+            return 2
+        snapshot, binding_exit = await _prepare_resume_binding(
+            graph, config, snapshot, backend_binding, force_rebind, registry, formatter
+        )
+        if binding_exit is not None:
+            return binding_exit
+        assert snapshot is not None
+        
+        interrupt_prompt = _pending_interrupt(snapshot)
+        if interrupt_prompt is not None:
+            try:
+                feedback = _read_feedback(interrupt_prompt, formatter, input_fn)
+            except KeyboardInterrupt:
+                formatter.print_error("Interrupted by Ctrl+C.")
+                _print_resume_hint(formatter, thread_id)
+                return 130
+            except EOFError:
+                formatter.print_error("Input closed while awaiting human feedback.")
+                _print_resume_hint(formatter, thread_id)
+                return 2
+            graph_input = Command(resume=feedback)
+            try:
+                await _stream_pass(graph, graph_input, config, formatter, verbose)
+            except KeyboardInterrupt:
+                formatter.print_error("Interrupted by Ctrl+C.")
+                _print_resume_hint(formatter, thread_id)
+                return 130
+            except EOFError:
+                formatter.print_error("Input closed.")
+                _print_resume_hint(formatter, thread_id)
+                return 2
+            except Exception as error:
+                formatter.print_error(f"Workflow failed: {error}")
+                if verbose:
+                    traceback.print_exc(file=formatter.console.file)
+                return 1
+
+    while True:
+        try:
+            user_input = input_fn("> ")
+            if user_input.strip() in ("/exit", "exit"):
+                break
+        except KeyboardInterrupt:
+            formatter.print_error("Interrupted by Ctrl+C.")
+            _print_resume_hint(formatter, thread_id)
+            return 130
+        except EOFError:
+            break
+            
+        snapshot = await graph.aget_state(config)
+        
+        if not _checkpoint_exists(snapshot):
+            # First turn: initialize state with the first message as task
+            graph_input = _initial_state(user_input, backend_binding)
+        else:
+            graph_input = {"messages": [HumanMessage(content=user_input)]}
+            
+        while True:
+            try:
+                await _stream_pass(
+                    graph,
+                    graph_input,
+                    config,
+                    formatter,
+                    verbose,
+                )
+                snapshot = await graph.aget_state(config)
+            except KeyboardInterrupt:
+                formatter.print_error("Interrupted by Ctrl+C.")
+                _print_resume_hint(formatter, thread_id)
+                return 130
+            except EOFError:
+                formatter.print_error("Input closed while awaiting human feedback.")
+                _print_resume_hint(formatter, thread_id)
+                return 2
+            except ValueError as error:
+                if _is_llm_configuration_error(error):
+                    formatter.print_error("Missing or invalid LLM configuration.")
+                else:
+                    formatter.print_error(f"Workflow error: {error}")
+                if verbose:
+                    traceback.print_exc(file=formatter.console.file)
+                return 1
+            except Exception as error:
+                formatter.print_error(f"Workflow failed: {error}")
+                if verbose:
+                    traceback.print_exc(file=formatter.console.file)
+                return 1
+
+            if not getattr(snapshot, "next", ()):
+                if _completed_with_tool_failure(snapshot):
+                    return 1
+                break
+
+            interrupt_prompt = _pending_interrupt(snapshot)
+            if interrupt_prompt is None:
+                formatter.print_error("Workflow paused at an unsupported node; checkpoint preserved.")
+                _print_resume_hint(formatter, thread_id)
+                return 1
+
+            try:
+                feedback = _read_feedback(interrupt_prompt, formatter, input_fn)
+            except KeyboardInterrupt:
+                formatter.print_error("Interrupted by Ctrl+C.")
+                _print_resume_hint(formatter, thread_id)
+                return 130
+            except EOFError:
+                formatter.print_error("Input closed while awaiting human feedback.")
+                _print_resume_hint(formatter, thread_id)
+                return 2
+            graph_input = Command(resume=feedback)
+
+        from agent_os.sessions import upsert_session
+        title = None
+        if not _checkpoint_exists(snapshot) and isinstance(graph_input, dict) and "messages" in graph_input:
+            msg = graph_input["messages"][0]
+            content = msg[1] if isinstance(msg, tuple) else msg.content
+            title = content[:50] + ("..." if len(content) > 50 else "")
+        upsert_session(thread_id, title)
+            
+    # On exit, write session log if summary exists
+    try:
+        final_snapshot = await graph.aget_state(config)
+        summary = final_snapshot.values.get("conversation_summary")
+        if summary:
+            import os
+
+            from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
+            from agent_os.session_log import write_session_summary
+            from agent_os.sessions import _get_db
+            
+            connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
+            if connector_name == "gbrain":
+                connector = GbrainConnector()
+            else:
+                vault_path = os.getenv("AGENT_OS_VAULT_PATH", backend_binding.sandbox_root)
+                connector = MarkdownVaultConnector(vault_path)
+                
+            with _get_db() as db:
+                c = db.execute("SELECT turn_count, created_at, title FROM sessions WHERE thread_id = ?", (thread_id,))
+                row = c.fetchone()
+                
+            session_meta = {
+                "turn_count": row[0] if row else 0,
+                "created_at": row[1] if row else "",
+                "title": row[2] if row else "Untitled Session"
+            }
+            write_session_summary(connector, thread_id, summary, session_meta)
+    except Exception as e:
+        formatter.print_warning(f"Failed to write session log: {e}")
+
+    return 0
+
 
 async def async_main(
     argv: list[str] | None = None,
@@ -382,12 +580,61 @@ async def async_main(
     if argv is None:
         argv = sys.argv[1:]
 
-    # Normalize argv: if first meaningful token isn't "run" or "doctor", prepend "run"
+    # Normalize argv: if first meaningful token isn't "run", "doctor", "chat", or "sessions", prepend "run"
     # This also routes naked -h/--help to 'run --help' to preserve legacy help visibility.
-    if not argv or argv[0] not in ("run", "doctor"):
+    if not argv or argv[0] not in ("run", "doctor", "chat", "sessions"):
         argv = ["run"] + argv
 
     args = build_parser().parse_args(argv)
+
+    if args.command == "sessions":
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+        from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
+        from agent_os.sessions import delete_session, get_session, list_sessions
+        
+        formatter = EventFormatter(console=console)
+        if args.session_command == "list":
+            sessions = list_sessions()
+            for s in sessions:
+                formatter.print_info(f"ID: {s['thread_id']} | Turns: {s['turn_count']} | Last: {s['last_turn_at'][:16]} | {s['title']}")
+            return 0
+        elif args.session_command == "resume":
+            # Delegate to chat
+            args.command = "chat"
+            args.resume = True
+            args.thread_id = args.thread_id
+            args.task = None
+            args.verbose = False
+            args.sandbox = None
+            args.profile = None
+            args.force_rebind = False
+        elif args.session_command == "inspect":
+            session = get_session(args.thread_id)
+            if not session:
+                formatter.print_error(f"Session {args.thread_id} not found in index.")
+                return 1
+            formatter.print_info(f"Session: {args.thread_id}")
+            formatter.print_info(f"Title: {session['title']}")
+            formatter.print_info(f"Turns: {session['turn_count']}")
+            return 0
+        elif args.session_command == "delete":
+            session = get_session(args.thread_id)
+            if not session:
+                formatter.print_error(f"Session {args.thread_id} not found.")
+                return 1
+            formatter.print_human_prompt(f"Are you sure you want to delete session '{args.thread_id}'? This will permanently delete the checkpoint. (y/N)")
+            ans = input_fn("> ")
+            if ans.lower() in ("y", "yes"):
+                database_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
+                async with AsyncSqliteSaver.from_conn_string(database_path) as saver:
+                    await saver.adelete_thread(args.thread_id)
+                delete_session(args.thread_id)
+                formatter.print_info(f"Session {args.thread_id} deleted.")
+                return 0
+            else:
+                formatter.print_info("Deletion cancelled.")
+                return 0
 
     if args.command == "doctor":
         from agent_os.cli.doctor import run_doctor
@@ -397,17 +644,18 @@ async def async_main(
 
     formatter = EventFormatter(console=console)
 
-    if args.resume and args.task:
-        formatter.print_error("Do not provide a task when using --resume.")
-        return 2
+    if args.command == "run":
+        if args.resume and args.task:
+            formatter.print_error("Do not provide a task when using --resume.")
+            return 2
+        if not args.resume and not args.task:
+            formatter.print_error("Task is required for a new workflow.")
+            return 2
     if args.resume and not args.thread_id:
         formatter.print_error("--thread-id is required when using --resume.")
         return 2
     if args.force_rebind and not args.resume:
         formatter.print_error("--force-rebind flag requires --resume.")
-        return 2
-    if not args.resume and not args.task:
-        formatter.print_error("Task is required for a new workflow.")
         return 2
 
     thread_id = args.thread_id or _generate_thread_id()
@@ -470,18 +718,31 @@ async def async_main(
         backend_binding = resolve_backend_binding(profile_name)
         if graph_factory is not None:
             graph = graph_factory()
-            return await _run_graph(
-                graph,
-                task=args.task,
-                resume=args.resume,
-                verbose=args.verbose,
-                formatter=formatter,
-                input_fn=input_fn,
-                thread_id=thread_id,
-                backend_binding=backend_binding,
-                force_rebind=args.force_rebind,
-                registry=registry,
-            )
+            if args.command == "chat":
+                return await _chat_loop(
+                    graph,
+                    resume=args.resume,
+                    verbose=args.verbose,
+                    formatter=formatter,
+                    input_fn=input_fn,
+                    thread_id=thread_id,
+                    backend_binding=backend_binding,
+                    force_rebind=args.force_rebind,
+                    registry=registry,
+                )
+            else:
+                return await _run_graph(
+                    graph,
+                    task=args.task,
+                    resume=args.resume,
+                    verbose=args.verbose,
+                    formatter=formatter,
+                    input_fn=input_fn,
+                    thread_id=thread_id,
+                    backend_binding=backend_binding,
+                    force_rebind=args.force_rebind,
+                    registry=registry,
+                )
 
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -496,18 +757,31 @@ async def async_main(
         async with AsyncSqliteSaver.from_conn_string(database_path) as saver:
             saver.serde = get_checkpoint_serializer()
             graph = build_graph(checkpointer=saver)
-            return await _run_graph(
-                graph,
-                task=args.task,
-                resume=args.resume,
-                verbose=args.verbose,
-                formatter=formatter,
-                input_fn=input_fn,
-                thread_id=thread_id,
-                backend_binding=backend_binding,
-                force_rebind=args.force_rebind,
-                registry=registry,
-            )
+            if args.command == "chat":
+                return await _chat_loop(
+                    graph,
+                    resume=args.resume,
+                    verbose=args.verbose,
+                    formatter=formatter,
+                    input_fn=input_fn,
+                    thread_id=thread_id,
+                    backend_binding=backend_binding,
+                    force_rebind=args.force_rebind,
+                    registry=registry,
+                )
+            else:
+                return await _run_graph(
+                    graph,
+                    task=args.task,
+                    resume=args.resume,
+                    verbose=args.verbose,
+                    formatter=formatter,
+                    input_fn=input_fn,
+                    thread_id=thread_id,
+                    backend_binding=backend_binding,
+                    force_rebind=args.force_rebind,
+                    registry=registry,
+                )
     except KeyboardInterrupt:
         formatter.print_error("Interrupted by Ctrl+C.")
         _print_resume_hint(formatter, thread_id)
