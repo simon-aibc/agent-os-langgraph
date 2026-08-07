@@ -8,11 +8,11 @@ for public releases.
 ### Added
 
 - Multi-turn conversational loop in CLI via `agent-os chat` command with clean handling of `/exit`, EOF, and Ctrl+C.
-- State schema support for multi-turn via `conversation_summary` string in `SimonState` and a generalized summarizer `agent_os/summarize.py` to condense old messages while retaininggist.
+- State schema support for multi-turn via `conversation_summary` string in `SimonState` and a generalized summarizer `agent_os/summarize.py` to condense old messages while retaining gist.
 - Seamless summarization integration via the active `architect` backend (defaults to `cli/claude-code` when applicable) configured through a new `summary` profile block (`threshold_tokens` and `keep_recent_n`).
 - Standardized, conflict-free prompt assembly `[system_task] + [hot_context] + [conversation_summary]` at the `architect` node boundary.
 - Session indexing using local SQLite (`agent_os/sessions.py`) providing `agent-os sessions list|inspect|delete` commands and auto-titling for conversation resumption.
-- Automated, gate-bypassing session log appending into the connected vault's `AI/Logs/` path retaining `agent-os` provenance metadata upon chat exit.
+- Automated, auto-approved session log appending into the connected vault's `AI/Logs/` path retaining `agent-os` provenance metadata upon chat exit.
 - `recall_session` skill providing "hôm qua nói gì về X" capability by bounding `MemoryConnector.search()` scope tightly to the generated `AI/Logs/` path.
 
 ## [1.4.0] — 2026-08-07

@@ -57,7 +57,7 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
                 pass
                 
 
-    summary_config = resolved_prof.summary if binding else None
+    summary_config = resolved_prof.summary if resolved_prof else None
     if not summary_config:
         from agent_os.profiles import SummaryConfig
         summary_config = SummaryConfig()
