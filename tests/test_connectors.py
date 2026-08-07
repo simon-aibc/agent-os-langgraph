@@ -332,4 +332,76 @@ def test_writable_memory_protocol(tmp_path):
     assert hasattr(md, "describe_write_side_effect")
     
     gbrain = GbrainConnector()
-    assert not hasattr(gbrain, "write_note")
+    assert hasattr(gbrain, "write_note")
+
+
+def test_gbrain_write_uses_put_page(monkeypatch):
+    monkeypatch.setenv("GBRAIN_TOKEN", "test-token")
+    gbrain = GbrainConnector()
+    
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"result": {}}).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+        mock_urlopen.return_value = mock_response
+        
+        res = gbrain.write_note("my-slug", "hello")
+        
+        assert res.committed is True
+        assert res.ref == "agentos/my-slug"
+        
+        req = mock_urlopen.call_args[0][0]
+        payload = json.loads(req.data.decode("utf-8"))
+        assert payload["method"] == "tools/call"
+        assert payload["params"]["name"] == "put_page"
+        
+        slug = payload["params"]["arguments"]["slug"]
+        assert slug == "agentos/my-slug"
+        
+        content = payload["params"]["arguments"]["content"]
+        assert "agent: agent-os" in content
+        assert "hello" in content
+
+
+def test_gbrain_write_prefixes_agentos(monkeypatch):
+    monkeypatch.setenv("GBRAIN_TOKEN", "test-token")
+    gbrain = GbrainConnector()
+    
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({"result": {}}).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+        mock_urlopen.return_value = mock_response
+        
+        res1 = gbrain.write_note("test1", "hello")
+        assert res1.ref == "agentos/test1"
+        
+        res2 = gbrain.write_note("agentos/test2", "hello")
+        assert res2.ref == "agentos/test2"
+
+
+@pytest.mark.integration
+def test_gbrain_real_write_roundtrip():
+    if not os.getenv("GBRAIN_TOKEN"):
+        pytest.skip("GBRAIN_TOKEN not provided")
+        
+    gbrain = GbrainConnector()
+    import uuid
+    slug = f"agentos/test/r14c-smoke-{uuid.uuid4()}"
+    
+    try:
+        res = gbrain.write_note(slug, "smoke body", frontmatter={"title": "r14c smoke"}, mode="overwrite")
+        assert res.committed is True
+        assert res.ref == slug
+        
+        note = gbrain.read_note(slug)
+        assert "smoke body" in note["content"]
+        assert note["frontmatter"]["title"] == "r14c smoke"
+        assert note["frontmatter"]["agent"] == "agent-os"
+        
+    finally:
+        # Cleanup
+        try:
+            gbrain._call_rpc("tools/call", {"name": "delete_page", "arguments": {"slug": slug}})
+        except Exception:
+            pass
