@@ -1,4 +1,5 @@
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -60,25 +61,34 @@ def test_markdown_vault_connector(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     
-    (vault / "note1.md").write_text("---\ntags: test\n---\nHello [[note2]]")
+    (vault / "note1.md").write_text("---\ntitle: Note 1\ntags: test\n---\nHello [[note2]]")
     (vault / "nested").mkdir()
-    (vault / "nested" / "note2.md").write_text("Just a nested note")
+    (vault / "nested" / "note2.md").write_text("# Nested Note 2\nJust a nested note")
     
     md = MarkdownVaultConnector(str(vault))
     
     # list
     notes = md.list_notes()
-    paths = [n["path"] for n in notes]
-    assert "note1.md" in paths
-    assert "nested/note2.md" in paths
+    refs = [n["ref"] for n in notes]
+    assert "note1.md" in refs
+    assert "nested/note2.md" in refs
+    
+    # verify title
+    note1_item = next(n for n in notes if n["ref"] == "note1.md")
+    assert note1_item["title"] == "Note 1"
+    note2_item = next(n for n in notes if n["ref"] == "nested/note2.md")
+    assert note2_item["title"] == "Nested Note 2"
     
     # search
     res = md.search("nested")
     assert len(res) == 1
-    assert res[0]["path"] == "nested/note2.md"
+    assert res[0]["ref"] == "nested/note2.md"
+    assert res[0]["title"] == "Nested Note 2"
+    assert "score" in res[0]
     
     # read
     note = md.read_note("note1")
+    assert note["ref"] == "note1"
     assert note["frontmatter"]["tags"] == "test"
     assert "note2" in note["links"]
 
@@ -97,10 +107,148 @@ def test_gbrain_connector_configured(monkeypatch):
     
     with patch("urllib.request.urlopen") as mock_urlopen:
         mock_response = MagicMock()
-        mock_response.read.return_value = json.dumps({"result": {"content": [{"text": json.dumps({"hits": [{"path": "remote.md"}]})}]}}).encode("utf-8")
+        mock_response.read.return_value = json.dumps({
+            "result": {
+                "content": [{
+                    "text": json.dumps({"hits": [{"slug": "remote.md", "title": "Remote", "chunk_text": "text", "score": 0.9}]})
+                }]
+            }
+        }).encode("utf-8")
         mock_response.__enter__.return_value = mock_response
         mock_urlopen.return_value = mock_response
         
         res = gbrain.search("test")
         assert len(res) == 1
-        assert res[0]["path"] == "remote.md"
+        assert res[0]["ref"] == "remote.md"
+        assert res[0]["title"] == "Remote"
+        assert res[0]["snippet"] == "text"
+        assert res[0]["score"] == 0.9
+
+
+def test_gbrain_read_note_uses_get_page(monkeypatch):
+    monkeypatch.setenv("GBRAIN_TOKEN", "test-token")
+    gbrain = GbrainConnector()
+    
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "result": {
+                "content": [{"text": json.dumps({"compiled_truth": "hello", "title": "test"})}]
+            }
+        }).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+        mock_urlopen.return_value = mock_response
+        
+        res = gbrain.read_note("slug-123")
+        assert res["ref"] == "slug-123"
+        assert res["content"] == "hello"
+        
+        # assert payload sent
+        req = mock_urlopen.call_args[0][0]
+        payload = json.loads(req.data.decode("utf-8"))
+        assert payload["method"] == "tools/call"
+        assert payload["params"]["name"] == "get_page"
+        assert payload["params"]["arguments"]["slug"] == "slug-123"
+
+
+def test_gbrain_list_notes_uses_list_pages(monkeypatch):
+    monkeypatch.setenv("GBRAIN_TOKEN", "test-token")
+    gbrain = GbrainConnector()
+    
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps({
+            "result": {
+                "content": [{"text": json.dumps({"pages": [{"slug": "p1", "title": "Page 1"}]})}]
+            }
+        }).encode("utf-8")
+        mock_response.__enter__.return_value = mock_response
+        mock_urlopen.return_value = mock_response
+        
+        res = gbrain.list_notes()
+        assert len(res) == 1
+        assert res[0]["ref"] == "p1"
+        assert res[0]["title"] == "Page 1"
+        
+        # assert payload sent
+        req = mock_urlopen.call_args[0][0]
+        payload = json.loads(req.data.decode("utf-8"))
+        assert payload["method"] == "tools/call"
+        assert payload["params"]["name"] == "list_pages"
+
+
+@pytest.fixture
+def memory_connectors(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "test.md").write_text("---\ntitle: test\n---\nbody [[link]]")
+    
+    md_conn = MarkdownVaultConnector(str(vault))
+    
+    monkeypatch.setenv("GBRAIN_TOKEN", "test-token")
+    gb_conn = GbrainConnector()
+    
+    return [md_conn, gb_conn]
+
+@pytest.mark.parametrize("idx", [0, 1])
+def test_memory_connector_contract(memory_connectors, idx):
+    conn = memory_connectors[idx]
+    
+    if isinstance(conn, GbrainConnector):
+        # mock it
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_response = MagicMock()
+            def side_effect(req, **kwargs):
+                payload = json.loads(req.data.decode("utf-8"))
+                name = payload["params"]["name"]
+                if name == "query":
+                    data = {"hits": [{"slug": "test.md", "title": "test", "chunk_text": "body [[link]]"}]}
+                elif name == "get_page":
+                    data = {"compiled_truth": "---\ntitle: test\n---\nbody [[link]]"}
+                else:
+                    data = {"pages": [{"slug": "test.md", "title": "test"}]}
+                mock_response.read.return_value = json.dumps({"result": {"content": [{"text": json.dumps(data)}]}}).encode("utf-8")
+                return mock_response
+            mock_urlopen.side_effect = side_effect
+            mock_response.__enter__.return_value = mock_response
+            
+            _run_contract(conn)
+    else:
+        _run_contract(conn)
+        
+def _run_contract(conn):
+    res_list = conn.list_notes()
+    assert len(res_list) > 0
+    assert "ref" in res_list[0]
+    
+    res_search = conn.search("body")
+    assert len(res_search) > 0
+    assert "ref" in res_search[0]
+    assert "title" in res_search[0]
+    assert "snippet" in res_search[0]
+    assert "score" in res_search[0]
+    
+    res_read = conn.read_note(res_search[0]["ref"])
+    assert "ref" in res_read
+    assert "content" in res_read
+    assert "frontmatter" in res_read
+    assert "links" in res_read
+    assert res_read["links"] == ["link"]
+
+
+@pytest.mark.integration
+def test_gbrain_real_smoke():
+    if not os.getenv("GBRAIN_TOKEN"):
+        pytest.skip("GBRAIN_TOKEN not provided")
+        
+    gbrain = GbrainConnector()
+    res = gbrain.search("agent-os")
+    if not res:
+        pytest.skip("No agent-os results in real vault")
+        
+    hit = res[0]
+    assert "ref" in hit
+    
+    note = gbrain.read_note(hit["ref"])
+    assert note["content"]
+    assert isinstance(note["links"], list)
