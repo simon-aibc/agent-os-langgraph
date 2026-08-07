@@ -351,23 +351,31 @@ class GbrainConnector(MemoryConnector):
         res = self._call_rpc("tools/call", {"name": "get_page", "arguments": {"slug": ref}})
         
         content = ""
+        fm: dict[str, Any] = {}
         if isinstance(res, dict):
             c_list = res.get("content") or []
             if c_list and isinstance(c_list, list):
                 text = c_list[0].get("text", "")
                 try:
-                    import json
                     parsed = json.loads(text)
                     if isinstance(parsed, dict):
                         content = parsed.get("compiled_truth") or parsed.get("content", "")
+                        # gbrain hoists `title` and stores remaining frontmatter keys
+                        # as a top-level `frontmatter` dict; compiled_truth is body-only,
+                        # so parse from those fields, not from the (stripped) body.
+                        fm = dict(parsed.get("frontmatter") or {})
+                        if parsed.get("title"):
+                            fm.setdefault("title", parsed["title"])
                     else:
                         content = text
                 except (json.JSONDecodeError, TypeError):
                     content = text
         elif isinstance(res, str):
             content = res
-            
-        fm = _parse_frontmatter(content)
+
+        if not fm:
+            # Fallback: raw markdown body (non-gbrain-shaped response)
+            fm = _parse_frontmatter(content)
         links = re.findall(r"\[\[(.*?)\]\]", content)
         
         return {
