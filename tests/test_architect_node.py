@@ -179,3 +179,72 @@ def test_architect_node_cli_no_retry_permanent_error(monkeypatch):
             architect_node(state)
 
         assert call_count == 1
+
+def test_prompt_order(monkeypatch):
+    """Test the order of prompt assembly with hot_context and conversation_summary."""
+    state = make_state()
+    state["task"] = "my task"
+    state["hot_context"] = "some hot context"
+    state["conversation_summary"] = "my summary"
+    
+    brief = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
+    
+    with patch("agent_os.nodes.architect.build_architect_agent") as mock_build:
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {"structured_response": brief}
+        mock_build.return_value = mock_agent
+        
+        architect_node(state)
+        
+        called_messages = mock_agent.invoke.call_args[0][0]["messages"]
+        last_msg = called_messages[-1].content
+        
+        assert "my task" in last_msg
+        assert "## Context (from vault)\nsome hot context" in last_msg
+        assert "## Conversation so far (summary)\nmy summary" in last_msg
+        
+        # Verify order
+        task_idx = last_msg.find("my task")
+        context_idx = last_msg.find("## Context")
+        summary_idx = last_msg.find("## Conversation")
+        
+        assert task_idx < context_idx < summary_idx
+
+
+def test_config_threshold_n_from_profile(monkeypatch):
+    """Test that summary threshold and keep_recent_n are read from the profile."""
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/codex")
+    state = make_state()
+    state["task"] = "test"
+    from agent_os.state import BackendBinding
+    state["backend_binding"] = BackendBinding(
+        router="test",
+        architect="cli/codex",
+        executor="test",
+        profile_name="test_profile",
+        sandbox_root="/tmp/sandbox"
+    )
+    
+    brief = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
+    
+    with patch("agent_os.profiles.load_profiles") as mock_load, \
+         patch("agent_os.profiles.resolve_profile") as mock_resolve, \
+         patch("agent_os.nodes.architect.build_cli_architect_invoker") as mock_build, \
+         patch("agent_os.summarize.summarize_and_trim") as mock_sum_trim:
+        
+        mock_invoker = MagicMock(return_value=brief)
+        mock_build.return_value = mock_invoker
+        
+        mock_sum_trim.return_value = ("new_sum", [], [])
+        
+        mock_resolved = MagicMock()
+        from agent_os.profiles import SummaryConfig
+        mock_resolved.summary = SummaryConfig(threshold_tokens=1234, keep_recent_n=42)
+        mock_resolve.return_value = mock_resolved
+        
+        architect_node(state)
+        
+        mock_sum_trim.assert_called_once()
+        kwargs = mock_sum_trim.call_args[1]
+        assert kwargs["threshold_tokens"] == 1234
+        assert kwargs["keep_recent_n"] == 42

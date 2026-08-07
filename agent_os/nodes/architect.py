@@ -15,19 +15,25 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
     if feedback and feedback.startswith("rejected:"):
         prompt += f"\n\nPrevious plan was rejected with feedback:\n{feedback}"
         
+    binding = state.get("backend_binding")
+    resolved_prof = None
+    if binding:
+        from pathlib import Path
+        from agent_os.backends import BackendRegistry
+        from agent_os.profiles import load_profiles, resolve_profile
+        try:
+            profile_file = load_profiles()
+            registry = BackendRegistry()
+            resolved_prof = resolve_profile(profile_file, binding.profile_name, registry, Path(binding.sandbox_root))
+        except Exception:
+            pass
+
     hot_context = state.get("hot_context")
     if hot_context is None:
         hot_context = ""
-        binding = state.get("backend_binding")
-        if binding:
-            from pathlib import Path
-
-            from agent_os.backends import BackendRegistry
-            from agent_os.profiles import load_profiles, resolve_profile
+        if resolved_prof:
             try:
-                profile_file = load_profiles()
-                registry = BackendRegistry()
-                resolved_prof = resolve_profile(profile_file, binding.profile_name, registry, Path(binding.sandbox_root))
+
                 config = resolved_prof.hot_context
                 
                 connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
@@ -49,8 +55,6 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
             except Exception:
                 pass
                 
-    if hot_context:
-        prompt = f"{prompt}\n\n## Context (from vault)\n{hot_context}"
 
     summary_config = resolved_prof.summary if binding else None
     if not summary_config:
@@ -90,7 +94,15 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
         summarizer=_summarizer_fn
     )
 
-    trimmed = trim_agent_messages(kept_messages, prompt)
+    prompt_parts = [prompt]
+    if hot_context:
+        prompt_parts.append(f"## Context (from vault)\n{hot_context}")
+    if new_summary:
+        prompt_parts.append(f"## Conversation so far (summary)\n{new_summary}")
+        
+    final_prompt = "\n\n".join(prompt_parts)
+
+    trimmed = trim_agent_messages(kept_messages, final_prompt)
 
     llm_architect = os.getenv("LLM_ARCHITECT", "")
     if llm_architect.startswith("cli/"):
