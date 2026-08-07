@@ -3,6 +3,40 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [1.4.0] — 2026-08-07
+
+### Added
+
+- Write-path for memory: `WritableMemory` Protocol (kept separate from read-only `MemoryConnector` so community read-only connectors are not forced to implement it) plus `MemoryWriteResult`.
+- `MarkdownVaultConnector.write_note` with `create`/`append`/`overwrite` modes, path-traversal sandbox guard bound to the connector's own `root_path`, and YAML frontmatter round-trip.
+- `GbrainConnector.write_note` mapping to gbrain `put_page`, with provenance frontmatter (`agent`/`created`/`via`/`source`) and `agentos/` slug isolation for agent-written notes.
+- Approval gate for vault mutation: `MemoryWriteProposal` (added to the checkpoint allowlist) with `evaluate_write_policy` (auto-approve for `AI/Logs/` appends, gate everything else) and `gated_write` reusing the existing `interrupt()` human gate; rejection commits nothing.
+- Bounded hot-context injection at the architect boundary via `load_hot_context` (`hot.md` + `AI/Memory/*.md`, `max_chars`/`max_age_days` bounds, no full-vault scan), configured through a profile `HotContextConfig`; `hot_context` state field carries static session-start context, kept distinct from the v1.5 rolling summary.
+
+### Fixed
+
+- Standardized `MemoryConnector` return schema (`ref`-keyed) across `MarkdownVaultConnector` and `GbrainConnector` so interface-bound skills behave identically on both.
+- `GbrainConnector` now calls the real gbrain tools (`get_page`, `list_pages`, `query`) instead of non-existent `read_note`/`list_notes`; read-path verified against a live gbrain server rather than mocks.
+- `GbrainConnector.read_note` reads frontmatter from gbrain's top-level `frontmatter`/`title` fields (compiled_truth is body-only), so provenance survives a write→read round-trip — a defect the mocks hid, caught by a real integration run on `main`.
+
+### Validation
+
+- 380 offline tests pass with warnings treated as errors (`python -m pytest -W error`); ruff clean.
+- Real gbrain read and write→read round-trips verified against a live server (env-gated integration tests), including provenance frontmatter and ephemeral-slug cleanup.
+
+## [1.3.0] — 2026-08-07
+
+### Added
+
+- Core generalization: generic `PlanArtifact`/`ExecutionResult` and `ActionProposal`; `CodingPlan`/`CodingResult` subclasses preserve the coding contract; `ArchitectBrief`/`ExecutorReport` retained as silent aliases (deprecation deferred).
+- Connector framework: `Connector` and `MemoryConnector` Protocols with `ConnectorRegistry`; `FilesystemConnector`, `MarkdownVaultConnector` (portable, zero-dependency), and `GbrainConnector` (wrapping the gbrain MCP).
+- Skill packages: `manifest.toml` loader with the `vault_qa` example binding the `MemoryConnector` interface, plus a "build your first non-coding skill" tutorial.
+
+### Validation
+
+- 356 offline tests pass with warnings treated as errors; ruff clean.
+- Non-coding end-to-end verified through `vault_qa` over `MarkdownVaultConnector` (unmocked).
+
 ## [1.2.0] — 2026-08-05
 
 ### Added
