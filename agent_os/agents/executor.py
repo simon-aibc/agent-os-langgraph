@@ -3,16 +3,16 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph.state import CompiledStateGraph
 
 from agent_os.llm import get_executor_llm, prepare_system_prompt
-from agent_os.schemas import ExecutorReport
+from agent_os.schemas import CodingResult
 from agent_os.tools import bash, edit_file, run_tests
 
 SYSTEM_PROMPT = """
 You are the system Executor.
-- Follow the supplied ArchitectBrief exactly.
+- Follow the supplied PlanArtifact exactly.
 - Operate only through sandboxed tools (edit_file, bash, run_tests).
 - Never access paths outside AGENT_OS_SANDBOX.
-- Run the supplied verification command using bash or run_tests.
-- Report diff, verify_output, and success in your final response.
+- Run the supplied verification command using bash or run_tests (if provided).
+- Report diff, verify_output, and status in your final response.
 """
 
 
@@ -27,6 +27,6 @@ def build_executor_agent(llm: BaseChatModel | None = None) -> CompiledStateGraph
         model=resolved_llm,
         tools=tools,
         system_prompt=system_prompt,
-        response_format=ExecutorReport,
+        response_format=CodingResult,
         name="executor_react_agent",
     )

@@ -4,7 +4,7 @@ from agent_os.agents.architect import build_architect_agent
 from agent_os.agents.cli_architect import build_cli_architect_invoker
 from agent_os.llm import invoke_with_llm_retry
 from agent_os.messages import trim_agent_messages
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import ArchitectBrief, PlanArtifact
 from agent_os.state import SimonState
 
 
@@ -32,7 +32,7 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
     result = invoke_with_llm_retry(lambda: agent.invoke({"messages": trimmed}))
 
     brief = result.get("structured_response")
-    if not isinstance(brief, ArchitectBrief):
-        raise ValueError("Architect agent did not return a valid ArchitectBrief")
+    if not isinstance(brief, (ArchitectBrief, PlanArtifact)):
+        raise ValueError("Architect agent did not return a valid PlanArtifact or ArchitectBrief")
 
     return {"plan": brief}

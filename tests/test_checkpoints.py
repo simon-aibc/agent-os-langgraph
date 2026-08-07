@@ -9,7 +9,14 @@ from agent_os.checkpoints import (
     get_checkpoint_serializer,
     get_default_checkpointer,
 )
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import (
+    ActionProposal,
+    ArchitectBrief,
+    CodingPlan,
+    CodingResult,
+    ExecutionResult,
+    PlanArtifact,
+)
 
 
 def test_get_default_checkpointer_uses_configured_path(tmp_path, monkeypatch):
@@ -64,3 +71,36 @@ def test_checkpoint_serializer_round_trips_allowed_application_models():
 
     assert restored == brief
     assert isinstance(restored, ArchitectBrief)
+
+
+def test_checkpoint_serializer_round_trips_generic_and_coding_models():
+    serializer = get_checkpoint_serializer()
+    
+    state_to_serialize = {
+        "plan": PlanArtifact(
+            summary="test plan",
+            proposed_actions=[ActionProposal(tool="ls", reason="check files")]
+        ),
+        "executor_output": ExecutionResult(status="completed"),
+        "coding_plan": CodingPlan(
+            summary="coding task",
+            files=["main.py"],
+            changes=["fix bug"],
+            verify_cmd="pytest"
+        ),
+        "coding_result": CodingResult(status="failed", diff="-bug\n+fix"),
+    }
+    
+    restored = serializer.loads_typed(serializer.dumps_typed(state_to_serialize))
+    
+    assert restored["plan"] == state_to_serialize["plan"]
+    assert isinstance(restored["plan"], PlanArtifact)
+    
+    assert restored["executor_output"] == state_to_serialize["executor_output"]
+    assert isinstance(restored["executor_output"], ExecutionResult)
+
+    assert restored["coding_plan"] == state_to_serialize["coding_plan"]
+    assert isinstance(restored["coding_plan"], CodingPlan)
+
+    assert restored["coding_result"] == state_to_serialize["coding_result"]
+    assert isinstance(restored["coding_result"], CodingResult)

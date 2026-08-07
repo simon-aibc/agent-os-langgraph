@@ -1,11 +1,11 @@
 from collections.abc import Callable
 
 from agent_os.backends import get_default_backend_registry
-from agent_os.schemas import ArchitectBrief, ExecutorReport
+from agent_os.schemas import ExecutionResult, PlanArtifact
 from agent_os.state import SimonState
 
 
-def build_executor_prompt(plan: ArchitectBrief) -> str:
+def build_executor_prompt(plan: PlanArtifact) -> str:
     """Build the prompt for the executor CLI."""
     prompt = (
         "You are an executor agent. Apply the following approved architectural "
@@ -15,23 +15,24 @@ def build_executor_prompt(plan: ArchitectBrief) -> str:
         f"{plan.model_dump_json(indent=2)}\n\n"
     )
 
-    if plan.verify_cmd:
+    verify_cmd = getattr(plan, "verify_cmd", "")
+    if verify_cmd:
         prompt += (
             f"After making the changes, you MUST run the following verification command:\n"
-            f"`{plan.verify_cmd}`\n\n"
+            f"`{verify_cmd}`\n\n"
         )
     else:
         prompt += "No verification command was provided.\n\n"
 
     prompt += (
-        "Return an ExecutorReport with your results. "
-        "Set success to true only if all changes were applied and the verification passed."
+        "Return a CodingResult with your results. "
+        "Set status to 'completed' only if all changes were applied and the verification passed."
     )
 
     return prompt
 
 
-def build_cli_executor_invoker(backend: str) -> Callable[[SimonState], ExecutorReport]:
+def build_cli_executor_invoker(backend: str) -> Callable[[SimonState], ExecutionResult]:
     """
     Returns a callable that executes the CLI executor node logic for a specific backend.
     Supported backends: 'claude-code', 'codex'.

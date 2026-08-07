@@ -49,7 +49,7 @@ def test_executor_node_invalid_plan():
         "hot_context": None,
     }
 
-    with pytest.raises(ValueError, match="Executor requires an ArchitectBrief plan."):
+    with pytest.raises(ValueError, match="Executor requires a PlanArtifact or ArchitectBrief plan."):
         executor_node(state)
 
 

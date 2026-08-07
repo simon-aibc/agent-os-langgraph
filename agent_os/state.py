@@ -6,10 +6,16 @@ from langgraph.graph.message import add_messages
 from pydantic import BaseModel, ConfigDict, field_validator
 from typing_extensions import TypedDict
 
-from agent_os.schemas import ArchitectBrief, ExecutorReport, ToolExecutionResult
+from agent_os.schemas import (
+    ArchitectBrief,
+    ExecutionResult,
+    ExecutorReport,
+    PlanArtifact,
+    ToolExecutionResult,
+)
 
-PlanArtifact = str | ArchitectBrief
-ExecutorArtifact = str | ExecutorReport
+PlanField = str | PlanArtifact | ArchitectBrief | None
+ResultField = str | ExecutionResult | ExecutorReport | None
 
 
 class BackendBinding(BaseModel):
@@ -38,8 +44,8 @@ class SimonState(TypedDict):
     """
     messages: Annotated[list[AnyMessage], add_messages]
     task: str
-    plan: PlanArtifact | None
-    executor_output: ExecutorArtifact | None
+    plan: PlanField
+    executor_output: ResultField
     human_feedback: str | None
     hot_context: str | None
 

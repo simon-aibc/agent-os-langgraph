@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from agent_os.nodes.human_gate import human_gate_node, normalize_human_feedback
-from agent_os.schemas import ArchitectBrief
+from agent_os.schemas import ArchitectBrief, CodingPlan
 from agent_os.state import SimonState
 
 
@@ -47,7 +47,7 @@ def test_normalize_human_feedback_invalid():
 
 
 def test_human_gate_node_non_architect_brief():
-    with pytest.raises(ValueError, match="requires an ArchitectBrief"):
+    with pytest.raises(ValueError, match="requires a PlanArtifact or ArchitectBrief"):
         human_gate_node(make_state("just a string"))
 
 
@@ -55,12 +55,12 @@ def test_human_gate_node_non_architect_brief():
 def test_human_gate_node_interrupts(mock_interrupt):
     mock_interrupt.return_value = "y"
 
-    plan = ArchitectBrief(files=["a.py"], changes=["fix"], verify_cmd="ls")
+    plan = CodingPlan(summary="test", files=["a.py"], changes=["fix"], verify_cmd="ls")
     result = human_gate_node(make_state(plan))
 
     mock_interrupt.assert_called_once()
     args = mock_interrupt.call_args.args
-    assert "ArchitectBrief JSON" in args[0]
+    assert "CodingPlan JSON" in args[0] or "ArchitectBrief JSON" in args[0]
     assert '"a.py"' in args[0]
     assert '"verify_cmd": "ls"' in args[0]
 

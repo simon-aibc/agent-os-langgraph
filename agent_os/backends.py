@@ -15,11 +15,16 @@ from agent_os.cli_backends import (
     run_cli_command,
     write_schema_file,
 )
-from agent_os.schemas import ArchitectBrief, ExecutorReport
+from agent_os.schemas import (
+    CodingPlan,
+    CodingResult,
+    ExecutionResult,
+    PlanArtifact,
+)
 from agent_os.state import SimonState
 
 BackendRole = Literal["architect", "executor"]
-BackendArtifact = ArchitectBrief | ExecutorReport
+BackendArtifact = PlanArtifact | ExecutionResult
 BackendInvoker = Callable[[SimonState], BackendArtifact]
 
 
@@ -163,16 +168,16 @@ class ClaudeCodeAdapter:
             if role == "architect":
                 from agent_os.agents.cli_architect import _build_architect_prompt
 
-                model = ArchitectBrief
+                model = CodingPlan
                 prompt = _build_architect_prompt(state)
                 permission_mode = "plan"
             else:
                 from agent_os.agents.cli_executor import build_executor_prompt
 
                 plan = state.get("plan")
-                if not isinstance(plan, ArchitectBrief):
-                    raise ValueError("State 'plan' must be an ArchitectBrief instance.")
-                model = ExecutorReport
+                if not isinstance(plan, PlanArtifact):
+                    raise ValueError("State 'plan' must be a PlanArtifact instance.")
+                model = CodingResult
                 prompt = build_executor_prompt(plan)
                 permission_mode = "acceptEdits"
 
@@ -236,16 +241,16 @@ class CodexAdapter:
             if role == "architect":
                 from agent_os.agents.cli_architect import _build_architect_prompt
 
-                model = ArchitectBrief
+                model = CodingPlan
                 prompt = _build_architect_prompt(state)
                 sandbox_mode = "read-only"
             else:
                 from agent_os.agents.cli_executor import build_executor_prompt
 
                 plan = state.get("plan")
-                if not isinstance(plan, ArchitectBrief):
-                    raise ValueError("State 'plan' must be an ArchitectBrief instance.")
-                model = ExecutorReport
+                if not isinstance(plan, PlanArtifact):
+                    raise ValueError("State 'plan' must be a PlanArtifact instance.")
+                model = CodingResult
                 prompt = build_executor_prompt(plan)
                 sandbox_mode = "workspace-write"
 
