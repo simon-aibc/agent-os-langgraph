@@ -88,13 +88,22 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
             return str(llm.invoke([HumanMessage(content=summary_prompt)]).content)
 
     from agent_os.summarize import summarize_and_trim
-    new_summary, kept_messages, remove_messages = summarize_and_trim(
-        state.get("messages", []),
-        state.get("conversation_summary"),
-        threshold_tokens=summary_config.threshold_tokens,
-        keep_recent_n=summary_config.keep_recent_n,
-        summarizer=_summarizer_fn
-    )
+    try:
+        new_summary, kept_messages, remove_messages = summarize_and_trim(
+            state.get("messages", []),
+            state.get("conversation_summary"),
+            threshold_tokens=summary_config.threshold_tokens,
+            keep_recent_n=summary_config.keep_recent_n,
+            summarizer=_summarizer_fn
+        )
+    except Exception:
+        # Summarization is best-effort: if the summarizer model can't be
+        # resolved/invoked (e.g. a CLI backend not on PATH), degrade to no
+        # summarization rather than failing the whole node — mirrors the
+        # hot_context load guard above.
+        new_summary = state.get("conversation_summary")
+        kept_messages = state.get("messages", [])
+        remove_messages = []
 
     prompt_parts = [prompt]
     if hot_context:
