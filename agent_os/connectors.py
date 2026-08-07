@@ -3,8 +3,9 @@ import os
 import re
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from agent_os.sandbox import resolve_sandbox_path
 from agent_os.schemas import ExecutionResult
@@ -44,6 +45,26 @@ class MemoryConnector(Protocol):
 
     def list_notes(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         ...
+
+
+@dataclass
+class MemoryWriteResult:
+    ref: str
+    mode: str                # "create" | "append" | "overwrite"
+    bytes_written: int | None
+    committed: bool
+
+class WritableMemory(Protocol):
+    @property
+    def name(self) -> str: ...
+    def write_note(
+        self,
+        ref: str,
+        content: str,
+        frontmatter: dict[str, Any] | None = None,
+        mode: Literal["create", "append", "overwrite"] = "create",
+    ) -> MemoryWriteResult: ...
+    def describe_write_side_effect(self, ref: str, mode: str) -> str: ...
 
 
 class ConnectorRegistry:
@@ -126,7 +147,62 @@ class MarkdownVaultConnector(MemoryConnector):
     def name(self) -> str:
         return "markdown_vault"
         
+    def describe_write_side_effect(self, ref: str, mode: str) -> str:
+        if mode == "append":
+            return f"append to note '{ref}' (creates if missing)"
+        elif mode == "overwrite":
+            return f"OVERWRITE note '{ref}' — existing content lost"
+        return f"create note '{ref}'"
 
+    def write_note(
+        self,
+        ref: str,
+        content: str,
+        frontmatter: dict[str, Any] | None = None,
+        mode: Literal["create", "append", "overwrite"] = "create",
+    ) -> MemoryWriteResult:
+        path = self.root_path / ref
+        if not path.name.endswith(".md"):
+            path = path.with_suffix(".md")
+            
+        try:
+            path = path.resolve()
+            path.relative_to(self.root_path)
+        except ValueError as e:
+            raise ValueError(f"Path traversal detected: {ref}") from e
+            
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if mode == "create" and path.exists():
+            raise FileExistsError(f"Note already exists: {ref}")
+            
+        final_content = content
+        if mode in ("create", "overwrite") and frontmatter:
+            fm_lines = ["---"]
+            for k, v in frontmatter.items():
+                fm_lines.append(f"{k}: {v}")
+            fm_lines.append("---")
+            fm_lines.append("")
+            fm_lines.append(content)
+            final_content = "\n".join(fm_lines)
+            
+        if mode == "append":
+            file_exists = path.exists() and path.stat().st_size > 0
+            with open(path, "a", encoding="utf-8") as f:
+                if file_exists:
+                    bytes_written = f.write("\n" + final_content)
+                else:
+                    bytes_written = f.write(final_content)
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                bytes_written = f.write(final_content)
+                
+        return MemoryWriteResult(
+            ref=path.relative_to(self.root_path).as_posix(),
+            mode=mode,
+            bytes_written=bytes_written,
+            committed=True
+        )
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         results = []
