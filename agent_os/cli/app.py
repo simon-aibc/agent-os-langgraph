@@ -75,6 +75,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
+    
+    p_brief = subparsers.add_parser("brief", help="Generate Morning Brief")
+    p_brief.add_argument("--date", help="Target date YYYY-MM-DD")
+    p_brief.add_argument("--profile", help="Named configuration profile to use.")
+    p_brief.add_argument("--connector", help="Memory connector to use")
+    
     return parser
 
 
@@ -635,6 +641,60 @@ async def async_main(
             else:
                 formatter.print_info("Deletion cancelled.")
                 return 0
+
+    if args.command == "brief":
+        import datetime
+        from agent_os.brief import generate_brief, write_brief
+        from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
+        from agent_os.sessions import list_sessions
+        from agent_os.backends import build_default_registry
+        from agent_os.profiles import load_profiles, resolve_profile, select_profile_name
+        from agent_os.sandbox import get_sandbox_root
+        
+        # 1. Resolve connector
+        connector_name = args.connector or os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
+        if connector_name == "gbrain":
+            connector = GbrainConnector()
+        else:
+            vault_path = os.getenv("AGENT_OS_VAULT_PATH", get_sandbox_root().resolve())
+            connector = MarkdownVaultConnector(vault_path)
+            
+        # 2. Resolve summarizer
+        try:
+            profile_file = load_profiles()
+            cli_name = args.profile
+            env_name = os.getenv("AGENT_OS_PROFILE")
+            file_default = profile_file.default
+            profile_name, _ = select_profile_name(cli_name, env_name, file_default)
+            registry = build_default_registry()
+            if profile_name is not None:
+                resolved_prof = resolve_profile(profile_file, profile_name, registry, get_sandbox_root().resolve())
+                if resolved_prof and resolved_prof.architect:
+                    os.environ["LLM_ARCHITECT"] = resolved_prof.architect
+        except Exception:
+            pass
+            
+        from agent_os.backends import BackendBinding
+        binding = BackendBinding.from_env()
+        summarizer = binding.architect
+        
+        def invoke_summarizer(prompt: str) -> str:
+            from langchain_core.messages import HumanMessage
+            resp = summarizer.invoke([HumanMessage(content=prompt)])
+            return resp.content if not isinstance(resp, str) else resp
+            
+        # 3. Get dependencies
+        date_str = args.date or datetime.datetime.now().strftime("%Y-%m-%d")
+        sessions = list_sessions()
+        
+        # 4. Generate
+        brief_md = generate_brief(connector, sessions, date=date_str, summarizer=invoke_summarizer)
+        
+        # 5. Write
+        res = write_brief(connector, brief_md, date_str)
+        print(f"Morning Brief generated and saved to: {res.ref}")
+        print(brief_md)
+        return 0
 
     if args.command == "doctor":
         from agent_os.cli.doctor import run_doctor

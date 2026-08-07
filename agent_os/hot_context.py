@@ -12,7 +12,7 @@ def load_hot_context(
     sources: list[str] | None = None
 ) -> str:
     if sources is None:
-        sources = ["hot.md", "AI/Memory/*.md"]
+        sources = ["system.md", "invariants.md", "goals.md", "hot.md", "AI/Memory/*.md"]
         
     try:
         all_notes = connector.list_notes()

@@ -12,8 +12,12 @@ def evaluate_write_policy(ref: str, mode: str) -> Literal["auto", "gate"]:
     is_log = normalized_ref.startswith("AI/Logs/") or normalized_ref.startswith("agentos/logs/")
     if is_log and mode == "append":
         return "auto"
+        
+    is_brief = normalized_ref.startswith("AI/Briefs/") or normalized_ref.startswith("agentos/briefs/")
+    if is_brief and mode in ("append", "create"):
+        return "auto"
+        
     return "gate"
-
 
 def gated_write(
     connector: WritableMemory,
