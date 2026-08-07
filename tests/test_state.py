@@ -31,6 +31,7 @@ def test_simon_state_keys():
         "tool_result",
         "router_escalated",
         "backend_binding",
+        "conversation_summary",
     }
     assert set(SimonState.__annotations__.keys()) == expected_all_keys
     # TypedDict fields are required unless declared with NotRequired.
