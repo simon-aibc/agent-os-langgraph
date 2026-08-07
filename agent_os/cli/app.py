@@ -535,6 +535,36 @@ async def _chat_loop(
             title = content[:50] + ("..." if len(content) > 50 else "")
         upsert_session(thread_id, title)
             
+    # On exit, write session log if summary exists
+    try:
+        final_snapshot = await graph.aget_state(config)
+        summary = final_snapshot.values.get("conversation_summary")
+        if summary:
+            import os
+            from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
+            from agent_os.session_log import write_session_summary
+            from agent_os.sessions import _get_db
+            
+            connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
+            if connector_name == "gbrain":
+                connector = GbrainConnector()
+            else:
+                vault_path = os.getenv("AGENT_OS_VAULT_PATH", backend_binding.sandbox_root)
+                connector = MarkdownVaultConnector(vault_path)
+                
+            with _get_db() as db:
+                c = db.execute("SELECT turn_count, created_at, title FROM sessions WHERE thread_id = ?", (thread_id,))
+                row = c.fetchone()
+                
+            session_meta = {
+                "turn_count": row[0] if row else 0,
+                "created_at": row[1] if row else "",
+                "title": row[2] if row else "Untitled Session"
+            }
+            write_session_summary(connector, thread_id, summary, session_meta)
+    except Exception as e:
+        formatter.print_warning(f"Failed to write session log: {e}")
+
     return 0
 
 

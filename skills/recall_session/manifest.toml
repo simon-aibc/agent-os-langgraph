@@ -1,0 +1,9 @@
+[skill]
+name = "recall_session"
+version = "0.1.0"
+description = "Nhớ lại nội dung chat từ các phiên trước thông qua log session"
+
+[[skill.handlers]]
+match = ["hôm qua nói gì về", "nhớ lại phiên", "recall session", "session log"]
+entrypoint = "handlers:recall_session"
+connectors = ["memory"]
