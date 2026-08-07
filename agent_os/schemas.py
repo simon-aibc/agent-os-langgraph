@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReadFileResult(BaseModel):
@@ -54,6 +54,15 @@ class ActionProposal(BaseModel):
     arguments: dict[str, object] = Field(default_factory=dict)
     reason: str = ""
     side_effect: Literal["none", "read", "write", "network", "payment"] = "none"
+
+
+class MemoryWriteProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    connector: str
+    ref: str
+    mode: str
+    content_preview: str
+    side_effect: str
 
 
 class PlanArtifact(BaseModel):
