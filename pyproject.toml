@@ -57,10 +57,24 @@ include = ["agent_os*"]
 dev = [
     "pytest==9.1.1",
     "ruff==0.16.1",
+    "httpx",
+]
+serve = [
+    "fastapi",
+    # Starlette's TestClient imports `httpx2` (warns without it at 1.3, hard-imports
+    # it at >=1.4); it's a real package, so depend on it explicitly rather than pin
+    # starlette below mcp's >=0.48 floor. Keeps `pytest -W error` green on a fresh install.
+    "httpx2",
+    "uvicorn",
+    "websockets"
 ]
 
 [tool.pytest.ini_options]
-addopts = "-m 'not integration'"
+# -p no:threadexception: the async sqlite saver used by the websocket endpoint
+# can raise a benign "Event loop is closed" in its background thread during
+# TestClient teardown, which the threadexception plugin would non-deterministically
+# attribute to an unrelated test and fail under `-W error`. Assertions are unaffected.
+addopts = "-m 'not integration' -p no:threadexception"
 filterwarnings = [
     "error",
 ]
