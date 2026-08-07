@@ -19,6 +19,7 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
     resolved_prof = None
     if binding:
         from pathlib import Path
+
         from agent_os.backends import BackendRegistry
         from agent_os.profiles import load_profiles, resolve_profile
         try:
@@ -80,8 +81,9 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
             brief = invoke_with_llm_retry(lambda: invoker(fake_state))
             return brief.summary
         else:
-            from agent_os.llm import get_architect_llm
             from langchain_core.messages import HumanMessage
+
+            from agent_os.llm import get_architect_llm
             llm = get_architect_llm(model_str)
             return str(llm.invoke([HumanMessage(content=summary_prompt)]).content)
 

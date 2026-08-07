@@ -37,7 +37,7 @@ def recall_session(task: str, **kwargs) -> str:
     out = [f"Kết quả nhớ lại lịch sử chat cho '{query}':\n"]
     found = False
     
-    for i, res in enumerate(results, 1):
+    for res in results:
         ref = res.get("ref", "")
         # Scope vào AI/Logs/ hoặc agentos/logs/ (theo evaluate_write_policy)
         normalized_ref = ref.lstrip("/")

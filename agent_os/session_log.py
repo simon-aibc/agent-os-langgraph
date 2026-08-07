@@ -1,7 +1,7 @@
 import datetime
 from typing import Any
 
-from agent_os.connectors import WritableMemory, MemoryWriteResult
+from agent_os.connectors import MemoryWriteResult, WritableMemory
 from agent_os.memory_gate import gated_write
 from agent_os.schemas import MemoryWriteProposal
 
@@ -15,7 +15,7 @@ def write_session_summary(
     """Write the session summary to the vault via auto-approved append."""
     
     # Use UTC for standard logging date
-    now = datetime.datetime.now(datetime.timezone.utc)
+    now = datetime.datetime.now(datetime.UTC)
     date_str = now.strftime("%Y-%m-%d")
     
     ref = f"AI/Logs/{date_str}.md"
@@ -41,8 +41,8 @@ def write_session_summary(
         f"\n## Session: {title} ({thread_id})",
         f"- **Time**: {now.isoformat()}",
         f"- **Turns**: {turn_count}",
-        f"- **Agent**: agent-os",
-        f"- **Via**: session-log",
+        "- **Agent**: agent-os",
+        "- **Via**: session-log",
         "",
         summary,
         ""

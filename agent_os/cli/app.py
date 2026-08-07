@@ -541,6 +541,7 @@ async def _chat_loop(
         summary = final_snapshot.values.get("conversation_summary")
         if summary:
             import os
+
             from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
             from agent_os.session_log import write_session_summary
             from agent_os.sessions import _get_db

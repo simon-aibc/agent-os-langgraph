@@ -227,7 +227,7 @@ def test_config_threshold_n_from_profile(monkeypatch):
     
     brief = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
     
-    with patch("agent_os.profiles.load_profiles") as mock_load, \
+    with patch("agent_os.profiles.load_profiles"), \
          patch("agent_os.profiles.resolve_profile") as mock_resolve, \
          patch("agent_os.nodes.architect.build_cli_architect_invoker") as mock_build, \
          patch("agent_os.summarize.summarize_and_trim") as mock_sum_trim:

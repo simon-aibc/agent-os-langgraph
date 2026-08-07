@@ -1,12 +1,10 @@
-import pytest
-from datetime import datetime, timezone
-import os
-import json
 
-from agent_os.connectors import MarkdownVaultConnector, MemoryWriteResult
+import pytest
+
+from agent_os.connectors import MarkdownVaultConnector
 from agent_os.session_log import write_session_summary
-from agent_os.schemas import MemoryWriteProposal
 from skills.recall_session.handlers import recall_session
+
 
 def test_write_session_summary_auto(tmp_path):
     """Test that write_session_summary auto-approves and writes correctly to AI/Logs/"""
@@ -54,7 +52,7 @@ def test_recall_session_finds_prior(tmp_path, monkeypatch):
     import datetime
     
     # Write session 1
-    MockDatetime.current = datetime.datetime(2026, 8, 1, tzinfo=datetime.timezone.utc)
+    MockDatetime.current = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
     with monkeypatch.context() as m:
         m.setattr(datetime, "datetime", MockDatetime)
         write_session_summary(
@@ -65,7 +63,7 @@ def test_recall_session_finds_prior(tmp_path, monkeypatch):
         )
     
     # Write session 2
-    MockDatetime.current = datetime.datetime(2026, 8, 2, tzinfo=datetime.timezone.utc)
+    MockDatetime.current = datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC)
     with monkeypatch.context() as m:
         m.setattr(datetime, "datetime", MockDatetime)
         write_session_summary(
