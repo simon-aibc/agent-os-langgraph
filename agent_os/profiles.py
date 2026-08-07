@@ -3,13 +3,20 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_os.backends import BackendRegistry
 
 
 class ProfileLoadError(ValueError):
     """Raised for invalid, unsafe, or unresolvable profile configuration."""
+
+
+class HotContextConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_chars: int = 8000
+    max_age_days: int = 14
+    sources: list[str] = Field(default_factory=lambda: ["hot.md", "AI/Memory/*.md"])
 
 
 class Profile(BaseModel):
@@ -22,6 +29,7 @@ class Profile(BaseModel):
     sandbox: str | None = None
     description: str = ""
     extends: str | None = None
+    hot_context: HotContextConfig | None = None
 
 
 class ProfileFile(BaseModel):
@@ -37,6 +45,7 @@ class ResolvedProfile(BaseModel):
     architect: str | None = None
     executor: str | None = None
     sandbox: str
+    hot_context: HotContextConfig
 
 
 def _reject_secrets(data: Any, path: str = "") -> None:
@@ -169,13 +178,13 @@ def resolve_profile(
     # Base from parent if exists
     if len(chain) > 1:
         parent = profile_file.profiles[chain[-1]]
-        for field in ("router", "architect", "executor", "sandbox"):
+        for field in ("router", "architect", "executor", "sandbox", "hot_context"):
             resolved_data[field] = getattr(parent, field)
             
     # Apply child overrides
     child = profile_file.profiles[name]
     child_set = child.model_fields_set
-    for field in ("router", "architect", "executor", "sandbox"):
+    for field in ("router", "architect", "executor", "sandbox", "hot_context"):
         if field in child_set:
             resolved_data[field] = getattr(child, field)
             
@@ -208,4 +217,5 @@ def resolve_profile(
         architect=resolved_data.get("architect"),
         executor=resolved_data.get("executor"),
         sandbox=resolved_data["sandbox"],
+        hot_context=resolved_data.get("hot_context") or HotContextConfig(),
     )
