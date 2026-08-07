@@ -106,6 +106,18 @@ class FilesystemConnector(Connector):
         return ExecutionResult(status="failed", errors=["Unknown error"])
 
 
+def _parse_frontmatter(content: str) -> dict[str, Any]:
+    match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
+    if not match:
+        return {}
+    fm = match.group(1)
+    res = {}
+    for line in fm.split("\n"):
+        if ":" in line:
+            k, v = line.split(":", 1)
+            res[k.strip()] = v.strip()
+    return res
+
 class MarkdownVaultConnector(MemoryConnector):
     def __init__(self, root_path: str):
         self.root_path = Path(root_path).resolve()
@@ -114,17 +126,7 @@ class MarkdownVaultConnector(MemoryConnector):
     def name(self) -> str:
         return "markdown_vault"
         
-    def _parse_frontmatter(self, content: str) -> dict[str, Any]:
-        match = re.match(r"^---\n(.*?)\n---", content, re.DOTALL)
-        if not match:
-            return {}
-        fm = match.group(1)
-        res = {}
-        for line in fm.split("\n"):
-            if ":" in line:
-                k, v = line.split(":", 1)
-                res[k.strip()] = v.strip()
-        return res
+
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         results = []
@@ -132,33 +134,53 @@ class MarkdownVaultConnector(MemoryConnector):
             try:
                 content = p.read_text(encoding="utf-8")
                 if query.lower() in content.lower():
-                    results.append({"path": p.relative_to(self.root_path).as_posix(), "snippet": content[:100]})
+                    fm = _parse_frontmatter(content)
+                    title = fm.get("title")
+                    if not title:
+                        h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+                        title = h1_match.group(1).strip() if h1_match else None
+                    
+                    results.append({
+                        "ref": p.relative_to(self.root_path).as_posix(),
+                        "title": title,
+                        "snippet": content[:100],
+                        "score": None
+                    })
                     if len(results) >= limit:
                         break
             except Exception:
                 continue
         return results
 
-    def read_note(self, slug_or_path: str) -> dict[str, Any]:
-        path = self.root_path / slug_or_path
+    def read_note(self, ref: str) -> dict[str, Any]:
+        path = self.root_path / ref
         if not path.name.endswith(".md"):
             path = path.with_suffix(".md")
             
         try:
             content = path.read_text(encoding="utf-8")
-            fm = self._parse_frontmatter(content)
+            fm = _parse_frontmatter(content)
             
             # Follow basic wikilinks `[[Link]]`
             links = re.findall(r"\[\[(.*?)\]\]", content)
             
-            return {"path": slug_or_path, "content": content, "frontmatter": fm, "links": links}
+            return {"ref": ref, "content": content, "frontmatter": fm, "links": links}
         except FileNotFoundError as e:
-            raise ValueError(f"Note not found: {slug_or_path}") from e
+            raise ValueError(f"Note not found: {ref}") from e
 
     def list_notes(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         results = []
         for p in self.root_path.rglob("*.md"):
-            results.append({"path": p.relative_to(self.root_path).as_posix()})
+            try:
+                content = p.read_text(encoding="utf-8")
+                fm = _parse_frontmatter(content)
+                title = fm.get("title")
+                if not title:
+                    h1_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
+                    title = h1_match.group(1).strip() if h1_match else None
+            except Exception:
+                title = None
+            results.append({"ref": p.relative_to(self.root_path).as_posix(), "title": title})
         return results
 
 
@@ -214,24 +236,92 @@ class GbrainConnector(MemoryConnector):
 
     def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         res = self._call_rpc("tools/call", {"name": "query", "arguments": {"query": query, "limit": limit}})
-        # gbrain returns: {"content": [{"text": "<json string with .hits>"}]}
+        
+        hits = []
         if isinstance(res, dict):
-            content = res.get("content") or []
-            if content and isinstance(content, list):
-                text = content[0].get("text", "")
+            c_list = res.get("content") or []
+            if c_list and isinstance(c_list, list):
+                text = c_list[0].get("text", "")
                 try:
                     import json
-                    nested = json.loads(text)
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict) and "hits" in parsed:
+                        hits = parsed["hits"]
+                    elif isinstance(parsed, list):
+                        hits = parsed
                 except (json.JSONDecodeError, TypeError):
-                    return []
-                hits = nested.get("hits") if isinstance(nested, dict) else nested
-                return hits if isinstance(hits, list) else []
-        return res if isinstance(res, list) else []
+                    pass
+        elif isinstance(res, list):
+            hits = res
+            
+        results = []
+        if isinstance(hits, list):
+            for hit in hits:
+                if isinstance(hit, dict):
+                    results.append({
+                        "ref": hit.get("slug", ""),
+                        "title": hit.get("title"),
+                        "snippet": hit.get("chunk_text", "")[:200],
+                        "score": hit.get("score")
+                    })
+        return results
 
-    def read_note(self, slug_or_path: str) -> dict[str, Any]:
-        res = self._call_rpc("tools/call", {"name": "read_note", "arguments": {"path": slug_or_path}})
-        return res if isinstance(res, dict) else {}
+    def read_note(self, ref: str) -> dict[str, Any]:
+        res = self._call_rpc("tools/call", {"name": "get_page", "arguments": {"slug": ref}})
+        
+        content = ""
+        if isinstance(res, dict):
+            c_list = res.get("content") or []
+            if c_list and isinstance(c_list, list):
+                text = c_list[0].get("text", "")
+                try:
+                    import json
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        content = parsed.get("compiled_truth") or parsed.get("content", "")
+                    else:
+                        content = text
+                except (json.JSONDecodeError, TypeError):
+                    content = text
+        elif isinstance(res, str):
+            content = res
+            
+        fm = _parse_frontmatter(content)
+        links = re.findall(r"\[\[(.*?)\]\]", content)
+        
+        return {
+            "ref": ref,
+            "content": content,
+            "frontmatter": fm,
+            "links": links
+        }
 
     def list_notes(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        res = self._call_rpc("tools/call", {"name": "list_notes", "arguments": {"filters": filters or {}}})
-        return res if isinstance(res, list) else []
+        res = self._call_rpc("tools/call", {"name": "list_pages", "arguments": filters or {}})
+        
+        pages = []
+        if isinstance(res, dict):
+            c_list = res.get("content") or []
+            if c_list and isinstance(c_list, list):
+                text = c_list[0].get("text", "")
+                try:
+                    import json
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict) and "pages" in parsed:
+                        pages = parsed["pages"]
+                    elif isinstance(parsed, list):
+                        pages = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        elif isinstance(res, list):
+            pages = res
+            
+        results = []
+        if isinstance(pages, list):
+            for page in pages:
+                if isinstance(page, dict):
+                    results.append({
+                        "ref": page.get("slug", ""),
+                        "title": page.get("title")
+                    })
+        return results

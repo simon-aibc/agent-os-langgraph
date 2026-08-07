@@ -37,16 +37,15 @@ def vault_qa(task: str, **kwargs) -> str:
         
     out = [f"Kết quả tra cứu cho '{query}':\n"]
     for i, res in enumerate(results, 1):
-        path = res.get("path", "unknown")
+        ref = res.get("ref", "unknown")
         snippet = res.get("snippet", "")
         if not snippet:
-            # Maybe it's gbrain format which doesn't have snippet, try to read it
             try:
-                note = connector.read_note(path)
+                note = connector.read_note(ref)
                 snippet = note.get("content", "")[:200]
             except Exception:
                 pass
                 
-        out.append(f"{i}. [{path}]\nTrích đoạn: {snippet}...\n")
+        out.append(f"{i}. [{ref}]\nTrích đoạn: {snippet}...\n")
         
     return "\n".join(out)
