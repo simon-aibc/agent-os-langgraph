@@ -3,11 +3,23 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
-## [Unreleased]
+## [1.6.0] — 2026-08-08
 
-- r1.5f (architect guard).
-- r1.6a (Morning Brief engine + context spine + `AI/Briefs/` auto-policy).
-- r1.6b (`agent-os serve` FastAPI, localhost-first, `[serve]` extra).
+### Added
+
+- **Morning Brief engine** (`agent_os/brief.py`) and an ordered **context spine** (`system.md` → `invariants.md` → `goals.md` → `hot.md` → `AI/Memory/*.md`); `agent-os brief` CLI writes `AI/Briefs/YYYY-MM-DD.md` through the write-path, auto-approved by policy.
+- **Runtime API** (`agent-os serve`): a localhost-first FastAPI interface from the `[serve]` extra exposing sessions, a chat WebSocket, brief, graph, and health endpoints — the seam between the runtime and any external UI.
+- **PolicyEngine**: `PolicyEngine` Protocol + `LocalPolicy` reference with a 7-level side-effect taxonomy (`none`/`read`/`write`/`network`/`communication`/`payment`/`privileged` → `allow`/`deny`/`require_approval`) and an `apply_policy` gate helper; the v1.4 memory-write gate is now a thin adapter over it, unchanged in behavior.
+- **Workspace v1** (`workspace.toml`): a composition primitive binding backends, skills, connectors, memory, policy, context sources, and limits; `agent-os --workspace <path>` for `run`/`chat`/`serve`. `department`/`organization` are metadata only — the core stays domain-agnostic. Two seeded reference workspaces under `examples/`.
+
+### Fixed
+
+- Architect node no longer crashes when a backend binding is present but profile resolution fails (guard on the resolved profile); summarization degrades gracefully when its model is unavailable.
+
+### Validation
+
+- 422 offline tests pass with warnings treated as errors (`python -m pytest -W error`); ruff clean; CI on Python 3.11 and 3.12.
+- Real end-to-end verified: brief generation against a live `claude-code` backend; `agent-os serve` endpoints via TestClient.
 
 ## [1.5.0] — 2026-08-07
 
