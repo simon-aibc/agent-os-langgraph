@@ -115,14 +115,13 @@ def test_real_llm_smoke(tmp_path):
         f.write("Ship v1.6 today.")
         
     sessions = [{"thread_id": "thr1", "title": "Debug routing", "updated_at": yesterday}]
-    
-    from agent_os.backends import BackendBinding
-    binding = BackendBinding.from_env()
-    
+
+    # Real summarizer via the CLI architect invoker (same proven path as the
+    # r1.5c summarize smoke), not the removed `agent_os.backends.BackendBinding`.
     def invoke_summarizer(prompt: str) -> str:
-        from langchain_core.messages import HumanMessage
-        resp = binding.architect.invoke([HumanMessage(content=prompt)])
-        return resp.content if not isinstance(resp, str) else resp
+        from agent_os.agents.cli_architect import build_cli_architect_invoker
+        invoker = build_cli_architect_invoker("claude-code")
+        return invoker({"task": prompt, "messages": []}).summary
         
     brief = generate_brief(
         connector,
