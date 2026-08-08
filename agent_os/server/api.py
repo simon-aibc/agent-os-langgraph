@@ -1,21 +1,53 @@
+import asyncio
 import datetime
+import json
 import os
 import sqlite3
+import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from agent_os.brief import generate_brief
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.connectors import MarkdownVaultConnector
+from agent_os.runs import (
+    append_event,
+    create_run,
+    get_run,
+    list_events,
+    list_runs,
+    set_status,
+)
 from agent_os.sandbox import get_sandbox_root
+from agent_os.server.run_executor import execute_run
 from agent_os.sessions import delete_session, list_sessions
 
-app = FastAPI(title="agent-os API", version="1.6.0")
+app = FastAPI(title="agent-os API", version="1.7.0")
+TERMINAL_RUN_STATUSES = {"completed", "cancelled", "error"}
+
+
+class CreateRunRequest(BaseModel):
+    task: str
+    thread_id: str | None = None
+    workspace: str | None = None
+
+
+class ApproveRunRequest(BaseModel):
+    feedback: str | None = None
+
 
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
-    return {"status": "ok", "version": "1.6.0"}
+    return {"status": "ok", "version": "1.7.0"}
 
 @app.get("/api/sessions")
 def get_sessions() -> list[dict[str, Any]]:
@@ -95,6 +127,103 @@ def create_brief() -> dict[str, str]:
 def get_graph_data() -> dict[str, list[dict[str, Any]]]:
     # Phase this: returning raw graph shape
     return {"nodes": [], "edges": []}
+
+@app.post("/api/runs")
+def create_run_endpoint(
+    request: CreateRunRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, str]:
+    thread_id = request.thread_id or str(uuid.uuid4())
+    run_id = create_run(thread_id, request.workspace, request.task)
+    background_tasks.add_task(execute_run, run_id, thread_id, request.task)
+    return {"run_id": run_id, "thread_id": thread_id, "status": "queued"}
+
+@app.get("/api/runs")
+def list_runs_endpoint(
+    status: str | None = None,
+    workspace: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    return list_runs(status=status, workspace=workspace, limit=limit)
+
+def _latest_interrupt_prompt(run_id: str) -> object | None:
+    for event in reversed(list_events(run_id)):
+        if event["kind"] == "interrupt":
+            payload = event["payload"]
+            if isinstance(payload, dict):
+                return payload.get("prompt")
+            return payload
+    return None
+
+@app.get("/api/runs/{run_id}")
+def get_run_endpoint(run_id: str) -> dict[str, Any]:
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    run["interrupt"] = (
+        _latest_interrupt_prompt(run_id)
+        if run["status"] == "interrupted"
+        else None
+    )
+    return run
+
+@app.post("/api/runs/{run_id}/approve")
+def approve_run_endpoint(
+    run_id: str,
+    request: ApproveRunRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, str]:
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run["status"] != "interrupted":
+        raise HTTPException(status_code=409, detail="Run is not interrupted")
+
+    background_tasks.add_task(
+        execute_run,
+        run_id,
+        run["thread_id"],
+        "",
+        resume_feedback=request.feedback or "",
+    )
+    return {"run_id": run_id, "status": "running"}
+
+@app.post("/api/runs/{run_id}/cancel")
+def cancel_run_endpoint(run_id: str) -> dict[str, str]:
+    run = get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run["status"] in TERMINAL_RUN_STATUSES:
+        raise HTTPException(status_code=409, detail="Run is already terminal")
+
+    set_status(run_id, "cancelled", ended=True)
+    append_event(run_id, "status", {"status": "cancelled"})
+    return {"run_id": run_id, "status": "cancelled"}
+
+@app.get("/api/runs/{run_id}/events")
+def get_run_events(run_id: str, after: int = 0) -> StreamingResponse:
+    if get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    async def event_stream():
+        last_seq = after
+        for event in list_events(run_id, after=last_seq):
+            last_seq = event["seq"]
+            yield f"data: {json.dumps(event)}\n\n"
+
+        while True:
+            for event in list_events(run_id, after=last_seq):
+                last_seq = event["seq"]
+                yield f"data: {json.dumps(event)}\n\n"
+
+            run = get_run(run_id)
+            if run is None or run["status"] in TERMINAL_RUN_STATUSES:
+                yield "event: end\ndata: {}\n\n"
+                return
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @app.websocket("/api/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
