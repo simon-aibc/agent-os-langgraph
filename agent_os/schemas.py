@@ -53,7 +53,8 @@ class ActionProposal(BaseModel):
     tool: str
     arguments: dict[str, object] = Field(default_factory=dict)
     reason: str = ""
-    side_effect: Literal["none", "read", "write", "network", "payment"] = "none"
+    side_effect: Literal["none", "read", "write", "network", "payment", "communication", "privileged"] = "none"
+    connector: str | None = None
 
 
 class MemoryWriteProposal(BaseModel):
@@ -102,3 +103,11 @@ class ExecutorReport(CodingResult):
         if "success" in data and "status" not in data:
             data["status"] = "completed" if data.pop("success") else "failed"
         super().__init__(**data)
+
+class PolicyDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: Literal["allow", "deny", "require_approval"]
+    policy_id: str
+    reason: str = ""
+    approver_roles: list[str] = Field(default_factory=list)
+    transformed_arguments: dict[str, object] | None = None
