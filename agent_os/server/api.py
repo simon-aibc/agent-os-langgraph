@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from agent_os.brief import generate_brief
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
-from agent_os.connectors import MarkdownVaultConnector
+from agent_os.connectors import GbrainConnector, MarkdownVaultConnector, MemoryConnector
 from agent_os.runs import (
     append_event,
     create_run,
@@ -32,7 +32,7 @@ from agent_os.sandbox import get_sandbox_root
 from agent_os.server.run_executor import execute_run
 from agent_os.sessions import delete_session, list_sessions
 
-app = FastAPI(title="agent-os API", version="1.7.1")
+app = FastAPI(title="agent-os API", version="1.7.2")
 
 # The Runtime API is meant to be driven by a browser operator console on a
 # different localhost port, so cross-origin requests must be allowed. Defaults
@@ -52,6 +52,7 @@ app.add_middleware(
 )
 
 TERMINAL_RUN_STATUSES = {"completed", "cancelled", "error"}
+GRAPH_MAX_NODES = 200
 
 
 class CreateRunRequest(BaseModel):
@@ -66,7 +67,7 @@ class ApproveRunRequest(BaseModel):
 
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
-    return {"status": "ok", "version": "1.7.1"}
+    return {"status": "ok", "version": "1.7.2"}
 
 @app.get("/api/sessions")
 def get_sessions() -> list[dict[str, Any]]:
@@ -142,10 +143,64 @@ def create_brief() -> dict[str, str]:
     brief_md = generate_brief(connector, sessions, date_str, summarizer=invoke_summarizer)
     return {"date": date_str, "content": brief_md}
 
+def build_graph_data(
+    connector: MemoryConnector,
+    max_nodes: int,
+) -> dict[str, list[dict[str, Any]]]:
+    nodes: list[dict[str, Any]] = []
+    for note in connector.list_notes()[: max(max_nodes, 0)]:
+        ref = note.get("ref")
+        if not ref:
+            continue
+
+        title = note.get("title")
+        nodes.append(
+            {
+                "id": ref,
+                "title": title or ref,
+                "group": ref.split("/")[0] if "/" in ref else "",
+                "type": "page",
+            }
+        )
+
+    refs = {node["id"] for node in nodes}
+    title_to_ref = {
+        node["title"]: node["id"]
+        for node in nodes
+        if node["title"] and node["title"] != node["id"]
+    }
+
+    edges: list[dict[str, Any]] = []
+    seen_edges: set[tuple[str, str]] = set()
+    for node in nodes:
+        source = node["id"]
+        try:
+            note = connector.read_note(source)
+        except Exception:
+            continue
+
+        for link in note.get("links") or []:
+            target = link if link in refs else title_to_ref.get(link)
+            if target not in refs or target == source:
+                continue
+
+            edge_key = (source, target)
+            if edge_key in seen_edges:
+                continue
+            seen_edges.add(edge_key)
+            edges.append({"source": source, "target": target, "type": "link"})
+
+    return {"nodes": nodes, "edges": edges}
+
+
 @app.get("/api/graph")
-def get_graph_data() -> dict[str, list[dict[str, Any]]]:
-    # Phase this: returning raw graph shape
-    return {"nodes": [], "edges": []}
+def get_graph_data(limit: int = GRAPH_MAX_NODES) -> dict[str, list[dict[str, Any]]]:
+    try:
+        effective_max = min(max(limit, 0), GRAPH_MAX_NODES)
+        connector = GbrainConnector()
+        return build_graph_data(connector, effective_max)
+    except Exception:
+        return {"nodes": [], "edges": []}
 
 @app.post("/api/runs")
 def create_run_endpoint(

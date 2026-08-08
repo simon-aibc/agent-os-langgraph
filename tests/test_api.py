@@ -5,14 +5,14 @@ from fastapi.testclient import TestClient
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import append_event, create_run, get_run, list_events, set_status
-from agent_os.server.api import app
+from agent_os.server.api import app, build_graph_data
 
 client = TestClient(app)
 
 def test_health_version():
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "version": "1.7.1"}
+    assert resp.json() == {"status": "ok", "version": "1.7.2"}
 
 def test_cors_allows_console_origin():
     origin = "http://127.0.0.1:4100"
@@ -56,6 +56,94 @@ def test_api_graph_shape():
     assert "edges" in data
     assert isinstance(data["nodes"], list)
     assert isinstance(data["edges"], list)
+
+class FakeMemoryConnector:
+    @property
+    def name(self):
+        return "fake"
+
+    def __init__(self):
+        self.notes = [
+            {"ref": "team/alpha", "title": "Alpha"},
+            {"ref": "beta", "title": "Beta Page"},
+            {"ref": "gamma", "title": None},
+            {"ref": "", "title": "No Ref"},
+        ]
+        self.reads = {
+            "team/alpha": {
+                "ref": "team/alpha",
+                "content": "",
+                "frontmatter": {},
+                "links": [
+                    "beta",
+                    "Beta Page",
+                    "Alpha",
+                    "missing",
+                    "team/alpha",
+                ],
+            },
+            "beta": {
+                "ref": "beta",
+                "content": "",
+                "frontmatter": {},
+                "links": ["gamma"],
+            },
+            "gamma": {
+                "ref": "gamma",
+                "content": "",
+                "frontmatter": {},
+                "links": [],
+            },
+        }
+
+    def search(self, query, limit=10):
+        return []
+
+    def list_notes(self, filters=None):
+        return self.notes
+
+    def read_note(self, slug_or_path):
+        return self.reads[slug_or_path]
+
+
+def test_build_graph_data_nodes_and_edges():
+    data = build_graph_data(FakeMemoryConnector(), 10)
+
+    assert data["nodes"] == [
+        {
+            "id": "team/alpha",
+            "title": "Alpha",
+            "group": "team",
+            "type": "page",
+        },
+        {"id": "beta", "title": "Beta Page", "group": "", "type": "page"},
+        {"id": "gamma", "title": "gamma", "group": "", "type": "page"},
+    ]
+    assert data["edges"] == [
+        {"source": "team/alpha", "target": "beta", "type": "link"},
+        {"source": "beta", "target": "gamma", "type": "link"},
+    ]
+
+
+def test_build_graph_data_respects_node_cap():
+    data = build_graph_data(FakeMemoryConnector(), 2)
+
+    assert [node["id"] for node in data["nodes"]] == ["team/alpha", "beta"]
+    assert data["edges"] == [
+        {"source": "team/alpha", "target": "beta", "type": "link"}
+    ]
+
+
+def test_api_graph_empty_state_fallback(monkeypatch):
+    def raise_gbrain_connector():
+        raise RuntimeError("gbrain unavailable")
+
+    monkeypatch.setattr("agent_os.server.api.GbrainConnector", raise_gbrain_connector)
+
+    resp = client.get("/api/graph")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": [], "edges": []}
 
 def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")

@@ -3,6 +3,12 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [1.7.2] — 2026-08-08
+
+### Added
+
+- Real `/api/graph` returns G-Brain nodes/edges from the memory connector, bounded by `GRAPH_MAX_NODES=200` with `?limit=` support and an empty-state fallback when gbrain is unreachable.
+
 ## [1.7.1] — 2026-08-08
 
 ### Fixed
