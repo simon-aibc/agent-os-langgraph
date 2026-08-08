@@ -1,6 +1,10 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
+from agent_os.checkpoints import CHECKPOINT_DB_ENV
+from agent_os.runs import append_event, create_run, set_status
 from agent_os.server.api import app
 
 client = TestClient(app)
@@ -41,6 +45,25 @@ def test_api_graph_shape():
     assert "edges" in data
     assert isinstance(data["nodes"], list)
     assert isinstance(data["edges"], list)
+
+def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    run_id = create_run("thread-sse", "workspace", "task")
+    append_event(run_id, "node", {"name": "planner", "event": "on_chain_start"})
+    append_event(run_id, "token", {"content": "hello"})
+    append_event(run_id, "result", {})
+    set_status(run_id, "completed", ended=True)
+
+    resp = client.get(f"/api/runs/{run_id}/events?after=1")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+    frames = [frame for frame in resp.text.strip().split("\n\n") if frame]
+    replayed = [json.loads(frame.removeprefix("data: ")) for frame in frames[:2]]
+    assert [event["seq"] for event in replayed] == [2, 3]
+    assert [event["kind"] for event in replayed] == ["token", "result"]
+    assert frames[-1] == "event: end\ndata: {}"
 
 @pytest.mark.anyio
 async def test_ws_chat_streams(monkeypatch, tmp_path):

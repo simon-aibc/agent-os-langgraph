@@ -1,17 +1,22 @@
+import asyncio
 import datetime
+import json
 import os
 import sqlite3
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 
 from agent_os.brief import generate_brief
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.connectors import MarkdownVaultConnector
+from agent_os.runs import get_run, list_events
 from agent_os.sandbox import get_sandbox_root
 from agent_os.sessions import delete_session, list_sessions
 
 app = FastAPI(title="agent-os API", version="1.6.0")
+TERMINAL_RUN_STATUSES = {"completed", "cancelled", "error"}
 
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
@@ -95,6 +100,31 @@ def create_brief() -> dict[str, str]:
 def get_graph_data() -> dict[str, list[dict[str, Any]]]:
     # Phase this: returning raw graph shape
     return {"nodes": [], "edges": []}
+
+@app.get("/api/runs/{run_id}/events")
+def get_run_events(run_id: str, after: int = 0) -> StreamingResponse:
+    if get_run(run_id) is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    async def event_stream():
+        last_seq = after
+        for event in list_events(run_id, after=last_seq):
+            last_seq = event["seq"]
+            yield f"data: {json.dumps(event)}\n\n"
+
+        while True:
+            for event in list_events(run_id, after=last_seq):
+                last_seq = event["seq"]
+                yield f"data: {json.dumps(event)}\n\n"
+
+            run = get_run(run_id)
+            if run is None or run["status"] in TERMINAL_RUN_STATUSES:
+                yield "event: end\ndata: {}\n\n"
+                return
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 @app.websocket("/api/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
