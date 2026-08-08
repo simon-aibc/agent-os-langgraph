@@ -1,10 +1,12 @@
 import contextlib
 import sqlite3
+from pathlib import Path
 
 import pytest
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import (
+    _get_db_path,
     _init_runs_db,
     append_event,
     create_run,
@@ -17,9 +19,9 @@ from agent_os.runs import (
 
 @pytest.fixture
 def runs_db(tmp_path, monkeypatch):
-    database_path = tmp_path / "checkpoints.db"
-    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(database_path))
-    return database_path
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(tmp_path / "checkpoints.db"))
+    # The ledger lives in its own derived file, not the checkpoint DB.
+    return Path(_get_db_path())
 
 
 def test_init_runs_db_creates_tables(runs_db):

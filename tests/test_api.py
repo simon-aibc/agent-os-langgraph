@@ -4,10 +4,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
-from agent_os.runs import append_event, create_run, set_status
+from agent_os.runs import append_event, create_run, get_run, list_events, set_status
 from agent_os.server.api import app
 
 client = TestClient(app)
+
+def test_health_version():
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok", "version": "1.7.0"}
 
 def test_api_sessions_list(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -64,6 +69,144 @@ def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
     assert [event["seq"] for event in replayed] == [2, 3]
     assert [event["kind"] for event in replayed] == ["token", "result"]
     assert frames[-1] == "event: end\ndata: {}"
+
+def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    calls = []
+
+    async def fake_execute_run(run_id, thread_id, task, *, resume_feedback=None):
+        calls.append(
+            {
+                "run_id": run_id,
+                "thread_id": thread_id,
+                "task": task,
+                "resume_feedback": resume_feedback,
+            }
+        )
+        if resume_feedback is None:
+            append_event(run_id, "interrupt", {"prompt": "First prompt"})
+            append_event(run_id, "interrupt", {"prompt": "Approve revised plan?"})
+            set_status(run_id, "interrupted")
+        else:
+            append_event(run_id, "result", {})
+            set_status(run_id, "completed", ended=True)
+
+    monkeypatch.setattr("agent_os.server.api.execute_run", fake_execute_run)
+
+    create_resp = client.post(
+        "/api/runs",
+        json={"task": "ship it", "workspace": "workspace-a"},
+    )
+
+    assert create_resp.status_code == 200
+    created = create_resp.json()
+    assert created["status"] == "queued"
+    assert created["thread_id"]
+
+    interrupted_resp = client.get(f"/api/runs/{created['run_id']}")
+    assert interrupted_resp.status_code == 200
+    interrupted = interrupted_resp.json()
+    assert interrupted["status"] == "interrupted"
+    assert interrupted["workspace"] == "workspace-a"
+    assert interrupted["interrupt"] == "Approve revised plan?"
+
+    approve_resp = client.post(
+        f"/api/runs/{created['run_id']}/approve",
+        json={"feedback": "approved"},
+    )
+
+    assert approve_resp.status_code == 200
+    assert approve_resp.json() == {"run_id": created["run_id"], "status": "running"}
+
+    completed_resp = client.get(f"/api/runs/{created['run_id']}")
+    assert completed_resp.status_code == 200
+    completed = completed_resp.json()
+    assert completed["status"] == "completed"
+    assert completed["interrupt"] is None
+    assert calls == [
+        {
+            "run_id": created["run_id"],
+            "thread_id": created["thread_id"],
+            "task": "ship it",
+            "resume_feedback": None,
+        },
+        {
+            "run_id": created["run_id"],
+            "thread_id": created["thread_id"],
+            "task": "",
+            "resume_feedback": "approved",
+        },
+    ]
+
+def test_run_api_cancel_path(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    run_id = create_run("thread-cancel", "workspace-a", "task")
+    set_status(run_id, "interrupted")
+
+    resp = client.post(f"/api/runs/{run_id}/cancel")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"run_id": run_id, "status": "cancelled"}
+    run = get_run(run_id)
+    assert run["status"] == "cancelled"
+    assert run["ended_at"] is not None
+    events = list_events(run_id)
+    assert events[-1]["kind"] == "status"
+    assert events[-1]["payload"] == {"status": "cancelled"}
+
+def test_run_api_404s(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+
+    assert client.get("/api/runs/missing").status_code == 404
+    assert client.post("/api/runs/missing/approve", json={}).status_code == 404
+    assert client.post("/api/runs/missing/cancel").status_code == 404
+
+def test_run_api_approve_conflict_when_not_interrupted(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    run_id = create_run("thread-approve-conflict", None, "task")
+
+    resp = client.post(f"/api/runs/{run_id}/approve", json={})
+
+    assert resp.status_code == 409
+
+def test_run_api_cancel_conflict_when_terminal(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    run_id = create_run("thread-cancel-conflict", None, "task")
+    set_status(run_id, "completed", ended=True)
+
+    resp = client.post(f"/api/runs/{run_id}/cancel")
+
+    assert resp.status_code == 409
+
+def test_run_api_list_filters(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    queued = create_run("thread-queued", "workspace-a", "task")
+    running_a = create_run("thread-running-a", "workspace-a", "task")
+    running_b = create_run("thread-running-b", "workspace-b", "task")
+    set_status(running_a, "running")
+    set_status(running_b, "running")
+
+    queued_resp = client.get("/api/runs?status=queued")
+    assert queued_resp.status_code == 200
+    assert [run["run_id"] for run in queued_resp.json()] == [queued]
+
+    workspace_resp = client.get("/api/runs?workspace=workspace-a")
+    assert workspace_resp.status_code == 200
+    assert {run["run_id"] for run in workspace_resp.json()} == {queued, running_a}
+
+    filtered_resp = client.get("/api/runs?status=running&workspace=workspace-a")
+    assert filtered_resp.status_code == 200
+    assert [run["run_id"] for run in filtered_resp.json()] == [running_a]
+
+    limit_resp = client.get("/api/runs?limit=2")
+    assert limit_resp.status_code == 200
+    assert len(limit_resp.json()) == 2
 
 @pytest.mark.anyio
 async def test_ws_chat_streams(monkeypatch, tmp_path):

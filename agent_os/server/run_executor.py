@@ -51,10 +51,24 @@ async def execute_run(
     try:
         runs.set_status(run_id, "running")
         async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
+            # Match the ledger's busy_timeout so the async checkpointer waits for
+            # the shared-file write lock instead of failing with "database is
+            # locked" when the synchronous ledger is mid-write.
+            await saver.conn.execute("PRAGMA busy_timeout=30000")
             graph = build_graph(checkpointer=saver)
             graph_input: object
             if resume_feedback is None:
-                graph_input = {"messages": [HumanMessage(content=task)]}
+                from agent_os.bindings import resolve_backend_binding
+                graph_input = {
+                    "messages": [HumanMessage(content=task)],
+                    "task": task,
+                    "plan": None,
+                    "executor_output": None,
+                    "human_feedback": None,
+                    "hot_context": None,
+                    "conversation_summary": None,
+                    "backend_binding": resolve_backend_binding(None),
+                }
             else:
                 graph_input = Command(resume=resume_feedback)
 
