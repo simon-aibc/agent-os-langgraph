@@ -36,7 +36,7 @@ dependencies = [
     "langchain-litellm==0.7.0",
     "litellm==1.93.0",
     "mcp==1.29.0",
-    "langchain-mcp-adapters==0.3.0",
+    "langchain-mcp-adapters==0.3.1",
     "rich==15.0.0",
 ]
 
