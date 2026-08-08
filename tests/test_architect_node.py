@@ -248,3 +248,51 @@ def test_config_threshold_n_from_profile(monkeypatch):
         kwargs = mock_sum_trim.call_args[1]
         assert kwargs["threshold_tokens"] == 1234
         assert kwargs["keep_recent_n"] == 42
+
+def test_architect_node_profile_resolve_fails_regression(monkeypatch):
+    """
+    Regression test for the bug where `binding` is present but `resolve_profile` raises,
+    causing `resolved_prof` to be None, which then crashed when trying to access `.summary`.
+    """
+    import pytest
+    from langchain_core.messages import HumanMessage
+
+    from agent_os.nodes.architect import architect_node
+    from agent_os.state import BackendBinding
+
+    # State with backend_binding set
+    binding = BackendBinding(
+        router="mock",
+        architect="mock",
+        executor="mock",
+        profile_name="test",
+        sandbox_root="/tmp"
+    )
+    state = {
+        "messages": [HumanMessage(content="Hello")],
+        "task": "Test task",
+        "backend_binding": binding,
+    }
+
+    # Mock resolve_profile to raise an exception
+    def mock_resolve_profile(*args, **kwargs):
+        raise ValueError("Profile load failed")
+        
+    monkeypatch.setattr("agent_os.profiles.resolve_profile", mock_resolve_profile)
+    monkeypatch.setenv("LLM_ARCHITECT", "cli/claude-code")
+
+    from unittest.mock import MagicMock, patch
+
+    from agent_os.schemas import ArchitectBrief
+    brief = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
+
+    # This should not raise AttributeError
+    try:
+        with patch("agent_os.nodes.architect.build_cli_architect_invoker") as mock_build_invoker:
+            mock_invoker = MagicMock(return_value=brief)
+            mock_build_invoker.return_value = mock_invoker
+            new_state = architect_node(state)
+            # Verify it degraded gracefully and still ran
+            assert new_state["plan"] is not None
+    except AttributeError as e:
+        pytest.fail(f"Regression failed, architect_node crashed with AttributeError: {e}")
