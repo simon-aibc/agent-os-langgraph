@@ -13,6 +13,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -31,7 +32,25 @@ from agent_os.sandbox import get_sandbox_root
 from agent_os.server.run_executor import execute_run
 from agent_os.sessions import delete_session, list_sessions
 
-app = FastAPI(title="agent-os API", version="1.7.0")
+app = FastAPI(title="agent-os API", version="1.7.1")
+
+# The Runtime API is meant to be driven by a browser operator console on a
+# different localhost port, so cross-origin requests must be allowed. Defaults
+# cover the console dev/prod port; override with AGENT_OS_CORS_ORIGINS (comma
+# separated) for other origins.
+_default_cors = "http://127.0.0.1:4100,http://localhost:4100"
+_cors_origins = [
+    o.strip()
+    for o in os.getenv("AGENT_OS_CORS_ORIGINS", _default_cors).split(",")
+    if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 TERMINAL_RUN_STATUSES = {"completed", "cancelled", "error"}
 
 
@@ -47,7 +66,7 @@ class ApproveRunRequest(BaseModel):
 
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
-    return {"status": "ok", "version": "1.7.0"}
+    return {"status": "ok", "version": "1.7.1"}
 
 @app.get("/api/sessions")
 def get_sessions() -> list[dict[str, Any]]:
