@@ -3,6 +3,12 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [1.7.1] — 2026-08-08
+
+### Fixed
+
+- **CORS on the Runtime API**: `agent-os serve` now sends `Access-Control-Allow-Origin` for the operator console origin (`http://127.0.0.1:4100` / `localhost:4100` by default; override with `AGENT_OS_CORS_ORIGINS`). Without this, a browser console could not call the API. Found by browser-verifying the console against a live server.
+
 ## [1.7.0] — 2026-08-08
 
 ### Added

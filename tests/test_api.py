@@ -12,7 +12,13 @@ client = TestClient(app)
 def test_health_version():
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "version": "1.7.0"}
+    assert resp.json() == {"status": "ok", "version": "1.7.1"}
+
+def test_cors_allows_console_origin():
+    origin = "http://127.0.0.1:4100"
+    resp = client.get("/api/health", headers={"Origin": origin})
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == origin
 
 def test_api_sessions_list(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
