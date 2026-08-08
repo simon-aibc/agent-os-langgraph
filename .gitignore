@@ -38,6 +38,7 @@ coverage.xml
 coverage.json
 
 # Databases / Checkpoints
+checkpoints.db
 *.db
 *.db-*
 *.sqlite
@@ -59,4 +60,10 @@ Thumbs.db
 *.log
 logs/
 DOGFOOD_LOG.md
+
+# Ignored directories
 /sandbox/
+sandbox/
+dashboard/
+.next/
+node_modules/

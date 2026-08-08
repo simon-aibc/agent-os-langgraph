@@ -3,15 +3,15 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11–3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 343 passing](https://img.shields.io/badge/tests-343%20passing-brightgreen.svg)
+![Tests: 408 passing](https://img.shields.io/badge/tests-408%20passing-brightgreen.svg)
 [![Release](https://img.shields.io/github/v/release/simon-aibc/agent-os-langgraph)](https://github.com/simon-aibc/agent-os-langgraph/releases/latest)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
-Production-style multi-agent orchestration built with LangGraph.
+An open-source backbone for building durable, controllable AI agent systems.
 Deterministic tools handle known work; ambiguous work escalates through an architect, human plan gate, and sandboxed executor.
-Typed state, durable SQLite checkpoints, MCP adapters, and an offline-tested streaming CLI demonstrate production engineering—not a tutorial chatbot.
+Typed state, durable SQLite checkpoints, MCP adapters, and an offline-tested streaming CLI demonstrate production engineering.
 
-**Current release:** [v1.2.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.2.0) ·
+**Current release:** [v1.5.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v1.5.0) ·
 [Changelog](CHANGELOG.md) · [Product specification](docs/PRD.md) ·
 [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap.md)
 
@@ -110,6 +110,15 @@ agent-os "write foo.txt :: $(printf 'line1\nline2')"
 # RIGHT: write content from an existing template file.
 agent-os "write foo.txt :: $(cat template.txt)"
 ```
+
+## Beyond one-shot runs
+
+Agent OS supports continuous, multi-turn, and background operations beyond basic one-shot execution:
+
+- `agent-os chat` provides multi-turn conversations and seamless workflow resumption.
+- `agent-os sessions list|inspect|delete` manages durable session state.
+- `agent-os brief` runs autonomous briefing engines.
+- `agent-os serve` provides a localhost FastAPI interface (`[serve]` extra) to integrate with external dashboards.
 
 ## Architecture
 
@@ -368,13 +377,7 @@ tests remain opt-in so a fresh clone never requires paid provider access.
 
 ## Roadmap
 
-Next milestones cover pluggable skill packages, local vault memory, context
-profiles, an interactive TUI, and isolated deployment. Hermes and Antigravity
-CLI adapters are candidates only after their noninteractive output and
-permission contracts can be enforced.
-
-See [docs/roadmap.md](docs/roadmap.md) for sequencing, public/private boundaries,
-and the complete backlog.
+See [docs/roadmap.md](docs/roadmap.md) for current state, north star goals, and the public milestone sequence.
 
 Contributions follow [CONTRIBUTING.md](CONTRIBUTING.md). Report vulnerabilities
 privately according to [SECURITY.md](SECURITY.md).
