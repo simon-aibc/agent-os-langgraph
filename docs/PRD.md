@@ -5,7 +5,7 @@
 - **License:** MIT
 - **Runtime:** Python 3.11+
 - **Repository:** https://github.com/simon-aibc/agent-os-langgraph
-- **Quality gate:** 263 offline tests, `pytest -W error`, Ruff, Python 3.11/3.12 CI
+- **Quality gate:** 416 offline tests, `pytest -W error`, Ruff, Python 3.11/3.12 CI
 
 ## 1. Product summary
 

@@ -139,7 +139,7 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 
 ## What each milestone demonstrates
 
-| Milestone | Implemented capability | Hiring signal |
+| Milestone | Implemented capability | Why it matters |
 |---|---|---|
 | R1 | Typed state and compiled graph skeleton | Understands LangGraph state and graph construction |
 | R2 | Conditional supervisor routing and bounded recursion | Designs deterministic control flow instead of prompt-only routing |
@@ -154,6 +154,9 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 | v1.0.1 | Resume, Bash status, write docs, and retry fixes | Converts dogfood findings into regression-tested patches |
 | v1.1.x | Claude Code and Codex CLI delegators | Integrates subscription agents without pretending they are raw chat models |
 | v1.2.x | Backend portability and profiles | Resolves tight coupling via an explicit BackendAdapter Protocol |
+| v1.3.x | Generic contracts, connector framework, and skill packages | Escapes the coding-agent shape into a domain-agnostic backbone |
+| v1.4.x | Memory write-path with an approval gate, provenance, and bounded hot-context | Treats agent memory writes as authority-gated actions |
+| v1.5.x | Conversational chat loop, session management, summarize-before-trim, and cross-session recall | Turns durable state into a multi-turn operator experience |
 
 ## Extending Agent OS
 

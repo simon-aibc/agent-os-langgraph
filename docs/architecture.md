@@ -51,7 +51,7 @@ node boundaries as Pydantic models from
 | `plan` | `str \| ArchitectBrief \| None` | Initial plan text or architect contract |
 | `executor_output` | `str \| ExecutorReport \| None` | Legacy text or structured execution report |
 | `human_feedback` | `str \| None` | `approved` or `rejected: <reason>` |
-| `hot_context` | `str \| None` | Reserved compact context channel |
+| `hot_context` | `str \| None` | Static session-start context (hot.md, AI/Memory, spine files), distinct from conversation_summary |
 | `tool_result` | optional `ToolExecutionResult \| None` | Serialized dispatcher result |
 | `router_escalated` | optional `bool` | Dispatcher-to-supervisor escalation signal |
 
@@ -171,9 +171,13 @@ Agent OS treats each model invocation as a cost boundary:
 Agent OS v1.5 introduces a robust connector framework:
 - **ConnectorRegistry** maps standardized interfaces (`MemoryConnector`, `FilesystemConnector`) to portable implementations.
 - **Write-path:** `WritableMemory` supports gated writes (`evaluate_write_policy`), ensuring agent-planned context writes require human approval (or fall under auto-approve policies like `AI/Logs/`).
+Gated writes now flow through a shared `PolicyEngine` (`LocalPolicy`, 7-level side-effect taxonomy `none`/`read`/`write`/`network`/`communication`/`payment`/`privileged` -> `allow`/`deny`/`require_approval`); a memory write is one kind of action evaluated by that policy.
 
 ## Chat and Sessions
 The CLI provides a `chat` loop for multi-turn conversations, preserving state across invocations. Sessions are indexed locally via SQLite, allowing users to list, inspect, and delete historical runs. A summarization engine condenses old messages into a rolling `conversation_summary`, injecting bounded context alongside `hot_context`.
+
+## Runtime API
+`agent-os serve` runs a localhost-first FastAPI interface from the `[serve]` extra, exposing sessions, a chat WebSocket, brief, and health endpoints for external UIs. It is the seam between the runtime and any interface.
 
 ## Extension points
 
