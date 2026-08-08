@@ -1,6 +1,6 @@
 # Agent OS LangGraph — public product specification
 
-- **Current version:** 1.1.2
+- **Current version:** 1.5.0
 - **Status:** Released
 - **License:** MIT
 - **Runtime:** Python 3.11+
@@ -141,7 +141,7 @@ Claude-only, Codex-only, and mixed Claude/Codex role configurations are valid.
 Other agent CLIs require a new delegator that implements the same structured
 contracts; they are not automatically supported by accepting a model name.
 
-## 7. Non-goals for v1.1
+## 7. Non-goals for v1.5
 
 - OS-level isolation for untrusted code.
 - Hosted multi-user service or distributed checkpoint database.

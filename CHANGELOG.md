@@ -3,6 +3,12 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [Unreleased]
+
+- r1.5f (architect guard).
+- r1.6a (Morning Brief engine + context spine + `AI/Briefs/` auto-policy).
+- r1.6b (`agent-os serve` FastAPI, localhost-first, `[serve]` extra).
+
 ## [1.5.0] — 2026-08-07
 
 ### Added

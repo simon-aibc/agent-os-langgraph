@@ -166,6 +166,15 @@ Agent OS treats each model invocation as a cost boundary:
 7. **Offline startup** (`agent_os/cli/app.py`) selects LiteLLM's local cost map
    before imports that could otherwise make an incidental metadata request.
 
+## Connector framework & Memory write-path
+
+Agent OS v1.5 introduces a robust connector framework:
+- **ConnectorRegistry** maps standardized interfaces (`MemoryConnector`, `FilesystemConnector`) to portable implementations.
+- **Write-path:** `WritableMemory` supports gated writes (`evaluate_write_policy`), ensuring agent-planned context writes require human approval (or fall under auto-approve policies like `AI/Logs/`).
+
+## Chat and Sessions
+The CLI provides a `chat` loop for multi-turn conversations, preserving state across invocations. Sessions are indexed locally via SQLite, allowing users to list, inspect, and delete historical runs. A summarization engine condenses old messages into a rolling `conversation_summary`, injecting bounded context alongside `hot_context`.
+
 ## Extension points
 
 - Register `RegisteredSkill` instances in an injected `SkillRegistry`.
