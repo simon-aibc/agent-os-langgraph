@@ -3,6 +3,24 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [1.7.0] — 2026-08-08
+
+### Added
+
+- **Run Ledger** (`agent_os/runs.py`): a durable record of graph invocations — `runs` + `run_events` tables with `create_run`, `append_event` (atomic per-run `seq`), `set_status`, `get_run`, `list_runs`, and `list_events(after=)`. Lives in a dedicated SQLite file derived from the checkpoint path (`checkpoints.runs.db`; override with `AGENT_OS_RUNS_DB`).
+- **EventStore + SSE**: `agent_os/server/run_executor.py` drives the graph via `astream_events`, translating node/token events into the ledger and resolving each run to `interrupted`/`completed`/`error`. `GET /api/runs/{id}/events` streams Server-Sent Events with replay-from-`?after=<seq>` and live-tail to terminal status.
+- **Runtime API** (`agent-os serve`): `POST`/`GET /api/runs`, `GET /api/runs/{id}` (with the pending interrupt prompt), `POST /api/runs/{id}/approve` (resumes via `Command(resume=...)`; 409 if not interrupted), and `POST /api/runs/{id}/cancel` (409 if terminal) — the runtime seam for external orchestrators and operator consoles.
+
+### Fixed
+
+- Fresh runs now seed the full initial graph state (`task` + backend binding), fixing a `KeyError('task')` that mocked tests hid.
+- The run ledger uses its own SQLite file to avoid a deadlock between the synchronous ledger writer and the async LangGraph checkpointer when sharing one file on the same event loop (surfaced as immediate `database is locked` even under WAL + `busy_timeout`).
+
+### Validation
+
+- 437 offline tests pass with warnings treated as errors (`python -m pytest -W error`); ruff clean; CI on Python 3.11 and 3.12.
+- Real end-to-end verified on the live graph: `create` → real node events → interrupt at the approval gate → `approve`/resume drives the executor node, with every outcome recorded in the ledger.
+
 ## [1.6.0] — 2026-08-08
 
 ### Added
