@@ -73,6 +73,14 @@ def build_parser() -> argparse.ArgumentParser:
     s_resume = s_sub.add_parser("resume", help="Resume a session")
     s_resume.add_argument("thread_id", help="Thread ID")
 
+    # agent-os serve
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start the FastAPI server for the agent-os dashboard."
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=4680, help="Port to bind to (default: 4680)")
+    serve_parser.add_argument("--profile", help="Name of the profile to use")
+
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
     
@@ -588,7 +596,7 @@ async def async_main(
 
     # Normalize argv: if first meaningful token isn't "run", "doctor", "chat", or "sessions", prepend "run"
     # This also routes naked -h/--help to 'run --help' to preserve legacy help visibility.
-    if not argv or argv[0] not in ("run", "doctor", "chat", "sessions"):
+    if not argv or argv[0] not in ("run", "doctor", "chat", "sessions", "serve"):
         argv = ["run"] + argv
 
     args = build_parser().parse_args(argv)
@@ -679,8 +687,8 @@ async def async_main(
         except Exception:
             pass
             
-        from agent_os.backends import BackendBinding
-        binding = BackendBinding.from_env()
+        from agent_os.bindings import resolve_backend_binding
+        binding = resolve_backend_binding(None)
         summarizer = binding.architect
         
         def invoke_summarizer(prompt: str) -> str:
@@ -699,6 +707,22 @@ async def async_main(
         res = write_brief(connector, brief_md, date_str)
         print(f"Morning Brief generated and saved to: {res.ref}")
         print(brief_md)
+        return 0
+
+    if args.command == "serve":
+        try:
+            import uvicorn
+
+            from agent_os.server.api import app as fastapi_app
+        except ImportError:
+            print("FastAPI dependencies not installed. Please run: pip install agent-os-langgraph[serve]")
+            return 1
+            
+        # We also need to set the profile if provided so the server uses it for backend_binding
+        if args.profile:
+            os.environ["AGENT_OS_PROFILE"] = args.profile
+            
+        uvicorn.run(fastapi_app, host=args.host, port=args.port)
         return 0
 
     if args.command == "doctor":
