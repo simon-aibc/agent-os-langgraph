@@ -24,6 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-os",
         description="Run the Agent OS LangGraph workflow.",
     )
+    parser.add_argument("--workspace", help="Path to workspace.toml or a workspace directory.")
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser(
@@ -47,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
     run_parser.add_argument("--profile", help="Named configuration profile to use.")
     run_parser.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+    run_parser.add_argument(
         "--force-rebind",
         action="store_true",
         help="Replace a persisted backend binding when resuming.",
@@ -58,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_chat.add_argument("-v", "--verbose", action="store_true", help="Show node progress.")
     p_chat.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
     p_chat.add_argument("--profile", help="Named configuration profile to use.")
+    p_chat.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
     p_chat.add_argument("--force-rebind", action="store_true", help="Replace a persisted backend binding when resuming.")
 
     p_sessions = subparsers.add_parser("sessions", help="Manage chat sessions")
@@ -80,6 +91,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     serve_parser.add_argument("--port", type=int, default=4680, help="Port to bind to (default: 4680)")
     serve_parser.add_argument("--profile", help="Name of the profile to use")
+    serve_parser.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
 
     doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
     doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
@@ -98,9 +114,27 @@ def _generate_thread_id() -> str:
     return f"{user}-{timestamp}-{uuid.uuid4().hex[:8]}"
 
 
+def _normalize_argv(argv: list[str]) -> list[str]:
+    commands = ("run", "doctor", "chat", "sessions", "serve", "brief")
+    if not argv:
+        return ["run"]
+    if argv[0] in commands:
+        return argv
+    if argv[0] == "--workspace" and len(argv) >= 2:
+        if len(argv) >= 3 and argv[2] in commands:
+            return argv
+        return [argv[0], argv[1], "run", *argv[2:]]
+    if argv[0].startswith("--workspace="):
+        if len(argv) >= 2 and argv[1] in commands:
+            return argv
+        return [argv[0], "run", *argv[1:]]
+    return ["run"] + argv
+
+
 def _initial_state(
     task: str,
     backend_binding: BackendBinding,
+    hot_context: str | None = None,
 ) -> dict[str, object]:
     return {
         "messages": [("user", task)],
@@ -108,7 +142,7 @@ def _initial_state(
         "plan": None,
         "executor_output": None,
         "human_feedback": None,
-        "hot_context": None,
+        "hot_context": hot_context,
         "conversation_summary": None,
         "backend_binding": backend_binding,
     }
@@ -293,12 +327,18 @@ async def _run_graph(
     backend_binding: BackendBinding,
     force_rebind: bool,
     registry: Any,
+    workspace_runtime: object | None = None,
+    initial_hot_context: str | None = None,
 ) -> int:
     from langgraph.types import Command
 
     from agent_os.routing import build_runtime_config
 
     config = build_runtime_config(thread_id)
+    if workspace_runtime is not None:
+        configurable = config.setdefault("configurable", {})
+        if isinstance(configurable, dict):
+            configurable["workspace"] = workspace_runtime
 
     if resume:
         snapshot = await graph.aget_state(config)
@@ -343,7 +383,7 @@ async def _run_graph(
     else:
         if task is None:
             raise AssertionError("A new workflow requires a task")
-        graph_input = _initial_state(task, backend_binding)
+        graph_input = _initial_state(task, backend_binding, initial_hot_context)
 
     while True:
         try:
@@ -417,6 +457,8 @@ async def _chat_loop(
     backend_binding: BackendBinding,
     force_rebind: bool,
     registry: Any,
+    workspace_runtime: object | None = None,
+    initial_hot_context: str | None = None,
 ) -> int:
     from langchain_core.messages import HumanMessage
     from langgraph.types import Command
@@ -424,6 +466,10 @@ async def _chat_loop(
     from agent_os.routing import build_runtime_config
 
     config = build_runtime_config(thread_id)
+    if workspace_runtime is not None:
+        configurable = config.setdefault("configurable", {})
+        if isinstance(configurable, dict):
+            configurable["workspace"] = workspace_runtime
 
     if resume:
         snapshot = await graph.aget_state(config)
@@ -482,7 +528,11 @@ async def _chat_loop(
         
         if not _checkpoint_exists(snapshot):
             # First turn: initialize state with the first message as task
-            graph_input = _initial_state(user_input, backend_binding)
+            graph_input = _initial_state(
+                user_input,
+                backend_binding,
+                initial_hot_context,
+            )
         else:
             graph_input = {"messages": [HumanMessage(content=user_input)]}
             
@@ -594,10 +644,9 @@ async def async_main(
     if argv is None:
         argv = sys.argv[1:]
 
-    # Normalize argv: if first meaningful token isn't "run", "doctor", "chat", or "sessions", prepend "run"
+    # Normalize argv: if first meaningful token isn't a command, prepend "run"
     # This also routes naked -h/--help to 'run --help' to preserve legacy help visibility.
-    if not argv or argv[0] not in ("run", "doctor", "chat", "sessions", "serve"):
-        argv = ["run"] + argv
+    argv = _normalize_argv(argv)
 
     args = build_parser().parse_args(argv)
 
@@ -710,20 +759,50 @@ async def async_main(
         return 0
 
     if args.command == "serve":
+        previous_env = {
+            "LLM_ROUTER": os.environ.get("LLM_ROUTER"),
+            "LLM_ARCHITECT": os.environ.get("LLM_ARCHITECT"),
+            "LLM_EXECUTOR": os.environ.get("LLM_EXECUTOR"),
+            "AGENT_OS_MEMORY_CONNECTOR": os.environ.get("AGENT_OS_MEMORY_CONNECTOR"),
+            "AGENT_OS_VAULT_PATH": os.environ.get("AGENT_OS_VAULT_PATH"),
+            "AGENT_OS_WORKSPACE": os.environ.get("AGENT_OS_WORKSPACE"),
+        }
         try:
             import uvicorn
 
             from agent_os.server.api import app as fastapi_app
+            if args.workspace:
+                from agent_os.workspace import compose_workspace, load_workspace
+
+                composed_workspace = compose_workspace(load_workspace(args.workspace))
+                for key, value in composed_workspace.environment.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+                os.environ["AGENT_OS_WORKSPACE"] = str(
+                    composed_workspace.workspace.base_path / "workspace.toml"
+                )
         except ImportError:
             print("FastAPI dependencies not installed. Please run: pip install agent-os-langgraph[serve]")
             return 1
+        except Exception as error:
+            print(f"Workspace error: {error}")
+            return 2
             
         # We also need to set the profile if provided so the server uses it for backend_binding
-        if args.profile:
+        if args.profile and not args.workspace:
             os.environ["AGENT_OS_PROFILE"] = args.profile
             
-        uvicorn.run(fastapi_app, host=args.host, port=args.port)
-        return 0
+        try:
+            uvicorn.run(fastapi_app, host=args.host, port=args.port)
+            return 0
+        finally:
+            for key, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
     if args.command == "doctor":
         from agent_os.cli.doctor import run_doctor
@@ -750,29 +829,46 @@ async def async_main(
     thread_id = args.thread_id or _generate_thread_id()
     formatter.print_thread_id(thread_id)
 
-    # Resolve profile
+    # Resolve profile or workspace
     from agent_os.backends import build_default_registry
     from agent_os.profiles import load_profiles, resolve_profile, select_profile_name
     from agent_os.sandbox import get_sandbox_root
 
-    try:
-        profile_file = load_profiles()
-        cli_name = args.profile
-        env_name = os.getenv("AGENT_OS_PROFILE")
-        file_default = profile_file.default
+    composed_workspace = None
+    workspace_runtime = None
+    initial_hot_context = None
+    workspace_env: dict[str, str | None] = {}
+    registry = build_default_registry()
+    profile_name = None
+    resolved_prof = None
 
-        profile_name, _ = select_profile_name(cli_name, env_name, file_default)
-        resolved_prof = None
-        registry = build_default_registry()
-        if profile_name is not None:
-            resolved_prof = resolve_profile(
-                profile_file,
-                profile_name,
-                registry,
-                get_sandbox_root().resolve()
-            )
+    try:
+        if args.workspace:
+            from agent_os.workspace import compose_workspace, load_workspace
+
+            composed_workspace = compose_workspace(load_workspace(args.workspace))
+            workspace_env = dict(composed_workspace.environment)
+            profile_name = composed_workspace.backend_binding.profile_name
+            initial_hot_context = composed_workspace.hot_context
+            workspace_runtime = composed_workspace
+            registry = composed_workspace.backend_registry
+        else:
+            profile_file = load_profiles()
+            cli_name = args.profile
+            env_name = os.getenv("AGENT_OS_PROFILE")
+            file_default = profile_file.default
+
+            profile_name, _ = select_profile_name(cli_name, env_name, file_default)
+            if profile_name is not None:
+                resolved_prof = resolve_profile(
+                    profile_file,
+                    profile_name,
+                    registry,
+                    get_sandbox_root().resolve()
+                )
     except Exception as e:
-        formatter.print_error(f"Profile error: {e}")
+        prefix = "Workspace error" if args.workspace else "Profile error"
+        formatter.print_error(f"{prefix}: {e}")
         return 2
 
     previous_env = {
@@ -780,7 +876,20 @@ async def async_main(
         "LLM_ARCHITECT": os.environ.get("LLM_ARCHITECT"),
         "LLM_EXECUTOR": os.environ.get("LLM_EXECUTOR"),
         "AGENT_OS_SANDBOX": os.environ.get("AGENT_OS_SANDBOX"),
+        "AGENT_OS_MEMORY_CONNECTOR": os.environ.get("AGENT_OS_MEMORY_CONNECTOR"),
+        "AGENT_OS_VAULT_PATH": os.environ.get("AGENT_OS_VAULT_PATH"),
+        "AGENT_OS_WORKSPACE": os.environ.get("AGENT_OS_WORKSPACE"),
     }
+
+    if composed_workspace is not None:
+        for key, value in workspace_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        os.environ["AGENT_OS_WORKSPACE"] = str(
+            composed_workspace.workspace.base_path / "workspace.toml"
+        )
 
     if resolved_prof is not None:
         profile_env = {
@@ -804,7 +913,10 @@ async def async_main(
     try:
         from agent_os.bindings import resolve_backend_binding
 
-        backend_binding = resolve_backend_binding(profile_name)
+        if composed_workspace is not None:
+            backend_binding = composed_workspace.backend_binding
+        else:
+            backend_binding = resolve_backend_binding(profile_name)
         if graph_factory is not None:
             graph = graph_factory()
             if args.command == "chat":
@@ -818,6 +930,8 @@ async def async_main(
                     backend_binding=backend_binding,
                     force_rebind=args.force_rebind,
                     registry=registry,
+                    workspace_runtime=workspace_runtime,
+                    initial_hot_context=initial_hot_context,
                 )
             else:
                 return await _run_graph(
@@ -831,6 +945,8 @@ async def async_main(
                     backend_binding=backend_binding,
                     force_rebind=args.force_rebind,
                     registry=registry,
+                    workspace_runtime=workspace_runtime,
+                    initial_hot_context=initial_hot_context,
                 )
 
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -841,11 +957,20 @@ async def async_main(
             get_checkpoint_serializer,
         )
         from agent_os.graph import build_graph
+        from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
 
         database_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
         async with AsyncSqliteSaver.from_conn_string(database_path) as saver:
             saver.serde = get_checkpoint_serializer()
-            graph = build_graph(checkpointer=saver)
+            if composed_workspace is not None:
+                graph = build_graph(
+                    tool_dispatcher_node_impl=build_tool_dispatcher_node(
+                        composed_workspace.skill_registry
+                    ),
+                    checkpointer=saver,
+                )
+            else:
+                graph = build_graph(checkpointer=saver)
             if args.command == "chat":
                 return await _chat_loop(
                     graph,
@@ -857,6 +982,8 @@ async def async_main(
                     backend_binding=backend_binding,
                     force_rebind=args.force_rebind,
                     registry=registry,
+                    workspace_runtime=workspace_runtime,
+                    initial_hot_context=initial_hot_context,
                 )
             else:
                 return await _run_graph(
@@ -870,6 +997,8 @@ async def async_main(
                     backend_binding=backend_binding,
                     force_rebind=args.force_rebind,
                     registry=registry,
+                    workspace_runtime=workspace_runtime,
+                    initial_hot_context=initial_hot_context,
                 )
     except KeyboardInterrupt:
         formatter.print_error("Interrupted by Ctrl+C.")
