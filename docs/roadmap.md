@@ -1,6 +1,6 @@
 # Roadmap
 
-Vision: **a generic, local-first multi-agent orchestrator that can grow from a portfolio-quality coding workflow into a personal daily driver without putting private context in the public repository.**
+Vision: **an open-source, local-first backbone for building durable, controllable AI agent systems — generic primitives an engineering team can clone, audit, extend, and self-host, without private context living in the public repository.**
 
 ## Current state — v1.5.0
 
