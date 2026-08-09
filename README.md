@@ -160,12 +160,18 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 
 ## Self-Hosting
 
-Run the full stack (API + Console) locally in one command:
+Run the API and Console locally with Docker Compose:
 
 ```bash
-docker compose up --build -d
+cp .env.example .env
+# Edit .env with the models, provider keys, and allowed workspace you need.
+docker compose up --build --detach
 ```
-Access the console at [http://127.0.0.1:4100](http://127.0.0.1:4100). See [Self-Hosting Guide](docs/self-hosting.md) for more configuration options.
+
+Open [http://127.0.0.1:4100](http://127.0.0.1:4100). Persistent runtime state
+lives in a named Docker volume; `docker compose down` stops the stack without
+deleting it. See the [Self-Hosting Guide](docs/self-hosting.md) for model setup,
+logs, backups, and security boundaries. Never commit `.env`.
 
 ## Extending Agent OS
 

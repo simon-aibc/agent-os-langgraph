@@ -29,11 +29,14 @@ services:
       start_period: 5s
 
   console:
+    # Publication gate: replace only with the anonymously pullable digest emitted
+    # by the reviewed agent-os-console release workflow.
     image: ghcr.io/simon-aibc/agent-os-console@sha256:1e2b8b29fa0ae866e8be2a1c9d3162b013a4a1cd12ffac57abd24c5ccf7ebd57
     ports:
       - "127.0.0.1:4100:4100"
     environment:
-      - AGENT_OS_API_BASE=http://127.0.0.1:4680
+      - AGENT_OS_API_BASE=${AGENT_OS_API_BASE:-http://127.0.0.1:4680}
+      - HOSTNAME=0.0.0.0
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4100/ >/dev/null || exit 1"]
       interval: 30s

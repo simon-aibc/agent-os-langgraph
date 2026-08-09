@@ -1,75 +1,88 @@
+import re
 from pathlib import Path
 
 import yaml
 
 REPO_ROOT = Path(__file__).parent.parent
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
+CONSOLE_DIGEST = (
+    "sha256:1e2b8b29fa0ae866e8be2a1c9d3162b013a4a1cd12ffac57abd24c5ccf7ebd57"
+)
+
+
+def _config() -> dict:
+    return yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
 
 
 def test_compose_file_exists():
-    assert COMPOSE_FILE.exists()
+    assert COMPOSE_FILE.is_file()
 
 
 def test_compose_ports_loopback():
-    with open(COMPOSE_FILE) as f:
-        config = yaml.safe_load(f)
-    for service_name, service in config["services"].items():
+    for service_name, service in _config()["services"].items():
         for port in service.get("ports", []):
-            assert port.startswith("127.0.0.1:"), f"{service_name} port {port} is not bound to loopback"
+            assert port.startswith("127.0.0.1:"), (
+                f"{service_name} port {port} is not bound to loopback"
+            )
 
 
 def test_compose_console_digest_pinned():
-    with open(COMPOSE_FILE) as f:
-        config = yaml.safe_load(f)
-    
-    console = config["services"].get("console")
-    assert console is not None
-    assert "@sha256:1e2b8b29fa0ae866e8be2a1c9d3162b013a4a1cd12ffac57abd24c5ccf7ebd57" in console["image"], "Console image must be pinned by sha256 digest"
+    console = _config()["services"]["console"]
+    image_name, separator, digest = console["image"].partition("@")
+
+    assert image_name == "ghcr.io/simon-aibc/agent-os-console"
+    assert separator == "@"
+    assert digest == CONSOLE_DIGEST
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
 
 
 def test_compose_health_dependencies():
-    with open(COMPOSE_FILE) as f:
-        config = yaml.safe_load(f)
-        
-    console = config["services"].get("console")
-    assert console is not None
-    assert "backend" in console.get("depends_on", {})
-    assert console["depends_on"]["backend"].get("condition") == "service_healthy"
+    console = _config()["services"]["console"]
+    assert console["depends_on"]["backend"]["condition"] == "service_healthy"
 
 
-def test_compose_console_api_base():
-    with open(COMPOSE_FILE) as f:
-        config = yaml.safe_load(f)
-        
-    console = config["services"].get("console")
-    assert console is not None
-    env = console.get("environment", [])
-    assert "AGENT_OS_API_BASE=http://127.0.0.1:4680" in env
+def test_compose_console_runtime_contract():
+    console = _config()["services"]["console"]
+    environment = console["environment"]
+
+    assert environment == [
+        "AGENT_OS_API_BASE=${AGENT_OS_API_BASE:-http://127.0.0.1:4680}",
+        "HOSTNAME=0.0.0.0",
+    ]
+    assert console["healthcheck"]["test"] == [
+        "CMD-SHELL",
+        "wget -qO- http://127.0.0.1:4100/ >/dev/null || exit 1",
+    ]
 
 
-def test_compose_console_healthcheck():
-    with open(COMPOSE_FILE) as f:
-        config = yaml.safe_load(f)
-        
-    console = config["services"].get("console")
-    assert console is not None
-    healthcheck = console.get("healthcheck", {})
-    test_cmd = healthcheck.get("test", [])
-    assert test_cmd == ["CMD-SHELL", "wget -qO- http://127.0.0.1:4100/ >/dev/null || exit 1"]
+def test_compose_backend_environment_contract():
+    backend = _config()["services"]["backend"]
+    environment = set(backend["environment"])
+
+    assert {
+        "LLM_ROUTER",
+        "LLM_ARCHITECT",
+        "LLM_EXECUTOR",
+        "AGENT_OS_CORS_ORIGINS",
+        "AGENT_OS_CHECKPOINTS_DB=/data/checkpoints.db",
+        "AGENT_OS_SCHED_DB=/data/checkpoints.sched.db",
+        "AGENT_OS_SCHEDULER_ENABLED",
+        "AGENT_OS_SCHED_TICK_SECONDS",
+        "AGENT_OS_SANDBOX=/workspace",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+    } <= environment
 
 
 def test_compose_no_secret_literals():
-    content = COMPOSE_FILE.read_text()
-    forbidden = ["sk-", "AIza", "ghp_"]
-    for word in forbidden:
-        assert word not in content
+    content = COMPOSE_FILE.read_text(encoding="utf-8")
+    forbidden = ["sk-", "AIza", "ghp_", "github_pat_", "-----BEGIN PRIVATE KEY"]
+    assert not any(marker in content for marker in forbidden)
 
 
-def test_compose_volumes():
-    with open(COMPOSE_FILE) as f:
-        config = yaml.safe_load(f)
-        
-    backend = config["services"].get("backend")
-    assert backend is not None
-    volumes = backend.get("volumes", [])
-    assert any(v.startswith("agentos_data:/data") for v in volumes)
+def test_compose_volumes_and_persistent_paths():
+    backend = _config()["services"]["backend"]
+    volumes = backend["volumes"]
+
+    assert "agentos_data:/data" in volumes
+    assert "${AGENT_OS_WORKSPACE:-.}:/workspace" in volumes

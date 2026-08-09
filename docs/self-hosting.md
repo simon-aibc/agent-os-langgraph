@@ -1,48 +1,122 @@
-# Self-Hosting
+# Self-hosting
 
-Agent OS can be self-hosted locally using Docker Compose, providing both the runtime API and the graphical console.
+Agent OS runs the runtime API and operator console locally with Docker Compose.
+Both published ports bind to `127.0.0.1`; the stack is not designed for direct
+internet exposure.
+
+## Prerequisites
+
+- Docker with Compose v2
+- A checkout of this repository
+- Provider credentials for any hosted models you select, or a reachable local
+  model endpoint
+- An anonymously pullable, digest-pinned `agent-os-console` image in
+  `docker-compose.yml`
 
 ## Quickstart
 
-1. Ensure Docker is installed and running.
-2. Clone the repository and navigate into it.
-3. Start the stack:
-   ```bash
-   docker compose up --build -d
-   ```
-4. Access the console at [http://127.0.0.1:4100](http://127.0.0.1:4100)
+```bash
+cp .env.example .env
+# Edit .env: choose the three LLM roles, add only the keys they need, and set
+# AGENT_OS_WORKSPACE to the host directory the agents may access.
+docker compose up --build --detach
+docker compose ps
+```
 
-## Architecture
+Open the console at <http://127.0.0.1:4100>. The runtime health endpoint is
+<http://127.0.0.1:4680/api/health>.
 
-The compose stack consists of two services:
-- **backend**: The Agent OS runtime API (`agent-os serve`). It mounts a persistent Docker volume (`agentos_data`) to `/data` for the system databases (checkpoints, runs, schedules). It also mounts your current directory (`.`) to `/workspace` so the agents can access your files.
-- **console**: The frontend dashboard. It connects to the backend API via your browser at `http://127.0.0.1:4680`.
+The stack has two services:
 
-## Configuration Matrix
+- `backend` builds the local Agent OS wheel, runs `agent-os serve`, mounts the
+  selected host workspace at `/workspace`, and stores runtime databases in the
+  `agentos_data` volume at `/data`.
+- `console` runs the separately published console image. Browser requests use
+  `http://127.0.0.1:4680`, while Compose waits for the backend health check
+  before starting it.
 
-You can configure the stack using an `.env` file in the same directory as `docker-compose.yml`.
+## Configuration
 
-| Variable | Default | Description |
+Compose reads `.env` from the repository root. Do not commit that file.
+
+| Variable | Default | Purpose |
 |---|---|---|
-| `LLM_ROUTER` | (none) | Router LLM model (e.g., `ollama/qwen2.5:14b`) |
-| `LLM_ARCHITECT` | (none) | Architect LLM model (e.g., `anthropic/claude-opus-4-8`) |
-| `LLM_EXECUTOR` | (none) | Executor LLM model (e.g., `openai/gpt-5.5`) |
-| `ANTHROPIC_API_KEY` | (none) | Required if using Claude models |
-| `OPENAI_API_KEY` | (none) | Required if using OpenAI models |
-| `AGENT_OS_WORKSPACE` | `.` | The host directory mapped to the container workspace |
-| `AGENT_OS_SANDBOX` | `/workspace` | The workspace path inside the container |
-| `AGENT_OS_SCHEDULER_ENABLED` | `true` | Enable or disable the local cron/interval scheduler |
-| `AGENT_OS_SCHED_TICK_SECONDS` | `1.0` | Scheduler tick cadence in seconds |
-| `AGENT_OS_CORS_ORIGINS` | (none) | Add `http://127.0.0.1:4100` if modifying the API configuration |
+| `LLM_ROUTER` | `ollama/qwen2.5:14b` | Router model in LiteLLM provider/model form |
+| `LLM_ARCHITECT` | `anthropic/claude-opus-4-8` | Architect model |
+| `LLM_EXECUTOR` | `openai/gpt-5.5` | Executor model |
+| `ANTHROPIC_API_KEY` | empty | Passed through only when set |
+| `OPENAI_API_KEY` | empty | Passed through only when set |
+| `AGENT_OS_WORKSPACE` | `.` | Host directory mounted read/write at `/workspace` |
+| `AGENT_OS_API_BASE` | `http://127.0.0.1:4680` | Browser-visible runtime API used by the console |
+| `AGENT_OS_CORS_ORIGINS` | `http://127.0.0.1:4100` | Allowed console origin |
+| `AGENT_OS_SCHEDULER_ENABLED` | `true` | Enables automatic schedule firing |
+| `AGENT_OS_SCHED_TICK_SECONDS` | `1` | Scheduler polling cadence |
 
-## Persistent Data & Backups
+Inside Compose, the runtime paths are deliberately fixed:
 
-The runtime stores stateful data in SQLite databases located in the `/data` directory inside the container. This directory is mapped to the `agentos_data` Docker volume.
+- checkpoints: `/data/checkpoints.db`
+- run ledger: `/data/checkpoints.runs.db` (derived automatically)
+- schedules: `/data/checkpoints.sched.db`
+- sandbox/workspace: `/workspace`
 
-To back up your checkpoints and schedules:
-1. Stop the backend to prevent writes.
-2. Create a backup of the Docker volume (e.g., using `docker run --rm -v agentos_data:/data -v $(pwd):/backup alpine tar czvf /backup/agentos-backup.tar.gz /data`).
+The corresponding direct-host settings in `.env.example` do not override
+these container paths.
 
-## Security
+Subscription CLI backends such as `cli/claude-code` and `cli/codex` require
+their binaries and authentication inside the container; host installations and
+login sessions are not inherited. Prefer API-backed models, use a reachable
+local provider, or build a deliberate custom image rather than mounting broad
+host credential directories.
 
-The compose configuration binds the services to `127.0.0.1`. This is intentional and prevents exposing your unauthenticated agent runtime to the local network or internet. Do not change the port bindings to `0.0.0.0` without placing a reverse proxy with authentication in front of the stack.
+## Operations
+
+```bash
+docker compose ps
+docker compose logs --follow backend console
+docker compose up --build --detach   # rebuild/update the backend and restart
+docker compose down                  # stop; preserve the named data volume
+```
+
+Do not add `--volumes` to `docker compose down` unless you intend to delete all
+runtime state.
+
+## Backup and restore
+
+The `agentos_data` volume contains checkpoints, the run ledger, and schedules.
+Stop the stack before copying SQLite files so the backup is consistent.
+
+```bash
+docker compose down
+docker run --rm \
+  --volume agent-os_agentos_data:/data:ro \
+  --volume "$PWD:/backup" \
+  alpine tar czf /backup/agentos-backup.tar.gz -C /data .
+```
+
+The actual volume name includes the Compose project name; confirm it with
+`docker volume ls` before backup or restore. Restore only into an empty or
+intentionally replaceable volume, with both services stopped.
+
+The backend image runs as the non-root `agentos` user. If a replacement volume
+or bind mount produces permission errors, fix ownership on that specific mount;
+do not run the service as root.
+
+## Troubleshooting and security
+
+```bash
+docker compose config --quiet
+docker compose ps
+curl --fail http://127.0.0.1:4680/api/health
+curl --fail http://127.0.0.1:4100/
+```
+
+- If the console image cannot be pulled anonymously by its exact digest, the
+  release is not ready. A locally cached image is not valid release evidence.
+- If port `4100` or `4680` is already in use, stop this stack and identify the
+  owner. Do not kill or unload unrelated services. When changing ports, keep
+  `AGENT_OS_API_BASE` and `AGENT_OS_CORS_ORIGINS` consistent.
+- Keep provider keys only in the ignored `.env` file or your deployment secret
+  system. Compose contains variable names, never credential values.
+- Do not change the host bindings to `0.0.0.0` without an authenticated reverse
+  proxy, TLS, and an explicit threat review. The runtime API has no public-edge
+  authentication boundary.
