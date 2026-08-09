@@ -3,6 +3,21 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [1.8.0] — 2026-08-09
+
+### Added
+
+- **Scheduler** (`agent_os/scheduler.py` + `agent-os schedule`): local cron/interval jobs (`run` | `brief`) persisted in a dedicated derived SQLite file (WAL + busy_timeout; never shares the async checkpointer's DB, avoiding the r1.7 deadlock class).
+- **Self-host container**: multi-stage `Dockerfile` (digest-pinned `python:3.11-slim`); runtime stage carries only the wheel + deps, checkpoints in `/data`, sandbox/vault in `/workspace`, HEALTHCHECK on `/api/health`. Smoke-verified: container boots healthy and `/api/health` returns 200.
+
+### Fixed
+
+- `agent-os serve` now awaits a `uvicorn.Server` on the running event loop instead of calling `uvicorn.run()` (which crashed with "Cannot run the event loop while another loop is running" inside the container).
+
+### Changed
+
+- v1.8 self-hosting ships the backend container only; bundling the private `agent-os-console` image into Compose is deferred to r1.9a after that image is containerized and published to GHCR.
+
 ## [1.7.2] — 2026-08-08
 
 ### Added

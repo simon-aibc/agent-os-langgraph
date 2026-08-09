@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-os-langgraph"
-version = "1.7.2"
+version = "1.8.0"
 description = "Deterministic multi-agent orchestration built with LangGraph."
 readme = "README.md"
 authors = [{ name = "Simon Tran" }]
@@ -38,6 +38,7 @@ dependencies = [
     "mcp==1.29.0",
     "langchain-mcp-adapters==0.3.1",
     "rich==15.0.0",
+    "croniter==6.0.0",
 ]
 
 [project.scripts]
