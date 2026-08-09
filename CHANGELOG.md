@@ -3,6 +3,12 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [Unreleased]
+
+### Changed
+
+- v1.8 self-hosting ships the smoke-verified backend container only; bundling the private `agent-os-console` image into Compose is deferred to r1.9a after that image is containerized and published to GHCR.
+
 ## [1.7.2] — 2026-08-08
 
 ### Added
