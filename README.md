@@ -158,6 +158,15 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 | v1.4.x | Memory write-path with an approval gate, provenance, and bounded hot-context | Treats agent memory writes as authority-gated actions |
 | v1.5.x | Conversational chat loop, session management, summarize-before-trim, and cross-session recall | Turns durable state into a multi-turn operator experience |
 
+## Self-Hosting
+
+Run the full stack (API + Console) locally in one command:
+
+```bash
+docker compose up --build -d
+```
+Access the console at [http://127.0.0.1:4100](http://127.0.0.1:4100). See [Self-Hosting Guide](docs/self-hosting.md) for more configuration options.
+
 ## Extending Agent OS
 
 ### Register a native tool

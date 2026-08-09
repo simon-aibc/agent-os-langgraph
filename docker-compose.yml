@@ -1,0 +1,41 @@
+name: agent-os
+
+services:
+  backend:
+    build:
+      context: .
+    ports:
+      - "127.0.0.1:4680:4680"
+    volumes:
+      - agentos_data:/data
+      - .:/workspace
+    environment:
+      # Optional explicit env vars can be passed through here
+      - AGENT_OS_LLM_PROVIDER
+      - ANTHROPIC_API_KEY
+      - OPENAI_API_KEY
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:4680/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  console:
+    image: ghcr.io/simon-aibc/agent-os-console@sha256:21d1093b62bc5088d65c288117c22040cdebdde79b74a8c3949c406a8e40926c
+    ports:
+      - "127.0.0.1:4100:4100"
+    environment:
+      - AGENT_OS_API_BASE=http://127.0.0.1:4680
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:4100/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  agentos_data:
