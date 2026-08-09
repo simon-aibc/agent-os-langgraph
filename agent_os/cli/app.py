@@ -104,7 +104,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_brief.add_argument("--date", help="Target date YYYY-MM-DD")
     p_brief.add_argument("--profile", help="Named configuration profile to use.")
     p_brief.add_argument("--connector", help="Memory connector to use")
-    
+
+    # agent-os schedule add|list|remove|run-once
+    p_schedule = subparsers.add_parser("schedule", help="Manage schedules")
+    sched_sub = p_schedule.add_subparsers(dest="schedule_command")
+
+    p_sched_add = sched_sub.add_parser("add", help="Create a new schedule")
+    p_sched_add.add_argument("--name", required=True, help="Human-readable schedule name")
+    p_sched_add.add_argument(
+        "--kind", required=True, choices=["run", "brief"],
+        help="Schedule kind",
+    )
+    p_sched_add.add_argument("--cron", help="Five-field POSIX cron expression")
+    p_sched_add.add_argument("--every", help="Interval (e.g. 30s, 5m, 2h, 1d)")
+    p_sched_add.add_argument("--task", help="Task description (required for kind=run)")
+    p_sched_add.add_argument("--timezone", default="UTC", help="IANA timezone (default: UTC)")
+    p_sched_add.add_argument("--workspace", help="Workspace path (optional for kind=run)")
+
+    p_sched_list = sched_sub.add_parser("list", help="List schedules")
+    p_sched_list.add_argument("--kind", choices=["run", "brief"], help="Filter by kind")
+    p_sched_list.add_argument("--enabled", choices=["true", "false"], help="Filter by enabled")
+    p_sched_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+
+    p_sched_remove = sched_sub.add_parser("remove", help="Remove a schedule")
+    p_sched_remove.add_argument("schedule_id", help="Schedule ID to remove")
+
+    p_sched_runonce = sched_sub.add_parser("run-once", help="Manually dispatch a schedule")
+    p_sched_runonce.add_argument("schedule_id", help="Schedule ID to dispatch")
+
     return parser
 
 
@@ -115,7 +142,7 @@ def _generate_thread_id() -> str:
 
 
 def _normalize_argv(argv: list[str]) -> list[str]:
-    commands = ("run", "doctor", "chat", "sessions", "serve", "brief")
+    commands = ("run", "doctor", "chat", "sessions", "serve", "brief", "schedule")
     if not argv:
         return ["run"]
     if argv[0] in commands:
@@ -633,6 +660,111 @@ async def _chat_loop(
     return 0
 
 
+async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFormatter) -> int:
+    """Handle all ``agent-os schedule`` subcommands."""
+    import json as _json
+
+    from agent_os.schedules import (
+        create_schedule,
+        get_schedule,
+        list_schedules,
+        remove_schedule,
+    )
+
+    if args.schedule_command == "add":
+        from agent_os.schedule_models import ScheduleInput
+
+        try:
+            schedule_input = ScheduleInput(
+                name=args.name,
+                kind=args.kind,
+                cron=args.cron,
+                every=args.every,
+                timezone=args.timezone,
+                task=args.task,
+                workspace=args.workspace,
+            )
+        except (ValueError, Exception) as exc:
+            formatter.print_error(str(exc))
+            return 2
+
+        try:
+            sid = create_schedule(
+                name=schedule_input.name,
+                kind=schedule_input.kind,
+                trigger_kind=schedule_input.trigger_kind,
+                trigger_value=schedule_input.trigger_value,
+                timezone=schedule_input.timezone,
+                payload=schedule_input.payload,
+            )
+        except ValueError as exc:
+            formatter.print_error(str(exc))
+            return 2
+
+        sched = get_schedule(sid)
+        if sched:
+            formatter.print_info(f"Created schedule {sid}")
+            formatter.print_info(f"  Name: {sched['name']}")
+            formatter.print_info(f"  Next run: {sched['next_run_at']}")
+        return 0
+
+    if args.schedule_command == "list":
+        enabled = None
+        if hasattr(args, "enabled") and args.enabled is not None:
+            enabled = args.enabled == "true"
+        kind = getattr(args, "kind", None)
+
+        schedules = list_schedules(kind=kind, enabled=enabled)
+
+        if getattr(args, "json_output", False):
+            print(_json.dumps(schedules, indent=2, default=str))
+            return 0
+
+        if not schedules:
+            formatter.print_info("No schedules found.")
+            return 0
+
+        for s in schedules:
+            trigger = f"cron={s['trigger_value']}" if s["trigger_kind"] == "cron" else f"every={s['trigger_value']}"
+            enabled_str = "enabled" if s["enabled"] else "disabled"
+            last = s.get("last_status") or "—"
+            last_err = f" ({s['last_error']})" if s.get("last_error") else ""
+            formatter.print_info(
+                f"{s['schedule_id']}  {s['name']}  {s['kind']}  "
+                f"{trigger}  tz={s['timezone']}  {enabled_str}  "
+                f"next={s['next_run_at'][:19]}  last={last}{last_err}"
+            )
+        return 0
+
+    if args.schedule_command == "remove":
+        if remove_schedule(args.schedule_id):
+            formatter.print_info(f"Removed schedule {args.schedule_id}")
+            return 0
+        formatter.print_error(f"Schedule {args.schedule_id} not found")
+        return 2
+
+    if args.schedule_command == "run-once":
+        sched = get_schedule(args.schedule_id)
+        if sched is None:
+            formatter.print_error(f"Schedule {args.schedule_id} not found")
+            return 2
+
+        from agent_os.scheduler import dispatch_schedule
+
+        result = await dispatch_schedule(sched, manual=True)
+        if result.status == "error":
+            formatter.print_error(f"Dispatch failed: {result.error}")
+            return 1
+        if result.run_id:
+            formatter.print_info(f"Run {result.run_id}: {result.status}")
+        if result.ref:
+            formatter.print_info(f"Written: {result.ref}")
+        return 0
+
+    formatter.print_error("Unknown schedule subcommand. See: agent-os schedule --help")
+    return 2
+
+
 async def async_main(
     argv: list[str] | None = None,
     *,
@@ -699,63 +831,44 @@ async def async_main(
                 formatter.print_info("Deletion cancelled.")
                 return 0
 
-    if args.command == "brief":
-        import datetime
+    if args.command == "schedule":
+        return await _handle_schedule_command(args, EventFormatter(console=console))
 
+    if args.command == "brief":
         from agent_os.backends import build_default_registry
-        from agent_os.brief import generate_brief, write_brief
-        from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
+        from agent_os.brief_runtime import execute_brief
         from agent_os.profiles import (
             load_profiles,
             resolve_profile,
             select_profile_name,
         )
         from agent_os.sandbox import get_sandbox_root
-        from agent_os.sessions import list_sessions
-        
-        # 1. Resolve connector
-        connector_name = args.connector or os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
-        if connector_name == "gbrain":
-            connector = GbrainConnector()
-        else:
-            vault_path = os.getenv("AGENT_OS_VAULT_PATH", get_sandbox_root().resolve())
-            connector = MarkdownVaultConnector(vault_path)
-            
-        # 2. Resolve summarizer
+
+        # Resolve profile to set LLM_ARCHITECT
         try:
             profile_file = load_profiles()
-            cli_name = args.profile
+            cli_name = getattr(args, "profile", None)
             env_name = os.getenv("AGENT_OS_PROFILE")
             file_default = profile_file.default
             profile_name, _ = select_profile_name(cli_name, env_name, file_default)
             registry = build_default_registry()
             if profile_name is not None:
-                resolved_prof = resolve_profile(profile_file, profile_name, registry, get_sandbox_root().resolve())
+                resolved_prof = resolve_profile(
+                    profile_file, profile_name, registry, get_sandbox_root().resolve()
+                )
                 if resolved_prof and resolved_prof.architect:
                     os.environ["LLM_ARCHITECT"] = resolved_prof.architect
         except Exception:
             pass
-            
-        from agent_os.bindings import resolve_backend_binding
-        binding = resolve_backend_binding(None)
-        summarizer = binding.architect
-        
-        def invoke_summarizer(prompt: str) -> str:
-            from langchain_core.messages import HumanMessage
-            resp = summarizer.invoke([HumanMessage(content=prompt)])
-            return resp.content if not isinstance(resp, str) else resp
-            
-        # 3. Get dependencies
-        date_str = args.date or datetime.datetime.now().strftime("%Y-%m-%d")
-        sessions = list_sessions()
-        
-        # 4. Generate
-        brief_md = generate_brief(connector, sessions, date=date_str, summarizer=invoke_summarizer)
-        
-        # 5. Write
-        res = write_brief(connector, brief_md, date_str)
-        print(f"Morning Brief generated and saved to: {res.ref}")
-        print(brief_md)
+
+        res = execute_brief(
+            date=getattr(args, "date", None),
+            connector_name=getattr(args, "connector", None),
+            write=True,
+        )
+        if res.ref:
+            print(f"Morning Brief generated and saved to: {res.ref}")
+        print(res.content)
         return 0
 
     if args.command == "serve":
@@ -795,7 +908,12 @@ async def async_main(
             os.environ["AGENT_OS_PROFILE"] = args.profile
             
         try:
-            uvicorn.run(fastapi_app, host=args.host, port=args.port)
+            # We are already inside a running asyncio loop (async_main), so
+            # uvicorn.run() — which starts its own loop — would raise "Cannot run
+            # the event loop while another loop is running". Await a Server on the
+            # current loop instead.
+            config = uvicorn.Config(fastapi_app, host=args.host, port=args.port)
+            await uvicorn.Server(config).serve()
             return 0
         finally:
             for key, value in previous_env.items():
