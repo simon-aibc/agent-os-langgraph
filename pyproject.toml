@@ -54,6 +54,9 @@ Issues = "https://github.com/simon-aibc/agent-os-langgraph/issues"
 [tool.setuptools.packages.find]
 include = ["agent_os*"]
 
+[tool.setuptools.package-data]
+agent_os = ["py.typed"]
+
 [project.optional-dependencies]
 dev = [
     "pytest==9.1.1",

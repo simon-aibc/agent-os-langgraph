@@ -160,6 +160,10 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 
 ## Extending Agent OS
 
+The supported extension surface is documented in
+[`docs/EXTENDING.md`](docs/EXTENDING.md). Import stable contracts from
+`agent_os.api`; graph construction and dispatcher wiring below are implementation APIs.
+
 ### Register a native tool
 
 `RegisteredSkill` accepts LangChain `BaseTool` objects or plain callables. A
@@ -172,7 +176,7 @@ from langchain_core.tools import tool
 from agent_os.default_registry import build_default_registry
 from agent_os.graph import build_graph
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
-from agent_os.skills import RegisteredSkill
+from agent_os.api import RegisteredSkill
 
 
 @tool
