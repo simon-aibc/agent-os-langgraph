@@ -24,7 +24,7 @@ def test_compose_console_digest_pinned():
     
     console = config["services"].get("console")
     assert console is not None
-    assert "@sha256:21d1093b62bc5088d65c288117c22040cdebdde79b74a8c3949c406a8e40926c" in console["image"], "Console image must be pinned by sha256 digest"
+    assert "@sha256:1e2b8b29fa0ae866e8be2a1c9d3162b013a4a1cd12ffac57abd24c5ccf7ebd57" in console["image"], "Console image must be pinned by sha256 digest"
 
 
 def test_compose_health_dependencies():

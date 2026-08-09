@@ -8,10 +8,17 @@ services:
       - "127.0.0.1:4680:4680"
     volumes:
       - agentos_data:/data
-      - .:/workspace
+      - ${AGENT_OS_WORKSPACE:-.}:/workspace
     environment:
-      # Optional explicit env vars can be passed through here
-      - AGENT_OS_LLM_PROVIDER
+      - LLM_ROUTER
+      - LLM_ARCHITECT
+      - LLM_EXECUTOR
+      - AGENT_OS_CORS_ORIGINS
+      - AGENT_OS_CHECKPOINTS_DB=/data/checkpoints.db
+      - AGENT_OS_SCHED_DB=/data/checkpoints.sched.db
+      - AGENT_OS_SCHEDULER_ENABLED
+      - AGENT_OS_SCHED_TICK_SECONDS
+      - AGENT_OS_SANDBOX=/workspace
       - ANTHROPIC_API_KEY
       - OPENAI_API_KEY
     healthcheck:
@@ -22,7 +29,7 @@ services:
       start_period: 5s
 
   console:
-    image: ghcr.io/simon-aibc/agent-os-console@sha256:21d1093b62bc5088d65c288117c22040cdebdde79b74a8c3949c406a8e40926c
+    image: ghcr.io/simon-aibc/agent-os-console@sha256:1e2b8b29fa0ae866e8be2a1c9d3162b013a4a1cd12ffac57abd24c5ccf7ebd57
     ports:
       - "127.0.0.1:4100:4100"
     environment:

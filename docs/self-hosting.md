@@ -24,9 +24,15 @@ You can configure the stack using an `.env` file in the same directory as `docke
 
 | Variable | Default | Description |
 |---|---|---|
-| `AGENT_OS_LLM_PROVIDER` | (none) | Primary LLM provider (e.g. `anthropic`, `openai`) |
+| `LLM_ROUTER` | (none) | Router LLM model (e.g., `ollama/qwen2.5:14b`) |
+| `LLM_ARCHITECT` | (none) | Architect LLM model (e.g., `anthropic/claude-opus-4-8`) |
+| `LLM_EXECUTOR` | (none) | Executor LLM model (e.g., `openai/gpt-5.5`) |
 | `ANTHROPIC_API_KEY` | (none) | Required if using Claude models |
 | `OPENAI_API_KEY` | (none) | Required if using OpenAI models |
+| `AGENT_OS_WORKSPACE` | `.` | The host directory mapped to the container workspace |
+| `AGENT_OS_SANDBOX` | `/workspace` | The workspace path inside the container |
+| `AGENT_OS_SCHEDULER_ENABLED` | `true` | Enable or disable the local cron/interval scheduler |
+| `AGENT_OS_SCHED_TICK_SECONDS` | `1.0` | Scheduler tick cadence in seconds |
 | `AGENT_OS_CORS_ORIGINS` | (none) | Add `http://127.0.0.1:4100` if modifying the API configuration |
 
 ## Persistent Data & Backups
