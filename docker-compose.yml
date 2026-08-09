@@ -31,7 +31,7 @@ services:
   console:
     # Publication gate: replace only with the anonymously pullable digest emitted
     # by the reviewed agent-os-console release workflow.
-    image: ghcr.io/simon-aibc/agent-os-console@sha256:1e2b8b29fa0ae866e8be2a1c9d3162b013a4a1cd12ffac57abd24c5ccf7ebd57
+    image: ghcr.io/simon-aibc/agent-os-console@sha256:72b694459d0eae0c16644cb2dd6bbb8f19fc63bf17aa425f5cc52de8dc186f06
     ports:
       - "127.0.0.1:4100:4100"
     environment:
