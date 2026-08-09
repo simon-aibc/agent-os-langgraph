@@ -37,10 +37,12 @@ def test_api_sessions_list(tmp_path, monkeypatch):
     assert "created_at" in data[0]
 
 def test_api_brief(monkeypatch):
-    def mock_generate_brief(*args, **kwargs):
-        return "Mock brief content"
+    from agent_os.brief_runtime import BriefExecutionResult
+
+    def mock_execute_brief(*args, **kwargs):
+        return BriefExecutionResult(date="2026-01-01", content="Mock brief content", ref=None)
     
-    monkeypatch.setattr("agent_os.server.api.generate_brief", mock_generate_brief)
+    monkeypatch.setattr("agent_os.brief_runtime.execute_brief", mock_execute_brief)
     
     resp = client.post("/api/brief")
     assert resp.status_code == 200

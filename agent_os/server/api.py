@@ -1,9 +1,9 @@
 import asyncio
-import datetime
 import json
 import os
 import sqlite3
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import (
@@ -17,9 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from agent_os.brief import generate_brief
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
-from agent_os.connectors import GbrainConnector, MarkdownVaultConnector, MemoryConnector
+from agent_os.connectors import GbrainConnector, MemoryConnector
 from agent_os.runs import (
     append_event,
     create_run,
@@ -28,11 +27,25 @@ from agent_os.runs import (
     list_runs,
     set_status,
 )
-from agent_os.sandbox import get_sandbox_root
+from agent_os.schedule_models import ScheduleInput
+from agent_os.scheduler import SchedulerService
 from agent_os.server.run_executor import execute_run
 from agent_os.sessions import delete_session, list_sessions
 
-app = FastAPI(title="agent-os API", version="1.7.2")
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Start/stop the scheduler service around the app lifetime."""
+    scheduler = SchedulerService()
+    app.state.scheduler = scheduler
+    scheduler.start()
+    try:
+        yield
+    finally:
+        await scheduler.stop()
+
+
+app = FastAPI(title="agent-os API", version="1.7.2", lifespan=_lifespan)
 
 # The Runtime API is meant to be driven by a browser operator console on a
 # different localhost port, so cross-origin requests must be allowed. Defaults
@@ -120,28 +133,10 @@ def remove_session(session_id: str, confirm: bool = False) -> dict[str, str]:
 @app.post("/api/brief")
 @app.get("/api/brief")
 def create_brief() -> dict[str, str]:
-    vault_path = os.getenv("AGENT_OS_VAULT_PATH", str(get_sandbox_root().resolve()))
-    connector = MarkdownVaultConnector(vault_path)
-    sessions = list_sessions()
-    date_str = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
-    
-    def invoke_summarizer(prompt: str) -> str:
-        # Same proven path as architect.py `_summarizer_fn`: a cli/ backend
-        # goes through the CLI architect invoker, otherwise the architect LLM.
-        # (resolve_backend_binding().architect is a backend-name string, not an
-        # invokable — calling .invoke on it would crash at runtime.)
-        model_str = os.getenv("LLM_ARCHITECT", "") or "cli/claude-code"
-        if model_str.startswith("cli/"):
-            from agent_os.agents.cli_architect import build_cli_architect_invoker
-            invoker = build_cli_architect_invoker(model_str[4:])
-            return invoker({"task": prompt, "messages": []}).summary
-        from langchain_core.messages import HumanMessage
+    from agent_os.brief_runtime import execute_brief
 
-        from agent_os.llm import get_architect_llm
-        return str(get_architect_llm(model_str).invoke([HumanMessage(content=prompt)]).content)
-        
-    brief_md = generate_brief(connector, sessions, date_str, summarizer=invoke_summarizer)
-    return {"date": date_str, "content": brief_md}
+    res = execute_brief(write=False)
+    return {"date": res.date, "content": res.content}
 
 def build_graph_data(
     connector: MemoryConnector,
@@ -298,6 +293,40 @@ def get_run_events(run_id: str, after: int = 0) -> StreamingResponse:
             await asyncio.sleep(0.5)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+
+@app.get("/api/schedules")
+def list_schedules_endpoint(
+    kind: str | None = None,
+    enabled: bool | None = None,
+) -> list[dict[str, Any]]:
+    from agent_os.schedules import list_schedules
+
+    return list_schedules(kind=kind, enabled=enabled)
+
+
+@app.post("/api/schedules", status_code=201)
+def create_schedule_endpoint(request: ScheduleInput) -> dict[str, Any]:
+    from agent_os.schedules import create_schedule, get_schedule
+
+    try:
+        sid = create_schedule(
+            name=request.name,
+            kind=request.kind,
+            trigger_kind=request.trigger_kind,
+            trigger_value=request.trigger_value,
+            timezone=request.timezone,
+            payload=request.payload,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    sched = get_schedule(sid)
+    if sched is None:
+        raise HTTPException(status_code=500, detail="Failed to retrieve created schedule")
+    return sched
+
 
 @app.websocket("/api/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
