@@ -69,14 +69,14 @@ class WritableMemory(Protocol):
 
 class ConnectorRegistry:
     def __init__(self) -> None:
-        self._connectors: dict[str, Connector | MemoryConnector] = {}
+        self._connectors: dict[str, Any] = {}
 
-    def register(self, name: str, connector: Connector | MemoryConnector) -> None:
+    def register(self, name: str, connector: Any) -> None:
         if name in self._connectors:
             raise ValueError(f"Connector '{name}' is already registered.")
         self._connectors[name] = connector
 
-    def resolve(self, name: str) -> Connector | MemoryConnector:
+    def resolve(self, name: str) -> Any:
         if name not in self._connectors:
             raise ValueError(f"Connector '{name}' not found in registry.")
         return self._connectors[name]
