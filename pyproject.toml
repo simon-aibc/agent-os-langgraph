@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-os-langgraph"
-version = "1.8.0"
+version = "2.0.0"
 description = "Deterministic multi-agent orchestration built with LangGraph."
 readme = "README.md"
 authors = [{ name = "Simon Tran" }]
@@ -53,6 +53,9 @@ Issues = "https://github.com/simon-aibc/agent-os-langgraph/issues"
 
 [tool.setuptools.packages.find]
 include = ["agent_os*"]
+
+[tool.setuptools.package-data]
+agent_os = ["py.typed"]
 
 [project.optional-dependencies]
 dev = [

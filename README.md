@@ -158,7 +158,26 @@ requirements are in [docs/PRD.md](docs/PRD.md).
 | v1.4.x | Memory write-path with an approval gate, provenance, and bounded hot-context | Treats agent memory writes as authority-gated actions |
 | v1.5.x | Conversational chat loop, session management, summarize-before-trim, and cross-session recall | Turns durable state into a multi-turn operator experience |
 
+## Self-Hosting
+
+Run the API and Console locally with Docker Compose:
+
+```bash
+cp .env.example .env
+# Edit .env with the models, provider keys, and allowed workspace you need.
+docker compose up --build --detach
+```
+
+Open [http://127.0.0.1:4100](http://127.0.0.1:4100). Persistent runtime state
+lives in a named Docker volume; `docker compose down` stops the stack without
+deleting it. See the [Self-Hosting Guide](docs/self-hosting.md) for model setup,
+logs, backups, and security boundaries. Never commit `.env`.
+
 ## Extending Agent OS
+
+The supported extension surface is documented in
+[`docs/EXTENDING.md`](docs/EXTENDING.md). Import stable contracts from
+`agent_os.api`; graph construction and dispatcher wiring below are implementation APIs.
 
 ### Register a native tool
 
@@ -172,7 +191,7 @@ from langchain_core.tools import tool
 from agent_os.default_registry import build_default_registry
 from agent_os.graph import build_graph
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
-from agent_os.skills import RegisteredSkill
+from agent_os.api import RegisteredSkill
 
 
 @tool

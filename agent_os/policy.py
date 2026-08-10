@@ -19,7 +19,7 @@ class PolicyEngine(Protocol):
 
 
 class LocalPolicy:
-    def __init__(self, rules: dict | None = None):
+    def __init__(self, rules: dict[str, Any] | None = None) -> None:
         self.rules = rules or {}
 
     def evaluate(
@@ -65,7 +65,7 @@ def apply_policy(
     *,
     workspace: Any = None,
     context: Any = None,
-    execute_fn: Callable[[ActionProposal], ExecutionResult]
+    execute_fn: Callable[[ActionProposal], ExecutionResult],
 ) -> ExecutionResult:
     decision = engine.evaluate(proposal, workspace=workspace, context=context)
     

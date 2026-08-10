@@ -1,0 +1,88 @@
+{
+  "callables": {
+    "BackendAdapter.authentication_status": "(POSITIONAL_OR_KEYWORD self: unannotated) -> AuthStatus",
+    "BackendAdapter.build_invoker": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD role: BackendRole) -> BackendInvoker",
+    "BackendRegistry.items": "(POSITIONAL_OR_KEYWORD self: unannotated) -> tuple[tuple[str, BackendAdapter], Ellipsis]",
+    "BackendRegistry.register": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD adapter: BackendAdapter) -> None",
+    "BackendRegistry.resolve": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD role: BackendRole; POSITIONAL_OR_KEYWORD name: str) -> BackendAdapter",
+    "ConnectorRegistry.list_connectors": "(POSITIONAL_OR_KEYWORD self: unannotated) -> list[str]",
+    "ConnectorRegistry.register": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD name: str; POSITIONAL_OR_KEYWORD connector: Any) -> None",
+    "ConnectorRegistry.resolve": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD name: str) -> Any",
+    "LocalPolicy.__init__": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD rules: dict[str, Any] | None = None) -> None",
+    "LocalPolicy.evaluate": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD proposal: ActionProposal; KEYWORD_ONLY workspace: Any = None; KEYWORD_ONLY context: Any = None) -> PolicyDecision",
+    "MemoryConnector.list_notes": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD filters: dict[str, Any] | None = None) -> list[dict[str, Any]]",
+    "MemoryConnector.read_note": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD slug_or_path: str) -> dict[str, Any]",
+    "MemoryConnector.search": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD query: str; POSITIONAL_OR_KEYWORD limit: int = 10) -> list[dict[str, Any]]",
+    "PolicyEngine.evaluate": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD proposal: ActionProposal; KEYWORD_ONLY workspace: Any = None; KEYWORD_ONLY context: Any = None) -> PolicyDecision",
+    "RegisteredSkill.__init__": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD name: str; POSITIONAL_OR_KEYWORD aliases: Sequence[str]; POSITIONAL_OR_KEYWORD handler: SkillHandler) -> None",
+    "RegisteredSkill.invoke": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD arguments: dict[str, object]) -> Any",
+    "RegisteredSkill.matches": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD command: str) -> bool",
+    "RegisteredSkill.router_description": "(POSITIONAL_OR_KEYWORD self: unannotated) -> str",
+    "SkillPackageLoader.__init__": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD registry: SkillRegistry) -> None",
+    "SkillPackageLoader.load_from_directories": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD directories: list[str]) -> None",
+    "SkillPackageLoader.load_package": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD package_dir: pathlib.Path) -> None",
+    "SkillRegistry.deterministic_match": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD text: str) -> RegisteredSkill | None",
+    "SkillRegistry.get": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD name: str) -> RegisteredSkill | None",
+    "SkillRegistry.names": "(POSITIONAL_OR_KEYWORD self: unannotated) -> list[str]",
+    "SkillRegistry.register": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD skill: RegisteredSkill) -> None",
+    "SkillRegistry.router_catalog": "(POSITIONAL_OR_KEYWORD self: unannotated) -> list[str]",
+    "apply_policy": "(POSITIONAL_OR_KEYWORD engine: PolicyEngine; POSITIONAL_OR_KEYWORD proposal: ActionProposal; KEYWORD_ONLY workspace: Any = None; KEYWORD_ONLY context: Any = None; KEYWORD_ONLY execute_fn: Callable[[ActionProposal], ExecutionResult]) -> ExecutionResult"
+  },
+  "exports": [
+    "ActionProposal",
+    "AuthStatus",
+    "BackendAdapter",
+    "BackendArtifact",
+    "BackendInvoker",
+    "BackendRegistry",
+    "BackendRole",
+    "ConnectorRegistry",
+    "ExecutionResult",
+    "LocalPolicy",
+    "MemoryConnector",
+    "PolicyDecision",
+    "PolicyEngine",
+    "RegisteredSkill",
+    "SkillHandler",
+    "SkillPackageLoader",
+    "SkillRegistry",
+    "apply_policy"
+  ],
+  "models": {
+    "ActionProposal": {
+      "arguments": {"annotation": "dict[str, object]", "required": false},
+      "connector": {"annotation": "str | None", "required": false},
+      "reason": {"annotation": "str", "required": false},
+      "side_effect": {"annotation": "Literal['none', 'read', 'write', 'network', 'payment', 'communication', 'privileged']", "required": false},
+      "tool": {"annotation": "str", "required": true}
+    },
+    "AuthStatus": {
+      "detail": {"annotation": "str", "required": false},
+      "status": {"annotation": "Literal['ok', 'unauthenticated', 'unknown']", "required": true}
+    },
+    "ExecutionResult": {
+      "artifacts": {"annotation": "list[str]", "required": false},
+      "errors": {"annotation": "list[str]", "required": false},
+      "outputs": {"annotation": "dict[str, object]", "required": false},
+      "status": {"annotation": "Literal['completed', 'failed', 'cancelled', 'waiting']", "required": true},
+      "usage": {"annotation": "dict[str, float]", "required": false}
+    },
+    "PolicyDecision": {
+      "approver_roles": {"annotation": "list[str]", "required": false},
+      "decision": {"annotation": "Literal['allow', 'deny', 'require_approval']", "required": true},
+      "policy_id": {"annotation": "str", "required": true},
+      "reason": {"annotation": "str", "required": false},
+      "transformed_arguments": {"annotation": "dict[str, object] | None", "required": false}
+    }
+  },
+  "protocol_attributes": {
+    "BackendAdapter": {
+      "binary_name": "str",
+      "name": "str",
+      "stub": "bool",
+      "supported_roles": "frozenset[BackendRole]"
+    },
+    "MemoryConnector": {"name": "str"},
+    "PolicyEngine": {}
+  }
+}
