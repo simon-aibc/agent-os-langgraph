@@ -1,13 +1,17 @@
 import os
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 from agent_os import runs
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.cli.app import _pending_interrupt
 from agent_os.sandbox import sandbox_scope
+from agent_os.server.runtime import (
+    build_runtime_graph,
+    initial_state,
+    runtime_config,
+)
 
 
 def _is_node_event(event_type: object, name: object) -> bool:
@@ -44,10 +48,8 @@ async def execute_run(
 ) -> None:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from agent_os.graph import build_graph
-
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
-    config = {"configurable": {"thread_id": thread_id}}
+    config = runtime_config(thread_id)
 
     try:
         run = runs.get_run(run_id)
@@ -60,20 +62,10 @@ async def execute_run(
                 # the shared-file write lock instead of failing with "database is
                 # locked" when the synchronous ledger is mid-write.
                 await saver.conn.execute("PRAGMA busy_timeout=30000")
-                graph = build_graph(checkpointer=saver)
+                graph = build_runtime_graph(checkpointer=saver)
                 graph_input: object
                 if resume_feedback is None:
-                    from agent_os.bindings import resolve_backend_binding
-                    graph_input = {
-                        "messages": [HumanMessage(content=task)],
-                        "task": task,
-                        "plan": None,
-                        "executor_output": None,
-                        "human_feedback": None,
-                        "hot_context": None,
-                        "conversation_summary": None,
-                        "backend_binding": resolve_backend_binding(None),
-                    }
+                    graph_input = initial_state(task)
                 else:
                     graph_input = Command(resume=resume_feedback)
 

@@ -93,7 +93,10 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
 
     await execute_run(run_id, "thread-1", "task")
 
-    assert graph.seen_config == {"configurable": {"thread_id": "thread-1"}}
+    assert graph.seen_config == {
+        "recursion_limit": 7,
+        "configurable": {"thread_id": "thread-1"},
+    }
     assert graph.seen_version == "v1"
     assert get_run(run_id)["status"] == "completed"
     events = list_events(run_id)

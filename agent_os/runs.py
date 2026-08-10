@@ -141,6 +141,40 @@ def set_status(
         conn.commit()
 
 
+def transition_status(
+    run_id: str,
+    *,
+    expected: str,
+    status: str,
+    error: str | None = None,
+    ended: bool = False,
+) -> bool:
+    _init_runs_db()
+    now = dt.datetime.now(dt.UTC).isoformat()
+    ended_at = now if ended else None
+    with contextlib.closing(_connect()) as conn:
+        if ended:
+            cursor = conn.execute(
+                """
+                UPDATE runs
+                SET status = ?, updated_at = ?, ended_at = ?, error = ?
+                WHERE run_id = ? AND status = ?
+                """,
+                (status, now, ended_at, error, run_id, expected),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                UPDATE runs
+                SET status = ?, updated_at = ?, error = ?
+                WHERE run_id = ? AND status = ?
+                """,
+                (status, now, error, run_id, expected),
+            )
+        conn.commit()
+        return cursor.rowcount == 1
+
+
 def get_run(run_id: str) -> dict[str, Any] | None:
     _init_runs_db()
     with contextlib.closing(_connect()) as conn:
