@@ -57,6 +57,21 @@ def test_build_sandbox_inventory_does_not_follow_symlink_cycle(monkeypatch, tmp_
     assert _build_sandbox_inventory() == ["nested/inside.txt"]
 
 
+def test_build_sandbox_inventory_skips_generated_and_dependency_trees(
+    monkeypatch, tmp_path
+):
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(sandbox))
+    (sandbox / "package.json").write_text("{}", encoding="utf-8")
+    for directory in (".git", ".graphify", "dist", "node_modules"):
+        ignored = sandbox / directory
+        ignored.mkdir()
+        (ignored / "noise.txt").write_text("noise", encoding="utf-8")
+
+    assert _build_sandbox_inventory() == ["package.json"]
+
+
 def test_build_sandbox_inventory_bounds(monkeypatch, tmp_path):
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
@@ -238,6 +253,9 @@ def test_build_cli_architect_invoker_codex_security_contract(monkeypatch, tmp_pa
         schema = json.loads(Path(schema_file).read_text(encoding="utf-8"))
         assert schema["additionalProperties"] is False
         assert schema["required"] == list(schema["properties"])
+        assert "$defs" not in schema
+        assert "proposed_actions" not in schema["properties"]
+        assert "metadata" not in schema["properties"]
 
         idx_output = args.index("--output-last-message")
         output_file = args[idx_output + 1]

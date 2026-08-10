@@ -9,6 +9,22 @@ from agent_os.state import SimonState
 
 MAX_INVENTORY_FILES = 1000
 _MAX_INVENTORY_DIRECTORIES = 1000
+_IGNORED_INVENTORY_DIRECTORIES = frozenset(
+    {
+        ".cache",
+        ".codegraph",
+        ".git",
+        ".graphify",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "venv",
+    }
+)
 
 
 def _build_sandbox_inventory() -> list[str]:
@@ -35,6 +51,8 @@ def _build_sandbox_inventory() -> list[str]:
         root_path = Path(root)
         safe_dirs: list[str] = []
         for directory in sorted(dirs):
+            if directory in _IGNORED_INVENTORY_DIRECTORIES:
+                continue
             directory_path = root_path / directory
             try:
                 if directory_path.is_symlink():
