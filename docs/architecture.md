@@ -168,7 +168,7 @@ Agent OS treats each model invocation as a cost boundary:
 
 ## Connector framework & Memory write-path
 
-Agent OS v1.5 introduces a robust connector framework:
+Agent OS exposes a robust connector framework:
 - **ConnectorRegistry** maps standardized interfaces (`MemoryConnector`, `FilesystemConnector`) to portable implementations.
 - **Write-path:** `WritableMemory` supports gated writes (`evaluate_write_policy`), ensuring agent-planned context writes require human approval (or fall under auto-approve policies like `AI/Logs/`).
 Gated writes now flow through a shared `PolicyEngine` (`LocalPolicy`, 7-level side-effect taxonomy `none`/`read`/`write`/`network`/`communication`/`payment`/`privileged` -> `allow`/`deny`/`require_approval`); a memory write is one kind of action evaluated by that policy.
@@ -177,7 +177,14 @@ Gated writes now flow through a shared `PolicyEngine` (`LocalPolicy`, 7-level si
 The CLI provides a `chat` loop for multi-turn conversations, preserving state across invocations. Sessions are indexed locally via SQLite, allowing users to list, inspect, and delete historical runs. A summarization engine condenses old messages into a rolling `conversation_summary`, injecting bounded context alongside `hot_context`.
 
 ## Runtime API
-`agent-os serve` runs a localhost-first FastAPI interface from the `[serve]` extra, exposing sessions, a chat WebSocket, brief, and health endpoints for external UIs. It is the seam between the runtime and any interface.
+
+`agent-os serve` runs a localhost-first FastAPI interface from the `[serve]`
+extra. It exposes health, sessions, chat WebSocket, brief, graph, schedule, and
+run-control endpoints for external UIs. The run API records each invocation in
+the run ledger, streams replayable Server-Sent Events, and lets an operator
+approve or cancel interrupted work without coupling the UI to LangGraph
+internals. It is the seam between the runtime and any interface, including the
+default operator console or a private dashboard.
 
 ## Extension points
 
