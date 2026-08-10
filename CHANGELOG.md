@@ -3,6 +3,17 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [2.0.0] — 2026-08-09
+
+### Added
+
+- **Stable extension API** (`agent_os.api`): a frozen, identity-preserving public facade (18 exports — `MemoryConnector`, `BackendAdapter`, `PolicyEngine`, skill-package types, etc.), `py.typed`, `docs/EXTENDING.md`, and golden-signature + behavioral conformance tests that fail if a public signature changes. This is the v2 compatibility surface for extension authors.
+- **Self-host Compose stack** (`docker-compose.yml` + `docs/self-hosting.md`): one-command bring-up of the backend container plus the operator console, with the console image pinned by immutable multi-arch GHCR digest and its browser API base wired to the backend at runtime.
+
+### Notes
+
+- Console image is published multi-arch (`linux/amd64` + `linux/arm64`) to `ghcr.io/simon-aibc/agent-os-console` and pulls anonymously.
+
 ## [1.8.0] — 2026-08-09
 
 ### Added
