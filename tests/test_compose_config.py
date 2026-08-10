@@ -6,7 +6,7 @@ import yaml
 REPO_ROOT = Path(__file__).parent.parent
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 CONSOLE_DIGEST = (
-    "sha256:72b694459d0eae0c16644cb2dd6bbb8f19fc63bf17aa425f5cc52de8dc186f06"
+    "sha256:1ee8c32becb93212c10fa74bdb0b74329187f02464e97353e522bd389fcb7ebb"
 )
 
 
