@@ -169,6 +169,9 @@ def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
 def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    workspace = tmp_path / "workspace-a"
+    workspace.mkdir()
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(tmp_path))
     calls = []
 
     async def fake_execute_run(run_id, thread_id, task, *, resume_feedback=None):
@@ -204,7 +207,7 @@ def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypat
     assert interrupted_resp.status_code == 200
     interrupted = interrupted_resp.json()
     assert interrupted["status"] == "interrupted"
-    assert interrupted["workspace"] == "workspace-a"
+    assert interrupted["workspace"] == str(workspace.resolve())
     assert interrupted["interrupt"] == "Approve revised plan?"
 
     approve_resp = client.post(
@@ -234,6 +237,22 @@ def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypat
             "resume_feedback": "approved",
         },
     ]
+
+
+def test_run_api_rejects_workspace_outside_sandbox(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(sandbox))
+
+    response = client.post(
+        "/api/runs",
+        json={"task": "unsafe", "workspace": str(tmp_path)},
+    )
+
+    assert response.status_code == 422
+    assert "outside the sandbox" in response.json()["detail"]
 
 def test_run_api_cancel_path(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")

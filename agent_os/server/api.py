@@ -27,6 +27,7 @@ from agent_os.runs import (
     list_runs,
     set_status,
 )
+from agent_os.sandbox import resolve_workspace_root
 from agent_os.schedule_models import ScheduleInput
 from agent_os.scheduler import SchedulerService
 from agent_os.server.run_executor import execute_run
@@ -202,8 +203,12 @@ def create_run_endpoint(
     request: CreateRunRequest,
     background_tasks: BackgroundTasks,
 ) -> dict[str, str]:
+    try:
+        workspace = str(resolve_workspace_root(request.workspace))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     thread_id = request.thread_id or str(uuid.uuid4())
-    run_id = create_run(thread_id, request.workspace, request.task)
+    run_id = create_run(thread_id, workspace, request.task)
     background_tasks.add_task(execute_run, run_id, thread_id, request.task)
     return {"run_id": run_id, "thread_id": thread_id, "status": "queued"}
 
