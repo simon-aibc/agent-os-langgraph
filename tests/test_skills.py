@@ -1,5 +1,6 @@
 import pytest
 
+from agent_os.default_registry import parse_tier1_request
 from agent_os.skills import RegisteredSkill, SkillRegistry
 
 
@@ -83,3 +84,21 @@ def test_skill_rejects_duplicate_or_empty_aliases():
         RegisteredSkill(name="read", aliases=["cat", "CAT"], handler=lambda: None)
     with pytest.raises(ValueError, match="must not be empty"):
         RegisteredSkill(name="read", aliases=["  "], handler=lambda: None)
+
+
+def test_tier1_request_routes_single_argument_workspace_skill_without_llm():
+    registry = SkillRegistry()
+    registry.register(
+        RegisteredSkill(
+            name="hermes_chat",
+            aliases=["hermes-chat"],
+            handler=lambda task: task,
+        )
+    )
+
+    decision = parse_tier1_request('hermes-chat {"message":"hello"}', registry)
+
+    assert decision is not None
+    assert decision.tool == "hermes_chat"
+    assert decision.confidence == 1.0
+    assert decision.arguments == {"task": '{"message":"hello"}'}

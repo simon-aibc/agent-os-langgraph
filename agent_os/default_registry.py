@@ -1,3 +1,4 @@
+import inspect
 import logging
 import shlex
 from collections.abc import Sequence
@@ -64,7 +65,28 @@ def parse_tier1_request(
             arguments={"cmd_args": command_arguments},
         )
 
-    return None
+    argument_name = _single_text_argument_name(skill)
+    if argument_name is None:
+        return None
+    return RouterDecision(
+        tool=skill.name,
+        confidence=1.0,
+        arguments={argument_name: arguments_text},
+    )
+
+
+def _single_text_argument_name(skill: RegisteredSkill) -> str | None:
+    if isinstance(skill.handler, BaseTool):
+        properties = skill.handler.get_input_schema().model_json_schema().get("properties", {})
+        return next(iter(properties)) if len(properties) == 1 else None
+
+    parameters = [
+        parameter
+        for parameter in inspect.signature(skill.handler).parameters.values()
+        if parameter.kind
+        not in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+    ]
+    return parameters[0].name if len(parameters) == 1 else None
 
 
 def build_default_registry(
