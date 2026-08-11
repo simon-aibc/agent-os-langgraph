@@ -85,6 +85,41 @@ def test_public_concierge_answers_vietnamese_when_asked(monkeypatch, tmp_path):
     assert payload["citations"] == ["profile.summary", "profile.services"]
 
 
+def test_public_concierge_answers_job_fit_questions(monkeypatch, tmp_path):
+    monkeypatch.setenv(PUBLIC_CONCIERGE_JSON_ENV, json.dumps(_profile()))
+    monkeypatch.setenv(PUBLIC_CONCIERGE_DB_ENV, str(tmp_path / "public.db"))
+    PUBLIC_CONCIERGE_BUCKETS.clear()
+
+    resp = client.post(
+        "/api/public/concierge/chat",
+        json={"message": "Simon phù hợp với job gì?"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "Simon phù hợp nhất" in payload["answer"]
+    assert "Growth / GTM / Commercial Growth" in payload["answer"]
+    assert "Mình là Simos" not in payload["answer"]
+    assert payload["citations"] == ["profile.summary", "profile.services", "profile.proof_points"]
+
+
+def test_public_concierge_answers_about_simon_without_self_intro(monkeypatch, tmp_path):
+    monkeypatch.setenv(PUBLIC_CONCIERGE_JSON_ENV, json.dumps(_profile()))
+    monkeypatch.setenv(PUBLIC_CONCIERGE_DB_ENV, str(tmp_path / "public.db"))
+    PUBLIC_CONCIERGE_BUCKETS.clear()
+
+    resp = client.post(
+        "/api/public/concierge/chat",
+        json={"message": "Tôi hỏi Simon chứ có hỏi Simos đâu?"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "Acme helps teams connect market insight to GTM execution." in payload["answer"]
+    assert "Mình là Simos" not in payload["answer"]
+    assert payload["citations"] == ["profile.summary", "profile.services"]
+
+
 def test_public_concierge_refuses_private_scope(monkeypatch, tmp_path):
     monkeypatch.setenv(PUBLIC_CONCIERGE_JSON_ENV, json.dumps(_profile()))
     monkeypatch.setenv(PUBLIC_CONCIERGE_DB_ENV, str(tmp_path / "public.db"))

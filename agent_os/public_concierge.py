@@ -265,6 +265,58 @@ def _format_bullets(items: list[str], *, limit: int = 5) -> str:
     return "\n".join(f"- {item.strip()}" for item in items[:limit] if item.strip())
 
 
+def _format_job_fit(profile: PublicConciergeProfile, *, is_vi: bool) -> list[str]:
+    if is_vi:
+        answer_parts = [
+            "Nếu nhìn từ public profile, Simon phù hợp nhất với các vai trò giao giữa growth, GTM, product marketing và commercial execution.",
+            "\n".join(
+                [
+                    "- Growth / GTM / Commercial Growth: biến insight thị trường thành positioning, acquisition system, launch plan và sales enablement.",
+                    "- Product Marketing: nối customer insight, value proposition, messaging và go-to-market.",
+                    "- Launch / Brand / F&B marketing: phù hợp khi cần vừa chiến lược vừa execution thực tế.",
+                    "- AI-enabled operations / AgentOS workflows: thiết kế workflow chatbot internal/external, memory, task routing và automation có guardrails.",
+                ]
+            ),
+        ]
+        if profile.proof_points:
+            answer_parts.append("Một vài tín hiệu public:\n" + _format_bullets(profile.proof_points, limit=4))
+        answer_parts.append("Nếu bạn đang tuyển, mình nên biết thêm industry, stage, target market và KPI chính để map fit rõ hơn.")
+    else:
+        answer_parts = [
+            "From Simon's public profile, the strongest fit is for roles that sit between growth, GTM, product marketing, and commercial execution.",
+            "\n".join(
+                [
+                    "- Growth / GTM / Commercial Growth: turning market insight into positioning, acquisition systems, launches, and sales enablement.",
+                    "- Product Marketing: connecting customer insight, value proposition, messaging, and go-to-market.",
+                    "- Launch / Brand / F&B marketing: useful when the role needs strategy plus hands-on execution.",
+                    "- AI-enabled operations / AgentOS workflows: designing guarded internal or external assistant workflows.",
+                ]
+            ),
+        ]
+        if profile.proof_points:
+            answer_parts.append("Public signals:\n" + _format_bullets(profile.proof_points, limit=4))
+        answer_parts.append("If you're hiring, share the industry, stage, market, and success metric, and I can map the fit more clearly.")
+    return answer_parts
+
+
+def _format_about_simon(profile: PublicConciergeProfile, *, is_vi: bool) -> list[str]:
+    if is_vi:
+        answer_parts = [
+            profile.summary,
+            "Nói ngắn gọn: Simon làm ở vùng growth / GTM / product marketing / commercial growth, và đang thử nghiệm AgentOS-style workflows để biến AI thành operating system thực dụng.",
+        ]
+        if profile.services:
+            answer_parts.append("Các mảng public có thể hỏi thêm:\n" + _format_bullets(profile.services, limit=5))
+    else:
+        answer_parts = [
+            profile.summary,
+            "In short: Simon works around growth, GTM, product marketing, and commercial growth, with practical AgentOS-style workflows for AI-enabled operating systems.",
+        ]
+        if profile.services:
+            answer_parts.append("Public areas you can ask about:\n" + _format_bullets(profile.services, limit=5))
+    return answer_parts
+
+
 class PublicConcierge:
     def __init__(self, profile: PublicConciergeProfile):
         self.profile = profile
@@ -277,6 +329,49 @@ class PublicConcierge:
         links: list[PublicLink] = []
 
         if _contains_any(
+            message,
+            {
+                "job",
+                "jobs",
+                "role",
+                "roles",
+                "position",
+                "positions",
+                "fit",
+                "hiring",
+                "career",
+                "phù hợp",
+                "phu hop",
+                "vị trí",
+                "vi tri",
+                "công việc",
+                "cong viec",
+                "nghề",
+                "nghe",
+            },
+        ):
+            answer_parts = _format_job_fit(self.profile, is_vi=is_vi)
+            citations = ["profile.summary", "profile.services", "profile.proof_points"]
+        elif _contains_any(
+            message,
+            {
+                "simon",
+                "who is",
+                "about",
+                "bio",
+                "background",
+                "profile",
+                "là ai",
+                "la ai",
+                "hỏi simon",
+                "hoi simon",
+                "về simon",
+                "ve simon",
+            },
+        ):
+            answer_parts = _format_about_simon(self.profile, is_vi=is_vi)
+            citations = ["profile.summary", "profile.services"]
+        elif _contains_any(
             message,
             {
                 "service",
