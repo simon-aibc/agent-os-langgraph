@@ -1,7 +1,9 @@
 import asyncio
+import hmac
 import json
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
@@ -9,6 +11,7 @@ from typing import Any
 from fastapi import (
     FastAPI,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -18,6 +21,13 @@ from pydantic import BaseModel
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.connectors import MemoryConnector
+from agent_os.public_concierge import (
+    PublicChatRequest,
+    PublicChatResponse,
+    PublicConcierge,
+    list_public_leads,
+    load_public_concierge_profile,
+)
 from agent_os.runs import (
     append_event,
     create_run,
@@ -78,6 +88,8 @@ app.add_middleware(
 TERMINAL_RUN_STATUSES = {"completed", "cancelled", "error"}
 GRAPH_MAX_NODES = 200
 ACTIVE_RUN_TASKS: dict[str, asyncio.Task[None]] = {}
+PUBLIC_CONCIERGE_BUCKETS: dict[str, list[float]] = {}
+PUBLIC_CONCIERGE_WINDOW_SECONDS = 60.0
 
 
 class CreateRunRequest(BaseModel):
@@ -90,6 +102,31 @@ class ApproveRunRequest(BaseModel):
     feedback: str | None = None
 
 
+def _public_concierge_rate_limit(request: Request) -> None:
+    limit = int(os.getenv("AGENT_OS_PUBLIC_CONCIERGE_RATE_LIMIT", "20"))
+    if limit <= 0:
+        return
+
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    client_key = forwarded_for.split(",", 1)[0].strip()
+    if not client_key and request.client is not None:
+        client_key = request.client.host
+    if not client_key:
+        client_key = "unknown"
+
+    now = time.monotonic()
+    bucket = [
+        ts
+        for ts in PUBLIC_CONCIERGE_BUCKETS.get(client_key, [])
+        if now - ts < PUBLIC_CONCIERGE_WINDOW_SECONDS
+    ]
+    if len(bucket) >= limit:
+        PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
+        raise HTTPException(status_code=429, detail="Public concierge rate limit exceeded")
+    bucket.append(now)
+    PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
+
+
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
     workspace = runtime_summary()
@@ -99,6 +136,37 @@ def health_check() -> dict[str, Any]:
         "workspace": workspace,
         "active_runs": len(ACTIVE_RUN_TASKS),
     }
+
+
+@app.post("/api/public/concierge/chat")
+def public_concierge_chat(
+    request: Request,
+    payload: PublicChatRequest,
+) -> PublicChatResponse:
+    profile = load_public_concierge_profile()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Public concierge is not configured")
+    _public_concierge_rate_limit(request)
+    return PublicConcierge(profile).respond(payload)
+
+
+@app.get("/api/public/concierge/leads")
+def public_concierge_leads(
+    request: Request,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    token = os.getenv("AGENT_OS_PUBLIC_CONCIERGE_ADMIN_TOKEN", "").strip()
+    if not token:
+        raise HTTPException(status_code=404, detail="Public concierge lead review is not configured")
+    # This endpoint is intentionally token-gated and should sit behind HTTPS in
+    # production. It is for internal review dashboards, not the public website.
+    provided = request.headers.get("x-admin-token", "").strip()
+    bearer = request.headers.get("authorization", "").strip()
+    if bearer.lower().startswith("bearer "):
+        provided = bearer[7:].strip()
+    if not hmac.compare_digest(provided, token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return list_public_leads(limit=limit)
 
 @app.get("/api/sessions")
 def get_sessions() -> list[dict[str, Any]]:

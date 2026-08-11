@@ -186,6 +186,12 @@ approve or cancel interrupted work without coupling the UI to LangGraph
 internals. It is the seam between the runtime and any interface, including the
 default operator console or a private dashboard.
 
+The optional public concierge facade is a separate website-chat boundary. When
+configured, `/api/public/concierge/chat` answers from an approved public profile
+and records visitor handoffs as review-required leads. It does not call private
+memory connectors, tools, files, chats, or executor backends. See
+[`docs/public-concierge.md`](public-concierge.md).
+
 ## Extension points
 
 - Register `RegisteredSkill` instances in an injected `SkillRegistry`.
