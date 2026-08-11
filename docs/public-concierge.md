@@ -1,10 +1,12 @@
 # Public concierge facade
 
 Agent OS can expose a narrow public website-chat facade for external visitors.
-The facade is intentionally separate from private Agent OS workspaces: it uses
-only an approved public profile, deterministic routing, a small lead ledger,
-and rate limiting. It does not call private memory connectors, tools, files,
-Telegram bots, or executor backends.
+The facade is intentionally separate from private Agent OS workspaces. Its
+primary response path runs the Hermes harness with an approved public profile,
+safe mode, an empty toolset, an isolated temporary working directory, opaque
+public sessions, a small lead ledger, and rate limiting. Deterministic routing
+is retained only as an availability and policy fallback. It does not call
+private memory connectors, tools, files, Telegram bots, or executor backends.
 
 ## Boundary
 
@@ -30,9 +32,23 @@ The endpoint is disabled by default. Set one of these variables before starting
 
 ```bash
 AGENT_OS_PUBLIC_CONCIERGE_PATH="./public-concierge.json"
+AGENT_OS_PUBLIC_CONCIERGE_MODE="hermes"
 # or
 AGENT_OS_PUBLIC_CONCIERGE_JSON='{"tenant_id":"acme", ...}'
 ```
+
+Optional Hermes settings:
+
+```bash
+AGENT_OS_PUBLIC_CONCIERGE_HERMES_BIN="/path/to/hermes"
+AGENT_OS_PUBLIC_CONCIERGE_MODEL="provider/model-name"
+AGENT_OS_PUBLIC_CONCIERGE_PROVIDER="provider-name"
+AGENT_OS_PUBLIC_CONCIERGE_TIMEOUT_SECONDS="60"
+AGENT_OS_PUBLIC_CONCIERGE_SESSION_TTL_SECONDS="86400"
+```
+
+Set `AGENT_OS_PUBLIC_CONCIERGE_MODE=deterministic` for offline tests or an
+explicit no-model deployment. Hermes mode is the default.
 
 Example profile:
 
@@ -72,6 +88,7 @@ Request:
 {
   "message": "Can you help with launch planning?",
   "visitor_id": "browser-session-id",
+  "session_id": "opaque-session-token-from-the-previous-response",
   "source_url": "https://example.com/#contact",
   "visitor": {
     "name": "Ada",
@@ -93,6 +110,11 @@ Response:
   "links": [],
   "citations": ["profile.summary", "profile.services"],
   "handoff_status": "review_required",
+  "session_id": "opaque-session-token",
+  "runtime": "agent-os",
+  "harness": "hermes",
+  "model": "provider/model-name",
+  "fallback": false,
   "lead": {
     "lead_id": "uuid",
     "status": "review_required",
@@ -100,6 +122,14 @@ Response:
   }
 }
 ```
+
+The browser session token is not a Hermes session id. Agent OS binds it to a
+Hermes session server-side and requires the same visitor id for resume.
+
+`GET /api/public/concierge/health`
+
+Returns the configured runtime, harness/model label, fallback availability,
+zero-tool public policy, and whether a public profile is configured.
 
 `GET /api/public/concierge/leads`
 
@@ -113,3 +143,8 @@ directly. Put this route behind a public HTTPS edge with authentication for
 admin endpoints, strict CORS, request limits, logging, and a reviewed public
 profile. Website chat should talk to this facade, not to the private Agent OS
 runtime or any personal assistant endpoint.
+
+For a reusable external-channel workspace, set `[policy].mode` to
+`public-read-only`. That mode starts with an empty skill registry instead of
+the default file/shell tools; only explicitly listed public skill packages are
+loaded.

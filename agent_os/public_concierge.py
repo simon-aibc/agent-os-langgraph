@@ -17,6 +17,7 @@ from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 PUBLIC_CONCIERGE_JSON_ENV = "AGENT_OS_PUBLIC_CONCIERGE_JSON"
 PUBLIC_CONCIERGE_PATH_ENV = "AGENT_OS_PUBLIC_CONCIERGE_PATH"
 PUBLIC_CONCIERGE_DB_ENV = "AGENT_OS_PUBLIC_CONCIERGE_DB"
+PUBLIC_CONCIERGE_SESSION_TTL_ENV = "AGENT_OS_PUBLIC_CONCIERGE_SESSION_TTL_SECONDS"
 
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d)")
@@ -93,6 +94,7 @@ class PublicConciergeProfile(BaseModel):
 class PublicChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     visitor_id: str | None = Field(default=None, max_length=120)
+    session_id: str | None = Field(default=None, max_length=120)
     visitor: PublicVisitor | None = None
     source_url: str | None = Field(default=None, max_length=500)
 
@@ -112,6 +114,11 @@ class PublicChatResponse(BaseModel):
     citations: list[str]
     handoff_status: Literal["none", "review_required"]
     lead: PublicLead | None = None
+    session_id: str | None = None
+    runtime: Literal["agent-os"] = "agent-os"
+    harness: Literal["hermes", "deterministic"] = "deterministic"
+    model: str | None = None
+    fallback: bool = True
 
 
 def _default_db_path() -> str:
@@ -149,6 +156,99 @@ def _init_db() -> None:
                 created_at TEXT NOT NULL
             )
             """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public_concierge_sessions (
+                session_id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                visitor_id TEXT,
+                hermes_session_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+
+
+def _session_ttl_seconds() -> int:
+    try:
+        value = int(os.getenv(PUBLIC_CONCIERGE_SESSION_TTL_ENV, "86400"))
+    except ValueError:
+        return 86400
+    return min(604800, max(300, value))
+
+
+def resolve_public_session(
+    profile: PublicConciergeProfile,
+    request: PublicChatRequest,
+) -> tuple[str, str | None]:
+    """Resolve an opaque browser token without exposing Hermes session ids."""
+    _init_db()
+    now = dt.datetime.now(dt.UTC)
+    requested = str(request.session_id or "").strip()
+    visitor_id = str(request.visitor_id or "").strip() or None
+
+    with contextlib.closing(_connect()) as conn:
+        conn.row_factory = sqlite3.Row
+        cutoff = now - dt.timedelta(seconds=_session_ttl_seconds())
+        conn.execute(
+            "DELETE FROM public_concierge_sessions WHERE updated_at < ?",
+            (cutoff.isoformat(),),
+        )
+        conn.commit()
+        if requested and visitor_id:
+            row = conn.execute(
+                """
+                SELECT session_id, visitor_id, hermes_session_id, updated_at
+                FROM public_concierge_sessions
+                WHERE session_id = ? AND tenant_id = ?
+                """,
+                (requested, profile.tenant_id),
+            ).fetchone()
+            if row is not None and row["visitor_id"] == visitor_id:
+                updated_at = dt.datetime.fromisoformat(str(row["updated_at"]))
+                if (now - updated_at).total_seconds() <= _session_ttl_seconds():
+                    return str(row["session_id"]), row["hermes_session_id"]
+
+        session_id = str(uuid.uuid4())
+        timestamp = now.isoformat()
+        conn.execute(
+            """
+            INSERT INTO public_concierge_sessions (
+                session_id, tenant_id, visitor_id, hermes_session_id,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            (session_id, profile.tenant_id, visitor_id, timestamp, timestamp),
+        )
+        conn.commit()
+        return session_id, None
+
+
+def bind_public_hermes_session(
+    profile: PublicConciergeProfile,
+    session_id: str,
+    hermes_session_id: str,
+) -> None:
+    """Persist the private Hermes id behind its opaque public session token."""
+    if not hermes_session_id.strip():
+        return
+    _init_db()
+    with contextlib.closing(_connect()) as conn:
+        conn.execute(
+            """
+            UPDATE public_concierge_sessions
+            SET hermes_session_id = ?, updated_at = ?
+            WHERE session_id = ? AND tenant_id = ?
+            """,
+            (
+                hermes_session_id.strip(),
+                dt.datetime.now(dt.UTC).isoformat(),
+                session_id,
+                profile.tenant_id,
+            ),
         )
         conn.commit()
 
@@ -331,6 +431,30 @@ class PublicConcierge:
         if _contains_any(
             message,
             {
+                "private",
+                "memory",
+                "task",
+                "telegram",
+                "file",
+                "vault",
+                "secret",
+                "token",
+                "password",
+                "riêng tư",
+                "nội bộ",
+                "mật khẩu",
+                "bí mật",
+            },
+        ):
+            answer_parts = [
+                "Mình không thể truy cập memory, task, file, chat hoặc tool nội bộ của SimonOS. Mình chỉ dùng thông tin public đã duyệt."
+                if is_vi
+                else "I cannot access private SimonOS memory, tasks, files, chats, or tools. I only use approved public information.",
+            ]
+            citations = ["profile.boundaries", "profile.summary"]
+        elif _contains_any(
+            message,
+            {
                 "job",
                 "jobs",
                 "role",
@@ -442,25 +566,6 @@ class PublicConcierge:
             ]
             links = self.profile.links
             citations = ["profile.links"]
-        elif _contains_any(
-            message,
-            {
-                "private",
-                "memory",
-                "task",
-                "telegram",
-                "file",
-                "vault",
-                "riêng tư",
-                "nội bộ",
-            },
-        ):
-            answer_parts = [
-                "Mình không thể truy cập memory, task, file, chat hoặc tool nội bộ của SimonOS. Mình chỉ dùng thông tin public đã duyệt."
-                if is_vi
-                else "I cannot access private SimonOS memory, tasks, files, chats, or tools. I only use approved public information.",
-            ]
-            citations = ["profile.boundaries", "profile.summary"]
         else:
             if is_vi:
                 answer_parts = [

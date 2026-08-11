@@ -20,6 +20,7 @@ def _write_workspace(
     organization: str | None = "ExampleCo",
     skills: list[str] | None = None,
     connectors: list[str] | None = None,
+    policy_mode: str = "local",
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     (root / "SYSTEM.md").write_text("# System\nUse the workspace context.\n")
@@ -56,7 +57,7 @@ def _write_workspace(
                 "max_age_days = 3650",
                 "",
                 "[policy]",
-                'mode = "local"',
+                f'mode = "{policy_mode}"',
                 "",
                 "[limits]",
                 "recursion_limit = 7",
@@ -129,6 +130,27 @@ def test_compose_binds_workspace_runtime(tmp_path, monkeypatch):
     assert "Use the workspace context." in composed.hot_context
     assert composed.limits == {"recursion_limit": 7}
     assert "LLM_ARCHITECT" not in os.environ
+
+
+def test_public_read_only_workspace_has_no_default_file_or_shell_tools(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.delenv("LLM_ARCHITECT", raising=False)
+    monkeypatch.delenv("LLM_EXECUTOR", raising=False)
+    skill_package = _write_skill_package(tmp_path)
+    workspace_path = _write_workspace(
+        tmp_path,
+        skills=[str(skill_package)],
+        policy_mode="public-read-only",
+    )
+
+    composed = compose_workspace(load_workspace(workspace_path))
+
+    assert composed.skill_registry.names() == ["hello_skill"]
+    assert composed.skill_registry.get("read_file") is None
+    assert composed.skill_registry.get("write_file") is None
+    assert composed.skill_registry.get("bash") is None
 
 
 def test_department_metadata_only(tmp_path):

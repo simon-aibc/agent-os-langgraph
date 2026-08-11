@@ -24,9 +24,12 @@ from agent_os.connectors import MemoryConnector
 from agent_os.public_concierge import (
     PublicChatRequest,
     PublicChatResponse,
-    PublicConcierge,
     list_public_leads,
     load_public_concierge_profile,
+)
+from agent_os.public_concierge_ai import (
+    PublicConciergeAI,
+    public_concierge_runtime_summary,
 )
 from agent_os.runs import (
     append_event,
@@ -138,8 +141,19 @@ def health_check() -> dict[str, Any]:
     }
 
 
+@app.get("/api/public/concierge/health")
+def public_concierge_health() -> dict[str, object]:
+    profile = load_public_concierge_profile()
+    return {
+        "status": "ok" if profile is not None else "not_configured",
+        "configured": profile is not None,
+        "tenant_id": profile.tenant_id if profile is not None else None,
+        **public_concierge_runtime_summary(),
+    }
+
+
 @app.post("/api/public/concierge/chat")
-def public_concierge_chat(
+async def public_concierge_chat(
     request: Request,
     payload: PublicChatRequest,
 ) -> PublicChatResponse:
@@ -147,7 +161,7 @@ def public_concierge_chat(
     if profile is None:
         raise HTTPException(status_code=404, detail="Public concierge is not configured")
     _public_concierge_rate_limit(request)
-    return PublicConcierge(profile).respond(payload)
+    return await asyncio.to_thread(PublicConciergeAI(profile).respond, payload)
 
 
 @app.get("/api/public/concierge/leads")

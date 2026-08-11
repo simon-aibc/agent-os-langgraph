@@ -1,5 +1,6 @@
 import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_os.public_concierge import (
@@ -9,6 +10,11 @@ from agent_os.public_concierge import (
 from agent_os.server.api import PUBLIC_CONCIERGE_BUCKETS, app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def deterministic_public_concierge(monkeypatch):
+    monkeypatch.setenv("AGENT_OS_PUBLIC_CONCIERGE_MODE", "deterministic")
 
 
 def _profile() -> dict[str, object]:
@@ -45,6 +51,25 @@ def test_public_concierge_is_disabled_without_profile(monkeypatch):
 
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Public concierge is not configured"
+
+
+def test_public_concierge_health_reports_runtime(monkeypatch):
+    monkeypatch.setenv(PUBLIC_CONCIERGE_JSON_ENV, json.dumps(_profile()))
+
+    resp = client.get("/api/public/concierge/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "status": "ok",
+        "configured": True,
+        "tenant_id": "acme",
+        "runtime": "agent-os",
+        "harness": "deterministic",
+        "model": None,
+        "fallback_enabled": True,
+        "public_tools": [],
+        "private_workspace_access": False,
+    }
 
 
 def test_public_concierge_answers_from_public_profile(monkeypatch, tmp_path):
