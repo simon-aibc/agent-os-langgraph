@@ -6,6 +6,7 @@ from langgraph.types import Command
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import create_run, get_run, list_events
+from agent_os.schemas import ToolExecutionResult
 from agent_os.server.run_executor import execute_run
 
 
@@ -51,8 +52,8 @@ def runs_db(tmp_path, monkeypatch):
     return database_path
 
 
-def _completed_snapshot() -> object:
-    return SimpleNamespace(tasks=())
+def _completed_snapshot(values: dict[str, Any] | None = None) -> object:
+    return SimpleNamespace(tasks=(), values=values or {})
 
 
 def _interrupted_snapshot(prompt: object = "Approve?") -> object:
@@ -109,6 +110,38 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
     ]
     assert events[0]["payload"] == {"name": "planner", "event": "on_chain_start"}
     assert events[1]["payload"] == {"content": "Hel"}
+
+
+@pytest.mark.anyio
+async def test_execute_run_includes_workspace_skill_output_in_result_event(
+    runs_db, monkeypatch
+):
+    graph = FakeGraph(
+        [],
+        _completed_snapshot(
+            {
+                "tool_result": ToolExecutionResult(
+                    tool="hermes_chat",
+                    output='{"content":"hello"}',
+                    success=True,
+                )
+            }
+        ),
+    )
+    _patch_graph(monkeypatch, graph)
+    run_id = create_run("thread-skill", None, "hermes-chat hello")
+
+    await execute_run(run_id, "thread-skill", "hermes-chat hello")
+
+    result_event = list_events(run_id)[-1]
+    assert result_event["kind"] == "result"
+    assert result_event["payload"] == {
+        "tool_result": {
+            "tool": "hermes_chat",
+            "output": '{"content":"hello"}',
+            "success": True,
+        }
+    }
 
 
 @pytest.mark.anyio

@@ -2,6 +2,7 @@ import os
 from typing import Any
 
 from langgraph.types import Command
+from pydantic import BaseModel
 
 from agent_os import runs
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
@@ -37,6 +38,18 @@ def _append_stream_event(run_id: str, event: dict[str, Any]) -> None:
         content = getattr(chunk, "content", None)
         if content:
             runs.append_event(run_id, "token", {"content": content})
+
+
+def _result_payload(snapshot: object) -> dict[str, Any]:
+    values = getattr(snapshot, "values", None)
+    if not isinstance(values, dict):
+        return {}
+    tool_result = values.get("tool_result")
+    if isinstance(tool_result, BaseModel):
+        tool_result = tool_result.model_dump(mode="json")
+    if isinstance(tool_result, dict):
+        return {"tool_result": tool_result}
+    return {}
 
 
 async def execute_run(
@@ -83,7 +96,7 @@ async def execute_run(
                     )
                     runs.set_status(run_id, "interrupted")
                 else:
-                    runs.append_event(run_id, "result", {})
+                    runs.append_event(run_id, "result", _result_payload(snapshot))
                     runs.set_status(run_id, "completed", ended=True)
     except Exception as error:
         message = str(error)
