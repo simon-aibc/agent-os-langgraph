@@ -67,6 +67,24 @@ def test_public_concierge_answers_from_public_profile(monkeypatch, tmp_path):
     assert payload["citations"] == ["profile.summary", "profile.services"]
 
 
+def test_public_concierge_answers_vietnamese_when_asked(monkeypatch, tmp_path):
+    monkeypatch.setenv(PUBLIC_CONCIERGE_JSON_ENV, json.dumps(_profile()))
+    monkeypatch.setenv(PUBLIC_CONCIERGE_DB_ENV, str(tmp_path / "public.db"))
+    PUBLIC_CONCIERGE_BUCKETS.clear()
+
+    resp = client.post(
+        "/api/public/concierge/chat",
+        json={"message": "Bạn có thể giúp gì về dịch vụ growth?"},
+    )
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "Mình là Simos" in payload["answer"]
+    assert "Một vài mảng" in payload["answer"]
+    assert "positioning" in payload["answer"]
+    assert payload["citations"] == ["profile.summary", "profile.services"]
+
+
 def test_public_concierge_refuses_private_scope(monkeypatch, tmp_path):
     monkeypatch.setenv(PUBLIC_CONCIERGE_JSON_ENV, json.dumps(_profile()))
     monkeypatch.setenv(PUBLIC_CONCIERGE_DB_ENV, str(tmp_path / "public.db"))

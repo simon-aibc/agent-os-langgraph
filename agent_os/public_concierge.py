@@ -20,6 +20,34 @@ PUBLIC_CONCIERGE_DB_ENV = "AGENT_OS_PUBLIC_CONCIERGE_DB"
 
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 PHONE_PATTERN = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d)")
+VI_PATTERN = re.compile(
+    r"[ăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩị"
+    r"óòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]",
+    re.I,
+)
+VI_HINTS = {
+    "anh",
+    "ban",
+    "bạn",
+    "biet",
+    "biết",
+    "cần",
+    "cho",
+    "chao",
+    "chào",
+    "dich",
+    "dịch",
+    "giup",
+    "giúp",
+    "lien",
+    "liên",
+    "minh",
+    "mình",
+    "tieng",
+    "tiếng",
+    "toi",
+    "tôi",
+}
 
 
 class PublicLink(BaseModel):
@@ -198,6 +226,14 @@ def _contains_any(message: str, needles: set[str]) -> bool:
     return any(needle in lowered for needle in needles)
 
 
+def _is_vietnamese(message: str) -> bool:
+    lowered = message.lower()
+    if VI_PATTERN.search(lowered):
+        return True
+    words = set(re.findall(r"[a-zA-Zăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]+", lowered))
+    return bool(words & VI_HINTS)
+
+
 def _lead_summary(request: PublicChatRequest) -> str | None:
     visitor = request.visitor
     if visitor is not None:
@@ -225,42 +261,122 @@ def _format_list(items: list[str]) -> str:
     return "; ".join(item.strip() for item in items if item.strip())
 
 
+def _format_bullets(items: list[str], *, limit: int = 5) -> str:
+    return "\n".join(f"- {item.strip()}" for item in items[:limit] if item.strip())
+
+
 class PublicConcierge:
     def __init__(self, profile: PublicConciergeProfile):
         self.profile = profile
 
     def respond(self, request: PublicChatRequest) -> PublicChatResponse:
         message = request.message.strip()
+        is_vi = _is_vietnamese(message)
         answer_parts: list[str]
         citations: list[str]
         links: list[PublicLink] = []
 
-        if _contains_any(message, {"service", "services", "offer", "help", "hire"}):
-            answer_parts = [self.profile.summary]
+        if _contains_any(
+            message,
+            {
+                "service",
+                "services",
+                "offer",
+                "help",
+                "hire",
+                "dịch vụ",
+                "giúp",
+                "cần",
+                "tuyển",
+            },
+        ):
+            if is_vi:
+                answer_parts = [
+                    "Mình là Simos - Simon's associate. Mình có thể giúp bạn xem nhanh Simon có phù hợp cho growth, GTM, launch hoặc workflow AI không.",
+                ]
+            else:
+                answer_parts = [
+                    "Hey, I'm Simos - Simon's associate. I can help you quickly see whether Simon is relevant for growth, GTM, launches, or AI-enabled workflows.",
+                ]
             if self.profile.services:
-                answer_parts.append("Public services: " + _format_list(self.profile.services))
+                label = "Một vài mảng Simon có thể hỗ trợ:" if is_vi else "Useful areas:"
+                answer_parts.append(label + "\n" + _format_bullets(self.profile.services))
             citations = ["profile.summary", "profile.services"]
-        elif _contains_any(message, {"project", "work", "case", "portfolio"}):
-            answer_parts = [self.profile.summary]
+        elif _contains_any(
+            message,
+            {
+                "project",
+                "work",
+                "case",
+                "portfolio",
+                "dự án",
+                "du an",
+                "kinh nghiệm",
+            },
+        ):
+            intro = (
+                "Một vài ví dụ public bạn có thể xem qua:"
+                if is_vi
+                else "A few public examples you can skim:"
+            )
+            answer_parts = [intro]
             if self.profile.projects:
-                answer_parts.append("Public work: " + _format_list(self.profile.projects))
+                answer_parts.append(_format_bullets(self.profile.projects, limit=4))
             if self.profile.proof_points:
-                answer_parts.append("Public proof points: " + _format_list(self.profile.proof_points))
+                label = "Tín hiệu public:" if is_vi else "Public signals:"
+                answer_parts.append(label + "\n" + _format_bullets(self.profile.proof_points, limit=4))
             citations = ["profile.summary", "profile.projects", "profile.proof_points"]
-        elif _contains_any(message, {"cv", "resume", "linkedin", "email", "contact", "whatsapp", "zalo"}):
+        elif _contains_any(
+            message,
+            {
+                "cv",
+                "resume",
+                "linkedin",
+                "email",
+                "contact",
+                "whatsapp",
+                "zalo",
+                "liên hệ",
+                "lien he",
+            },
+        ):
             answer_parts = [
-                "You can use the approved public contact links below."
+                "Bạn có thể liên hệ Simon qua các kênh public bên dưới."
+                if is_vi
+                else "You can reach Simon through the public links below."
             ]
             links = self.profile.links
             citations = ["profile.links"]
-        elif _contains_any(message, {"private", "memory", "task", "telegram", "file", "vault"}):
+        elif _contains_any(
+            message,
+            {
+                "private",
+                "memory",
+                "task",
+                "telegram",
+                "file",
+                "vault",
+                "riêng tư",
+                "nội bộ",
+            },
+        ):
             answer_parts = [
-                "I cannot access private SimonOS memory, tasks, files, chats, or tools.",
-                self.profile.summary,
+                "Mình không thể truy cập memory, task, file, chat hoặc tool nội bộ của SimonOS. Mình chỉ dùng thông tin public đã duyệt."
+                if is_vi
+                else "I cannot access private SimonOS memory, tasks, files, chats, or tools. I only use approved public information.",
             ]
             citations = ["profile.boundaries", "profile.summary"]
         else:
-            answer_parts = [self.profile.welcome, self.profile.summary]
+            if is_vi:
+                answer_parts = [
+                    "Chào bạn, mình là Simos - Simon's associate.",
+                    "Mình có thể trả lời nhanh bằng tiếng Việt hoặc tiếng Anh về dịch vụ, work examples, CV và cách liên hệ Simon.",
+                ]
+            else:
+                answer_parts = [
+                    self.profile.welcome,
+                    "I can answer in English or Vietnamese about services, public work, CVs, and contact paths.",
+                ]
             citations = ["profile.welcome", "profile.summary"]
 
         lead = None
@@ -268,7 +384,9 @@ class PublicConcierge:
         if lead_summary is not None:
             lead = _record_lead(self.profile, request, lead_summary)
             answer_parts.append(
-                "I saved this as a review-required lead for the internal team."
+                "Mình đã lưu lại để Simon review trước khi follow-up."
+                if is_vi
+                else "Got it. I saved this for Simon to review before any follow-up."
             )
 
         return PublicChatResponse(
