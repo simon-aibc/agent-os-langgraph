@@ -36,6 +36,30 @@ The dispatcher returns `Command(goto=END)` on success, so that path does not
 pass through the supervisor again. Architect, gate, and executor edges are
 explicit; supervisor destinations are conditional.
 
+### Local service boundaries (self-hosted deployment)
+
+When Agent OS runs alongside sibling services on a single host — the reference
+setup used by the maintainer — each surface listens on its own loopback port and
+owns a distinct concern. Applications embedding Agent OS should preserve these
+boundaries so that ownership is clear:
+
+- `127.0.0.1:4680` — Agent OS Python API (this repo): orchestration graph,
+  runs, dispatch, approvals, checkpoint state.
+- `127.0.0.1:4681` — Agent OS Console (separate private repo
+  `agent-os-console`): read-only operator UI over the Agent OS API.
+- `127.0.0.1:4679` — application layer (out of scope for this repo, example:
+  SimonOS Node): life-OS routes like todos, calendar, notes owned by the
+  embedding app, not by Agent OS.
+- `127.0.0.1:8642` — Hermes gateway (external): optional OpenAI-compatible
+  `/v1/chat/completions` adapter that lets any OAI-style chat frontend
+  (Open WebUI, LobeChat, AionUi, etc.) connect to a Hermes-orchestrated
+  backend. Agent OS itself does not expose this endpoint; embedding apps that
+  want that surface should run a gateway process alongside.
+
+Agent OS does not claim any of the application-layer routes. Downstream
+integrations misconfigured to POST life-OS routes at Agent OS's port will
+correctly 404 — this is by design.
+
 ## State and boundary models
 
 [`SimonState`](../agent_os/state.py) is a `TypedDict`, which lets LangGraph own
