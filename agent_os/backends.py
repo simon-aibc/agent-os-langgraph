@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Protocol
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from agent_os.cli_backends import (
     build_safe_subprocess_env,
@@ -26,6 +26,26 @@ from agent_os.state import SimonState
 BackendRole = Literal["architect", "executor"]
 BackendArtifact = PlanArtifact | ExecutionResult
 BackendInvoker = Callable[[SimonState], BackendArtifact]
+
+
+class _CodexCodingPlanOutput(BaseModel):
+    """Codex-compatible projection without free-form mapping fields."""
+
+    summary: str = ""
+    steps: list[str] = Field(default_factory=list)
+    files: list[str]
+    changes: list[str]
+    verify_cmd: str
+
+
+class _CodexCodingResultOutput(BaseModel):
+    """Codex-compatible execution report without free-form mapping fields."""
+
+    status: Literal["completed", "failed", "cancelled", "waiting"]
+    artifacts: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    diff: str = ""
+    verify_output: str = ""
 
 
 class AuthStatus(BaseModel):
@@ -242,6 +262,7 @@ class CodexAdapter:
                 from agent_os.agents.cli_architect import _build_architect_prompt
 
                 model = CodingPlan
+                schema_model = _CodexCodingPlanOutput
                 prompt = _build_architect_prompt(state)
                 sandbox_mode = "read-only"
             else:
@@ -251,12 +272,13 @@ class CodexAdapter:
                 if not isinstance(plan, PlanArtifact):
                     raise ValueError("State 'plan' must be a PlanArtifact instance.")
                 model = CodingResult
+                schema_model = _CodexCodingResultOutput
                 prompt = build_executor_prompt(plan)
                 sandbox_mode = "workspace-write"
 
             with tempfile.TemporaryDirectory(prefix="agent-os-codex-") as temp_dir:
                 output_path = Path(temp_dir) / "last-message.json"
-                with write_schema_file(model, strict=True) as schema_path:
+                with write_schema_file(schema_model, strict=True) as schema_path:
                     args = [
                         "exec",
                         "--sandbox",
@@ -271,7 +293,8 @@ class CodexAdapter:
                 parsed = parse_codex_output_file(output_path)
 
             try:
-                return model.model_validate(parsed)
+                compatible_output = schema_model.model_validate(parsed)
+                return model.model_validate(compatible_output.model_dump())
             except ValidationError as exc:
                 raise ValueError(
                     f"Failed to validate {self.name} structured output as "

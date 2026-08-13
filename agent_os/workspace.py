@@ -221,7 +221,10 @@ def _validate_backend_bindings(
 
 
 def _build_workspace_skill_registry(ws: Workspace) -> SkillRegistry:
-    registry = build_skill_registry()
+    if str(ws.policy.get("mode", "")).strip().lower() == "public-read-only":
+        registry = SkillRegistry()
+    else:
+        registry = build_skill_registry()
     loader = SkillPackageLoader(registry)
 
     for entry in ws.skills:

@@ -1,15 +1,17 @@
 import asyncio
+import hmac
 import json
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import (
-    BackgroundTasks,
     FastAPI,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
 )
@@ -18,7 +20,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
-from agent_os.connectors import GbrainConnector, MemoryConnector
+from agent_os.connectors import MemoryConnector
+from agent_os.public_concierge import (
+    PublicChatRequest,
+    PublicChatResponse,
+    list_public_leads,
+    load_public_concierge_profile,
+)
+from agent_os.public_concierge_ai import (
+    PublicConciergeAI,
+    public_concierge_runtime_summary,
+)
 from agent_os.runs import (
     append_event,
     create_run,
@@ -26,10 +38,20 @@ from agent_os.runs import (
     list_events,
     list_runs,
     set_status,
+    transition_status,
 )
+from agent_os.sandbox import resolve_workspace_root
 from agent_os.schedule_models import ScheduleInput
 from agent_os.scheduler import SchedulerService
 from agent_os.server.run_executor import execute_run
+from agent_os.server.runtime import (
+    build_runtime_graph,
+    initial_state,
+    memory_connector,
+    package_version,
+    runtime_config,
+    runtime_summary,
+)
 from agent_os.sessions import delete_session, list_sessions
 
 
@@ -45,7 +67,9 @@ async def _lifespan(app: FastAPI):
         await scheduler.stop()
 
 
-app = FastAPI(title="agent-os API", version="1.7.2", lifespan=_lifespan)
+SERVER_VERSION = package_version()
+
+app = FastAPI(title="agent-os API", version=SERVER_VERSION, lifespan=_lifespan)
 
 # The Runtime API is meant to be driven by a browser operator console on a
 # different localhost port, so cross-origin requests must be allowed. Defaults
@@ -66,6 +90,9 @@ app.add_middleware(
 
 TERMINAL_RUN_STATUSES = {"completed", "cancelled", "error"}
 GRAPH_MAX_NODES = 200
+ACTIVE_RUN_TASKS: dict[str, asyncio.Task[None]] = {}
+PUBLIC_CONCIERGE_BUCKETS: dict[str, list[float]] = {}
+PUBLIC_CONCIERGE_WINDOW_SECONDS = 60.0
 
 
 class CreateRunRequest(BaseModel):
@@ -78,9 +105,82 @@ class ApproveRunRequest(BaseModel):
     feedback: str | None = None
 
 
+def _public_concierge_rate_limit(request: Request) -> None:
+    limit = int(os.getenv("AGENT_OS_PUBLIC_CONCIERGE_RATE_LIMIT", "20"))
+    if limit <= 0:
+        return
+
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    client_key = forwarded_for.split(",", 1)[0].strip()
+    if not client_key and request.client is not None:
+        client_key = request.client.host
+    if not client_key:
+        client_key = "unknown"
+
+    now = time.monotonic()
+    bucket = [
+        ts
+        for ts in PUBLIC_CONCIERGE_BUCKETS.get(client_key, [])
+        if now - ts < PUBLIC_CONCIERGE_WINDOW_SECONDS
+    ]
+    if len(bucket) >= limit:
+        PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
+        raise HTTPException(status_code=429, detail="Public concierge rate limit exceeded")
+    bucket.append(now)
+    PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
+
+
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
-    return {"status": "ok", "version": "1.7.2"}
+    workspace = runtime_summary()
+    return {
+        "status": "ok" if workspace.get("status") != "error" else "degraded",
+        "version": SERVER_VERSION,
+        "workspace": workspace,
+        "active_runs": len(ACTIVE_RUN_TASKS),
+    }
+
+
+@app.get("/api/public/concierge/health")
+def public_concierge_health() -> dict[str, object]:
+    profile = load_public_concierge_profile()
+    return {
+        "status": "ok" if profile is not None else "not_configured",
+        "configured": profile is not None,
+        "tenant_id": profile.tenant_id if profile is not None else None,
+        **public_concierge_runtime_summary(),
+    }
+
+
+@app.post("/api/public/concierge/chat")
+async def public_concierge_chat(
+    request: Request,
+    payload: PublicChatRequest,
+) -> PublicChatResponse:
+    profile = load_public_concierge_profile()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Public concierge is not configured")
+    _public_concierge_rate_limit(request)
+    return await asyncio.to_thread(PublicConciergeAI(profile).respond, payload)
+
+
+@app.get("/api/public/concierge/leads")
+def public_concierge_leads(
+    request: Request,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    token = os.getenv("AGENT_OS_PUBLIC_CONCIERGE_ADMIN_TOKEN", "").strip()
+    if not token:
+        raise HTTPException(status_code=404, detail="Public concierge lead review is not configured")
+    # This endpoint is intentionally token-gated and should sit behind HTTPS in
+    # production. It is for internal review dashboards, not the public website.
+    provided = request.headers.get("x-admin-token", "").strip()
+    bearer = request.headers.get("authorization", "").strip()
+    if bearer.lower().startswith("bearer "):
+        provided = bearer[7:].strip()
+    if not hmac.compare_digest(provided, token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return list_public_leads(limit=limit)
 
 @app.get("/api/sessions")
 def get_sessions() -> list[dict[str, Any]]:
@@ -192,19 +292,54 @@ def build_graph_data(
 def get_graph_data(limit: int = GRAPH_MAX_NODES) -> dict[str, list[dict[str, Any]]]:
     try:
         effective_max = min(max(limit, 0), GRAPH_MAX_NODES)
-        connector = GbrainConnector()
-        return build_graph_data(connector, effective_max)
+        return build_graph_data(memory_connector(), effective_max)
     except Exception:
         return {"nodes": [], "edges": []}
 
+
+def _start_run_task(
+    run_id: str,
+    thread_id: str,
+    task: str,
+    *,
+    resume_feedback: str | None = None,
+) -> None:
+    existing = ACTIVE_RUN_TASKS.get(run_id)
+    if existing is not None and not existing.done():
+        return
+
+    async def runner() -> None:
+        try:
+            await execute_run(
+                run_id,
+                thread_id,
+                task,
+                resume_feedback=resume_feedback,
+            )
+        except asyncio.CancelledError:
+            run = get_run(run_id)
+            if run is not None and run["status"] not in TERMINAL_RUN_STATUSES:
+                set_status(run_id, "cancelled", ended=True)
+                append_event(run_id, "status", {"status": "cancelled"})
+            raise
+        finally:
+            ACTIVE_RUN_TASKS.pop(run_id, None)
+
+    ACTIVE_RUN_TASKS[run_id] = asyncio.create_task(
+        runner(),
+        name=f"agent-os-run-{run_id}",
+    )
+
+
 @app.post("/api/runs")
-def create_run_endpoint(
-    request: CreateRunRequest,
-    background_tasks: BackgroundTasks,
-) -> dict[str, str]:
+async def create_run_endpoint(request: CreateRunRequest) -> dict[str, str]:
+    try:
+        workspace = str(resolve_workspace_root(request.workspace))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     thread_id = request.thread_id or str(uuid.uuid4())
-    run_id = create_run(thread_id, request.workspace, request.task)
-    background_tasks.add_task(execute_run, run_id, thread_id, request.task)
+    run_id = create_run(thread_id, workspace, request.task)
+    _start_run_task(run_id, thread_id, request.task)
     return {"run_id": run_id, "thread_id": thread_id, "status": "queued"}
 
 @app.get("/api/runs")
@@ -237,19 +372,24 @@ def get_run_endpoint(run_id: str) -> dict[str, Any]:
     return run
 
 @app.post("/api/runs/{run_id}/approve")
-def approve_run_endpoint(
+async def approve_run_endpoint(
     run_id: str,
     request: ApproveRunRequest,
-    background_tasks: BackgroundTasks,
 ) -> dict[str, str]:
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if run["status"] != "interrupted":
+        if run["status"] == "running":
+            return {"run_id": run_id, "status": "running"}
         raise HTTPException(status_code=409, detail="Run is not interrupted")
 
-    background_tasks.add_task(
-        execute_run,
+    if not transition_status(run_id, expected="interrupted", status="running"):
+        latest = get_run(run_id)
+        if latest is not None and latest["status"] == "running":
+            return {"run_id": run_id, "status": "running"}
+        raise HTTPException(status_code=409, detail="Run is not interrupted")
+    _start_run_task(
         run_id,
         run["thread_id"],
         "",
@@ -258,13 +398,16 @@ def approve_run_endpoint(
     return {"run_id": run_id, "status": "running"}
 
 @app.post("/api/runs/{run_id}/cancel")
-def cancel_run_endpoint(run_id: str) -> dict[str, str]:
+async def cancel_run_endpoint(run_id: str) -> dict[str, str]:
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if run["status"] in TERMINAL_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Run is already terminal")
 
+    active_task = ACTIVE_RUN_TASKS.get(run_id)
+    if active_task is not None and not active_task.done():
+        active_task.cancel()
     set_status(run_id, "cancelled", ended=True)
     append_event(run_id, "status", {"status": "cancelled"})
     return {"run_id": run_id, "status": "cancelled"}
@@ -333,22 +476,19 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
     await websocket.accept()
     import json
 
-    from langchain_core.messages import HumanMessage
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from agent_os.graph import build_graph
-    
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
     
     async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
-        graph = build_graph(checkpointer=saver)
-        config = {"configurable": {"thread_id": thread_id}}
+        graph = build_runtime_graph(checkpointer=saver)
+        config = runtime_config(thread_id)
         
         try:
             while True:
                 data = await websocket.receive_text()
                 # Run graph
-                state_update = {"messages": [HumanMessage(content=data)]}
+                state_update = initial_state(data)
                 
                 async for event in graph.astream_events(state_update, config, version="v1"):
                     if event["event"] == "on_chat_model_stream":

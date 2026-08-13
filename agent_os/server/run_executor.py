@@ -1,12 +1,18 @@
 import os
 from typing import Any
 
-from langchain_core.messages import HumanMessage
 from langgraph.types import Command
+from pydantic import BaseModel
 
 from agent_os import runs
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.cli.app import _pending_interrupt
+from agent_os.sandbox import sandbox_scope
+from agent_os.server.runtime import (
+    build_runtime_graph,
+    initial_state,
+    runtime_config,
+)
 
 
 def _is_node_event(event_type: object, name: object) -> bool:
@@ -34,6 +40,18 @@ def _append_stream_event(run_id: str, event: dict[str, Any]) -> None:
             runs.append_event(run_id, "token", {"content": content})
 
 
+def _result_payload(snapshot: object) -> dict[str, Any]:
+    values = getattr(snapshot, "values", None)
+    if not isinstance(values, dict):
+        return {}
+    tool_result = values.get("tool_result")
+    if isinstance(tool_result, BaseModel):
+        tool_result = tool_result.model_dump(mode="json")
+    if isinstance(tool_result, dict):
+        return {"tool_result": tool_result}
+    return {}
+
+
 async def execute_run(
     run_id: str,
     thread_id: str,
@@ -43,51 +61,43 @@ async def execute_run(
 ) -> None:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from agent_os.graph import build_graph
-
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
-    config = {"configurable": {"thread_id": thread_id}}
+    config = runtime_config(thread_id)
 
     try:
+        run = runs.get_run(run_id)
+        if run is None:
+            raise ValueError(f"Run {run_id} does not exist")
         runs.set_status(run_id, "running")
-        async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
-            # Match the ledger's busy_timeout so the async checkpointer waits for
-            # the shared-file write lock instead of failing with "database is
-            # locked" when the synchronous ledger is mid-write.
-            await saver.conn.execute("PRAGMA busy_timeout=30000")
-            graph = build_graph(checkpointer=saver)
-            graph_input: object
-            if resume_feedback is None:
-                from agent_os.bindings import resolve_backend_binding
-                graph_input = {
-                    "messages": [HumanMessage(content=task)],
-                    "task": task,
-                    "plan": None,
-                    "executor_output": None,
-                    "human_feedback": None,
-                    "hot_context": None,
-                    "conversation_summary": None,
-                    "backend_binding": resolve_backend_binding(None),
-                }
-            else:
-                graph_input = Command(resume=resume_feedback)
+        with sandbox_scope(run.get("workspace")):
+            async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
+                # Match the ledger's busy_timeout so the async checkpointer waits for
+                # the shared-file write lock instead of failing with "database is
+                # locked" when the synchronous ledger is mid-write.
+                await saver.conn.execute("PRAGMA busy_timeout=30000")
+                graph = build_runtime_graph(checkpointer=saver)
+                graph_input: object
+                if resume_feedback is None:
+                    graph_input = initial_state(task)
+                else:
+                    graph_input = Command(resume=resume_feedback)
 
-            async for event in graph.astream_events(graph_input, config, version="v1"):
-                if isinstance(event, dict):
-                    _append_stream_event(run_id, event)
+                async for event in graph.astream_events(graph_input, config, version="v1"):
+                    if isinstance(event, dict):
+                        _append_stream_event(run_id, event)
 
-            snapshot = await graph.aget_state(config)
-            interrupt_prompt = _pending_interrupt(snapshot)
-            if interrupt_prompt is not None:
-                runs.append_event(
-                    run_id,
-                    "interrupt",
-                    {"prompt": str(interrupt_prompt)},
-                )
-                runs.set_status(run_id, "interrupted")
-            else:
-                runs.append_event(run_id, "result", {})
-                runs.set_status(run_id, "completed", ended=True)
+                snapshot = await graph.aget_state(config)
+                interrupt_prompt = _pending_interrupt(snapshot)
+                if interrupt_prompt is not None:
+                    runs.append_event(
+                        run_id,
+                        "interrupt",
+                        {"prompt": str(interrupt_prompt)},
+                    )
+                    runs.set_status(run_id, "interrupted")
+                else:
+                    runs.append_event(run_id, "result", _result_payload(snapshot))
+                    runs.set_status(run_id, "completed", ended=True)
     except Exception as error:
         message = str(error)
         runs.append_event(run_id, "error", {"message": message})

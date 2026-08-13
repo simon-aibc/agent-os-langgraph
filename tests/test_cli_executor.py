@@ -172,6 +172,9 @@ def test_build_cli_executor_invoker_codex_success(monkeypatch, tmp_path):
         schema = json.loads(Path(schema_file).read_text(encoding="utf-8"))
         assert schema["additionalProperties"] is False
         assert schema["required"] == list(schema["properties"])
+        assert "$defs" not in schema
+        assert "outputs" not in schema["properties"]
+        assert "usage" not in schema["properties"]
 
         idx_output = args.index("--output-last-message")
         output_file = args[idx_output + 1]

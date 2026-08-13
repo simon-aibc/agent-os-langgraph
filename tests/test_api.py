@@ -12,7 +12,54 @@ client = TestClient(app)
 def test_health_version():
     resp = client.get("/api/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "version": "1.7.2"}
+    payload = resp.json()
+    assert payload["status"] == "ok"
+    assert payload["version"] == "2.0.0"
+    assert payload["workspace"]["status"] == "not_configured"
+    assert payload["active_runs"] == 0
+
+def test_health_reports_configured_workspace(tmp_path, monkeypatch):
+    workspace_path = tmp_path / "workspace.toml"
+    (tmp_path / "SYSTEM.md").write_text("# System\nPrivate context.\n")
+    workspace_path.write_text(
+        "\n".join(
+            [
+                "skills = []",
+                'connectors = ["memory"]',
+                "",
+                "[workspace]",
+                'name = "private-test"',
+                "",
+                "[backends]",
+                'architect = "codex"',
+                'executor = "codex"',
+                "",
+                "[memory]",
+                'type = "markdown"',
+                'path = "."',
+                "",
+                "[context]",
+                'sources = ["SYSTEM.md"]',
+                "max_age_days = 3650",
+                "",
+            ]
+        )
+    )
+    monkeypatch.setenv("AGENT_OS_WORKSPACE", str(workspace_path))
+    from agent_os.server import runtime
+
+    runtime.composed_workspace.cache_clear()
+
+    try:
+        resp = client.get("/api/health")
+        payload = resp.json()
+        assert resp.status_code == 200
+        assert payload["workspace"]["status"] == "ok"
+        assert payload["workspace"]["name"] == "private-test"
+        assert isinstance(payload["workspace"]["skills"], int)
+        assert payload["workspace"]["hot_context"] is True
+    finally:
+        runtime.composed_workspace.cache_clear()
 
 def test_cors_allows_console_origin():
     origin = "http://127.0.0.1:4100"
@@ -137,10 +184,10 @@ def test_build_graph_data_respects_node_cap():
 
 
 def test_api_graph_empty_state_fallback(monkeypatch):
-    def raise_gbrain_connector():
+    def raise_memory_connector():
         raise RuntimeError("gbrain unavailable")
 
-    monkeypatch.setattr("agent_os.server.api.GbrainConnector", raise_gbrain_connector)
+    monkeypatch.setattr("agent_os.server.api.memory_connector", raise_memory_connector)
 
     resp = client.get("/api/graph")
 
@@ -169,6 +216,9 @@ def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
 def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    workspace = tmp_path / "workspace-a"
+    workspace.mkdir()
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(tmp_path))
     calls = []
 
     async def fake_execute_run(run_id, thread_id, task, *, resume_feedback=None):
@@ -204,7 +254,7 @@ def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypat
     assert interrupted_resp.status_code == 200
     interrupted = interrupted_resp.json()
     assert interrupted["status"] == "interrupted"
-    assert interrupted["workspace"] == "workspace-a"
+    assert interrupted["workspace"] == str(workspace.resolve())
     assert interrupted["interrupt"] == "Approve revised plan?"
 
     approve_resp = client.post(
@@ -234,6 +284,22 @@ def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypat
             "resume_feedback": "approved",
         },
     ]
+
+
+def test_run_api_rejects_workspace_outside_sandbox(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(sandbox))
+
+    response = client.post(
+        "/api/runs",
+        json={"task": "unsafe", "workspace": str(tmp_path)},
+    )
+
+    assert response.status_code == 422
+    assert "outside the sandbox" in response.json()["detail"]
 
 def test_run_api_cancel_path(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")

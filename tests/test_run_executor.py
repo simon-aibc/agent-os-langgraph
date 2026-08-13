@@ -6,6 +6,7 @@ from langgraph.types import Command
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import create_run, get_run, list_events
+from agent_os.schemas import ToolExecutionResult
 from agent_os.server.run_executor import execute_run
 
 
@@ -47,11 +48,12 @@ class FakeGraph:
 def runs_db(tmp_path, monkeypatch):
     database_path = tmp_path / "checkpoints.db"
     monkeypatch.setenv(CHECKPOINT_DB_ENV, str(database_path))
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(tmp_path))
     return database_path
 
 
-def _completed_snapshot() -> object:
-    return SimpleNamespace(tasks=())
+def _completed_snapshot(values: dict[str, Any] | None = None) -> object:
+    return SimpleNamespace(tasks=(), values=values or {})
 
 
 def _interrupted_snapshot(prompt: object = "Approve?") -> object:
@@ -85,11 +87,17 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
         _completed_snapshot(),
     )
     _patch_graph(monkeypatch, graph)
-    run_id = create_run("thread-1", "workspace", "task")
+    workspace = runs_db.parent / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(runs_db.parent))
+    run_id = create_run("thread-1", str(workspace), "task")
 
     await execute_run(run_id, "thread-1", "task")
 
-    assert graph.seen_config == {"configurable": {"thread_id": "thread-1"}}
+    assert graph.seen_config == {
+        "recursion_limit": 7,
+        "configurable": {"thread_id": "thread-1"},
+    }
     assert graph.seen_version == "v1"
     assert get_run(run_id)["status"] == "completed"
     events = list_events(run_id)
@@ -102,6 +110,61 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
     ]
     assert events[0]["payload"] == {"name": "planner", "event": "on_chain_start"}
     assert events[1]["payload"] == {"content": "Hel"}
+
+
+@pytest.mark.anyio
+async def test_execute_run_includes_workspace_skill_output_in_result_event(
+    runs_db, monkeypatch
+):
+    graph = FakeGraph(
+        [],
+        _completed_snapshot(
+            {
+                "tool_result": ToolExecutionResult(
+                    tool="hermes_chat",
+                    output='{"content":"hello"}',
+                    success=True,
+                )
+            }
+        ),
+    )
+    _patch_graph(monkeypatch, graph)
+    run_id = create_run("thread-skill", None, "hermes-chat hello")
+
+    await execute_run(run_id, "thread-skill", "hermes-chat hello")
+
+    result_event = list_events(run_id)[-1]
+    assert result_event["kind"] == "result"
+    assert result_event["payload"] == {
+        "tool_result": {
+            "tool": "hermes_chat",
+            "output": '{"content":"hello"}',
+            "success": True,
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_execute_run_binds_the_persisted_workspace(runs_db, monkeypatch):
+    from agent_os.sandbox import get_sandbox_root
+
+    workspace = runs_db.parent / "project"
+    workspace.mkdir()
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(runs_db.parent))
+
+    class WorkspaceGraph(FakeGraph):
+        async def astream_events(self, graph_input, config, version):
+            assert get_sandbox_root() == workspace.resolve()
+            if False:
+                yield {}
+
+    graph = WorkspaceGraph([], _completed_snapshot())
+    _patch_graph(monkeypatch, graph)
+    run_id = create_run("thread-workspace", str(workspace), "task")
+
+    await execute_run(run_id, "thread-workspace", "task")
+
+    assert get_run(run_id)["status"] == "completed"
 
 
 @pytest.mark.anyio

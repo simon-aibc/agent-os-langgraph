@@ -883,7 +883,6 @@ async def async_main(
         try:
             import uvicorn
 
-            from agent_os.server.api import app as fastapi_app
             if args.workspace:
                 from agent_os.workspace import compose_workspace, load_workspace
 
@@ -896,6 +895,7 @@ async def async_main(
                 os.environ["AGENT_OS_WORKSPACE"] = str(
                     composed_workspace.workspace.base_path / "workspace.toml"
                 )
+            from agent_os.server.api import app as fastapi_app
         except ImportError:
             print("FastAPI dependencies not installed. Please run: pip install agent-os-langgraph[serve]")
             return 1
