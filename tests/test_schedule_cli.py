@@ -140,3 +140,114 @@ def test_normalize_argv_includes_schedule():
     from agent_os.cli.app import _normalize_argv
 
     assert _normalize_argv(["schedule", "list"]) == ["schedule", "list"]
+
+
+# ── app_callback CLI tests ──────────────────────────────────────────
+
+
+def test_schedule_add_app_callback_parser():
+    parser = build_parser()
+    args = parser.parse_args([
+        "schedule", "add",
+        "--name", "cb-sched",
+        "--kind", "app_callback",
+        "--every", "5m",
+        "--url", "https://api.example.com/hook",
+        "--method", "POST",
+        "--headers", '{"X-Key": "val"}',
+        "--body", '{"msg": "test"}',
+    ])
+    assert args.kind == "app_callback"
+    assert args.url == "https://api.example.com/hook"
+    assert args.method == "POST"
+    assert args.headers == '{"X-Key": "val"}'
+    assert args.body == '{"msg": "test"}'
+
+
+def test_schedule_add_app_callback_lifecycle(capsys):
+    exit_code = asyncio.run(async_main([
+        "schedule", "add",
+        "--name", "test-cb",
+        "--kind", "app_callback",
+        "--every", "15m",
+        "--url", "https://api.example.com/hook",
+        "--headers", '{"Authorization": "Bearer 123"}',
+        "--body", '{"action": "ping"}',
+    ]))
+    assert exit_code == 0
+    capsys.readouterr()
+
+    exit_code = asyncio.run(async_main(["schedule", "list"]))
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "test-cb" in output
+    assert "app_callback" in output
+
+
+def test_schedule_run_once_app_callback(capsys):
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    exit_code = asyncio.run(async_main([
+        "schedule", "add",
+        "--name", "run-once-cb",
+        "--kind", "app_callback",
+        "--every", "1h",
+        "--url", "https://api.example.com/hook",
+    ]))
+    assert exit_code == 0
+    capsys.readouterr()
+
+    # Get the schedule ID
+    exit_code = asyncio.run(async_main(["schedule", "list"]))
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    schedule_id = output.strip().split("\n")[0].split()[1]
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+
+    mock_client = AsyncMock()
+    mock_client.request.return_value = mock_resp
+    mock_client.__aenter__.return_value = mock_client
+
+    with patch("agent_os.scheduler.httpx.AsyncClient", return_value=mock_client):
+        exit_code = asyncio.run(async_main(["schedule", "run-once", schedule_id]))
+        assert exit_code == 0
+        out = capsys.readouterr().out
+        assert "Callback completed" in out
+
+
+def test_schedule_add_app_callback_invalid_headers():
+    exit_code = asyncio.run(async_main([
+        "schedule", "add",
+        "--name", "bad-headers",
+        "--kind", "app_callback",
+        "--every", "1h",
+        "--url", "https://example.com",
+        "--headers", "not-json",
+    ]))
+    assert exit_code == 2
+
+
+def test_schedule_add_app_callback_invalid_body():
+    exit_code = asyncio.run(async_main([
+        "schedule", "add",
+        "--name", "bad-body",
+        "--kind", "app_callback",
+        "--every", "1h",
+        "--url", "https://example.com",
+        "--body", "not-json",
+    ]))
+    assert exit_code == 2
+
+
+def test_schedule_add_app_callback_missing_url():
+    exit_code = asyncio.run(async_main([
+        "schedule", "add",
+        "--name", "no-url",
+        "--kind", "app_callback",
+        "--every", "1h",
+    ]))
+    assert exit_code == 2
+

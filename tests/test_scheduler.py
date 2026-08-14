@@ -56,6 +56,27 @@ def brief_schedule():
     }
 
 
+@pytest.fixture
+def app_callback_schedule():
+    """A minimal app_callback schedule dict."""
+    return {
+        "schedule_id": "sched-3",
+        "name": "test callback",
+        "kind": "app_callback",
+        "trigger_kind": "interval",
+        "trigger_value": "1h",
+        "timezone": "UTC",
+        "payload": {
+            "url": "https://api.example.com/webhook",
+            "method": "POST",
+            "headers": {"Authorization": "Bearer secret-token-123"},
+            "body": {"event": "ping"},
+        },
+        "enabled": True,
+        "next_run_at": "2026-01-01T12:00:00+00:00",
+    }
+
+
 @pytest.mark.anyio
 async def test_dispatch_run_schedule(run_schedule):
     with (
@@ -107,6 +128,122 @@ async def test_dispatch_brief_schedule(brief_schedule):
         assert result.status == "completed"
         assert result.ref == "AI/Briefs/2026-01-01.md"
         mock_record.assert_called_once()
+
+
+@pytest.mark.anyio
+async def test_dispatch_app_callback_success(app_callback_schedule):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.is_success = True
+
+    mock_client = AsyncMock()
+    mock_client.request.return_value = mock_resp
+    mock_client.__aenter__.return_value = mock_client
+
+    with (
+        patch(
+            "agent_os.scheduler.httpx.AsyncClient", return_value=mock_client
+        ) as mock_client_type,
+        patch("agent_os.scheduler.record_schedule_result") as mock_record,
+    ):
+        result = await dispatch_schedule(app_callback_schedule)
+
+        assert isinstance(result, ScheduleDispatchResult)
+        assert result.schedule_id == "sched-3"
+        assert result.kind == "app_callback"
+        assert result.status == "completed"
+        assert result.ref == "200"
+        assert result.error is None
+
+        mock_client.request.assert_awaited_once_with(
+            method="POST",
+            url="https://api.example.com/webhook",
+            headers={"Authorization": "Bearer secret-token-123"},
+            json={"event": "ping"},
+        )
+        mock_record.assert_called_once_with("sched-3", status="completed")
+        mock_client_type.assert_called_once_with(
+            timeout=30.0, follow_redirects=True, max_redirects=5
+        )
+        mock_client.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_dispatch_app_callback_http_error(app_callback_schedule, caplog):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 502
+    mock_resp.is_success = False
+    mock_resp.text = "private-response-body"
+    app_callback_schedule["payload"]["body"] = {"token": "private-request-body"}
+
+    mock_client = AsyncMock()
+    mock_client.request.return_value = mock_resp
+    mock_client.__aenter__.return_value = mock_client
+
+    with (
+        patch("agent_os.scheduler.httpx.AsyncClient", return_value=mock_client),
+        patch("agent_os.scheduler.record_schedule_result") as mock_record,
+    ):
+        result = await dispatch_schedule(app_callback_schedule)
+
+        assert result.kind == "app_callback"
+        assert result.status == "error"
+        assert result.ref == "502"
+        assert result.error == "HTTP 502"
+        assert "secret-token" not in (result.error or "")
+        assert "private-request-body" not in (result.error or "")
+        assert "private-response-body" not in (result.error or "")
+        assert "private-request-body" not in caplog.text
+        assert "private-response-body" not in caplog.text
+        mock_record.assert_called_once_with(
+            "sched-3", status="error", error="HTTP 502"
+        )
+
+
+@pytest.mark.anyio
+async def test_dispatch_app_callback_transport_error(
+    app_callback_schedule, caplog
+):
+    import httpx
+
+    mock_client = AsyncMock()
+    mock_client.request.side_effect = httpx.ConnectTimeout(
+        "Authorization: Bearer secret-token-123; body: private-payload"
+    )
+    mock_client.__aenter__.return_value = mock_client
+
+    with (
+        patch("agent_os.scheduler.httpx.AsyncClient", return_value=mock_client),
+        patch("agent_os.scheduler.record_schedule_result") as mock_record,
+    ):
+        result = await dispatch_schedule(app_callback_schedule)
+
+        assert result.kind == "app_callback"
+        assert result.status == "error"
+        assert result.error == "HTTP request failed: ConnectTimeout"
+        assert "secret-token" not in (result.error or "")
+        assert "secret-token" not in caplog.text
+        assert "private-payload" not in caplog.text
+        mock_record.assert_called_once()
+        mock_client.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_dispatch_app_callback_cancellation(app_callback_schedule):
+    mock_client = AsyncMock()
+    mock_client.request.side_effect = asyncio.CancelledError()
+    mock_client.__aenter__.return_value = mock_client
+
+    with (
+        patch("agent_os.scheduler.httpx.AsyncClient", return_value=mock_client),
+        patch("agent_os.scheduler.record_schedule_result") as mock_record,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await dispatch_schedule(app_callback_schedule)
+
+        mock_record.assert_called_once_with(
+            "sched-3", status="error", error="Scheduler shutdown"
+        )
 
 
 @pytest.mark.anyio

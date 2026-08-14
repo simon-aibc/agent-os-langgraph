@@ -56,6 +56,11 @@ def test_init_creates_schedules_table(sched_db):
             "WHERE type = 'table' AND name = 'schedules'"
         )
         assert cursor.fetchone() is not None
+        table_sql = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'schedules'"
+        ).fetchone()[0]
+        assert "'app_callback'" in table_sql
 
 
 def test_init_creates_due_index(sched_db):
@@ -485,3 +490,266 @@ def test_record_schedule_result_with_error(sched_db):
     assert sched is not None
     assert sched["last_status"] == "error"
     assert sched["last_error"] == "boom"
+
+
+# ── app_callback tests ──────────────────────────────────────────────
+
+
+def test_create_app_callback_schedule(sched_db):
+    sid = create_schedule(
+        name="webhook-task",
+        kind="app_callback",
+        trigger_kind="interval",
+        trigger_value="1h",
+        payload={
+            "url": "https://api.example.com/v1/webhook",
+            "method": "POST",
+            "headers": {"Authorization": "Bearer key"},
+            "body": {"event": "ping"},
+        },
+    )
+    sched = get_schedule(sid)
+    assert sched is not None
+    assert sched["kind"] == "app_callback"
+    assert sched["payload"]["url"] == "https://api.example.com/v1/webhook"
+    assert sched["payload"]["method"] == "POST"
+    assert sched["payload"]["headers"] == {"Authorization": "Bearer key"}
+    assert sched["payload"]["body"] == {"event": "ping"}
+
+
+def test_create_app_callback_normalizes_default_method(sched_db):
+    default_id = create_schedule(
+        name="default-method",
+        kind="app_callback",
+        trigger_kind="interval",
+        trigger_value="1h",
+        payload={"url": "https://example.com/callback"},
+    )
+    lower_id = create_schedule(
+        name="lower-method",
+        kind="app_callback",
+        trigger_kind="interval",
+        trigger_value="1h",
+        payload={"url": "https://example.com/callback", "method": "patch"},
+    )
+
+    assert get_schedule(default_id)["payload"]["method"] == "POST"  # type: ignore[index]
+    assert get_schedule(lower_id)["payload"]["method"] == "PATCH"  # type: ignore[index]
+
+
+def test_app_callback_payload_validation_missing_url(sched_db):
+    with pytest.raises(ValueError, match="requires 'url'"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={},
+        )
+
+
+def test_app_callback_payload_validation_invalid_url(sched_db):
+    with pytest.raises(ValueError, match="url must start with"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={"url": "ftp://example.com"},
+        )
+
+    with pytest.raises(ValueError, match="include a valid host"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={"url": "https://"},
+        )
+
+
+def test_app_callback_payload_validation_invalid_method(sched_db):
+    with pytest.raises(ValueError, match="method must be one of"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={"url": "https://example.com", "method": "INVALID"},
+        )
+
+
+def test_app_callback_payload_validation_unknown_keys(sched_db):
+    with pytest.raises(ValueError, match="Unknown payload keys"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={"url": "https://example.com", "unknown_key": 123},
+        )
+
+
+def test_app_callback_payload_validation_invalid_headers_and_body(sched_db):
+    with pytest.raises(ValueError, match="headers must be a dict"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={"url": "https://example.com", "headers": "not-a-dict"},  # type: ignore[dict-item]
+        )
+
+    with pytest.raises(ValueError, match="body must be a dict"):
+        create_schedule(
+            name="bad",
+            kind="app_callback",
+            trigger_kind="interval",
+            trigger_value="1h",
+            payload={"url": "https://example.com", "body": "not-a-dict"},  # type: ignore[dict-item]
+        )
+
+
+# ── DB Migration ────────────────────────────────────────────────────
+
+
+def test_db_migration_widens_check_constraint_idempotently(sched_db):
+    """An existing DB with CHECK(kind IN ('run','brief')) is migrated to allow app_callback."""
+    # 1. Create old schema table directly.
+    with contextlib.closing(sqlite3.connect(sched_db)) as conn:
+        conn.execute("""
+            CREATE TABLE schedules (
+                schedule_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('run', 'brief')),
+                trigger_kind TEXT NOT NULL
+                    CHECK (trigger_kind IN ('cron', 'interval')),
+                trigger_value TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                next_run_at TEXT NOT NULL,
+                last_run_at TEXT,
+                last_status TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO schedules (
+                schedule_id, name, kind, trigger_kind, trigger_value,
+                timezone, payload, enabled, next_run_at, created_at, updated_at
+            )
+            VALUES (
+                'old-id-1', 'existing-run', 'run', 'interval', '1h',
+                'UTC', '{"task": "old work"}', 1, '2026-01-01T00:00:00+00:00',
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
+            )
+        """)
+        conn.execute("CREATE INDEX schedules_kind_name_idx ON schedules(kind, name)")
+        conn.commit()
+
+    # 2. Run _init_schedules_db (which triggers migration).
+    _init_schedules_db()
+
+    # 3. Verify existing row is preserved.
+    old_sched = get_schedule("old-id-1")
+    assert old_sched is not None
+    assert old_sched["name"] == "existing-run"
+    assert old_sched["payload"] == {"task": "old work"}
+
+    # 4. Verify app_callback schedule can now be created.
+    new_id = create_schedule(
+        name="new-callback",
+        kind="app_callback",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"url": "https://example.com/webhook"},
+    )
+    new_sched = get_schedule(new_id)
+    assert new_sched is not None
+    assert new_sched["kind"] == "app_callback"
+
+    # 5. Verify both the standard and pre-existing indexes survive.
+    with contextlib.closing(sqlite3.connect(sched_db)) as conn:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name IN ('schedules_due_idx', 'schedules_kind_name_idx')"
+        )
+        assert {row[0] for row in cursor.fetchall()} == {
+            "schedules_due_idx",
+            "schedules_kind_name_idx",
+        }
+
+    # 6. Second call to _init_schedules_db is idempotent.
+    _init_schedules_db()
+    assert get_schedule("old-id-1") is not None
+    assert get_schedule(new_id) is not None
+
+
+def test_db_migration_rolls_back_on_failure(sched_db, monkeypatch):
+    with contextlib.closing(sqlite3.connect(sched_db)) as conn:
+        conn.execute("""
+            CREATE TABLE schedules (
+                schedule_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('run', 'brief')),
+                trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('cron', 'interval')),
+                trigger_value TEXT NOT NULL,
+                timezone TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                next_run_at TEXT NOT NULL,
+                last_run_at TEXT,
+                last_status TEXT,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO schedules (
+                schedule_id, name, kind, trigger_kind, trigger_value,
+                timezone, payload, next_run_at, created_at, updated_at
+            ) VALUES (
+                'preserved-id', 'preserved', 'brief', 'interval', '1h',
+                'UTC', '{}', '2026-01-01T00:00:00+00:00',
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
+            )
+        """)
+        conn.commit()
+
+    class FailingConnection:
+        def __init__(self, path):
+            self.connection = sqlite3.connect(path)
+
+        def execute(self, statement, parameters=()):
+            if statement.startswith("ALTER TABLE schedules__migration"):
+                raise sqlite3.OperationalError("injected migration failure")
+            return self.connection.execute(statement, parameters)
+
+        def commit(self):
+            self.connection.commit()
+
+        def rollback(self):
+            self.connection.rollback()
+
+        def close(self):
+            self.connection.close()
+
+    monkeypatch.setattr(
+        "agent_os.schedules._connect", lambda: FailingConnection(sched_db)
+    )
+
+    with pytest.raises(sqlite3.OperationalError, match="injected migration failure"):
+        _init_schedules_db()
+
+    with contextlib.closing(sqlite3.connect(sched_db)) as conn:
+        assert conn.execute(
+            "SELECT name FROM schedules WHERE schedule_id = 'preserved-id'"
+        ).fetchone() == ("preserved",)
+        assert conn.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = 'schedules__migration'"
+        ).fetchone() is None
