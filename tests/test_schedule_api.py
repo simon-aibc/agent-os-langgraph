@@ -136,12 +136,66 @@ def test_list_schedules_filter_by_kind(client: TestClient):
         "kind": "brief",
         "every": "24h",
     })
+    client.post("/api/schedules", json={
+        "name": "c1",
+        "kind": "app_callback",
+        "every": "10m",
+        "url": "https://example.com/webhook",
+    })
 
     resp = client.get("/api/schedules", params={"kind": "run"})
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
     assert data[0]["kind"] == "run"
+
+    resp = client.get("/api/schedules", params={"kind": "app_callback"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["kind"] == "app_callback"
+
+
+def test_create_schedule_app_callback(client: TestClient):
+    resp = client.post("/api/schedules", json={
+        "name": "hook",
+        "kind": "app_callback",
+        "every": "1h",
+        "url": "https://api.example.com/webhook",
+        "method": "post",
+        "headers": {"X-Custom": "header-value"},
+        "body": {"event": "start"},
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["name"] == "hook"
+    assert data["kind"] == "app_callback"
+    assert data["trigger_kind"] == "interval"
+    assert data["payload"]["url"] == "https://api.example.com/webhook"
+    assert data["payload"]["method"] == "POST"
+    assert data["payload"]["headers"] == {"X-Custom": "header-value"}
+    assert data["payload"]["body"] == {"event": "start"}
+
+
+def test_create_schedule_422_app_callback_without_url(client: TestClient):
+    resp = client.post("/api/schedules", json={
+        "name": "bad",
+        "kind": "app_callback",
+        "every": "1h",
+    })
+    assert resp.status_code == 422
+
+
+def test_create_schedule_422_app_callback_with_task(client: TestClient):
+    resp = client.post("/api/schedules", json={
+        "name": "bad",
+        "kind": "app_callback",
+        "every": "1h",
+        "url": "https://example.com/webhook",
+        "task": "should fail",
+    })
+    assert resp.status_code == 422
+
 
 
 # ── Existing v1.7 routes preserved ─────────────────────────────────

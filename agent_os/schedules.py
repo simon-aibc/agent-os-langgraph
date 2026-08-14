@@ -22,6 +22,7 @@ import os
 import sqlite3
 import uuid
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.schedule_recurrence import (
@@ -35,12 +36,18 @@ from agent_os.schedule_recurrence import (
 
 SCHED_DB_ENV = "AGENT_OS_SCHED_DB"
 
-ALLOWED_KINDS: frozenset[str] = frozenset({"run", "brief"})
+ALLOWED_KINDS: frozenset[str] = frozenset({"run", "brief", "app_callback"})
 ALLOWED_TRIGGER_KINDS: frozenset[str] = frozenset({"cron", "interval"})
 
 # Valid payload keys per kind.
 _RUN_PAYLOAD_KEYS: frozenset[str] = frozenset({"task", "workspace"})
 _BRIEF_PAYLOAD_KEYS: frozenset[str] = frozenset()
+_APP_CALLBACK_PAYLOAD_KEYS: frozenset[str] = frozenset(
+    {"url", "method", "headers", "body"}
+)
+ALLOWED_HTTP_METHODS: frozenset[str] = frozenset(
+    {"GET", "POST", "PUT", "PATCH", "DELETE"}
+)
 
 # ── DB path derivation (mirrors runs.py) ────────────────────────────
 
@@ -71,35 +78,119 @@ def _connect() -> sqlite3.Connection:
 
 
 def _init_schedules_db() -> None:
-    """Idempotently create the schedules table and index."""
+    """Idempotently create the schedules table and index, migrating if needed."""
     with contextlib.closing(_connect()) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS schedules (
-                schedule_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                kind TEXT NOT NULL CHECK (kind IN ('run', 'brief')),
-                trigger_kind TEXT NOT NULL
-                    CHECK (trigger_kind IN ('cron', 'interval')),
-                trigger_value TEXT NOT NULL,
-                timezone TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                next_run_at TEXT NOT NULL,
-                last_run_at TEXT,
-                last_status TEXT,
-                last_error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = conn.execute(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'schedules'"
             )
-        """)
-        conn.execute("""
-            CREATE INDEX IF NOT EXISTS schedules_due_idx
-                ON schedules(enabled, next_run_at)
-        """)
-        conn.commit()
+            row = cursor.fetchone()
+            if row is None:
+                conn.execute("""
+                    CREATE TABLE schedules (
+                        schedule_id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        kind TEXT NOT NULL CHECK (kind IN ('run', 'brief', 'app_callback')),
+                        trigger_kind TEXT NOT NULL
+                            CHECK (trigger_kind IN ('cron', 'interval')),
+                        trigger_value TEXT NOT NULL,
+                        timezone TEXT NOT NULL,
+                        payload TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        next_run_at TEXT NOT NULL,
+                        last_run_at TEXT,
+                        last_status TEXT,
+                        last_error TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                """)
+            else:
+                table_sql = row[0] or ""
+                if "app_callback" not in table_sql:
+                    index_rows = conn.execute(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'index' AND tbl_name = 'schedules' "
+                        "AND sql IS NOT NULL ORDER BY name"
+                    ).fetchall()
+                    index_sql = [index_row[0] for index_row in index_rows]
+
+                    conn.execute("""
+                        CREATE TABLE schedules__migration (
+                            schedule_id TEXT PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            kind TEXT NOT NULL CHECK (kind IN ('run', 'brief', 'app_callback')),
+                            trigger_kind TEXT NOT NULL
+                                CHECK (trigger_kind IN ('cron', 'interval')),
+                            trigger_value TEXT NOT NULL,
+                            timezone TEXT NOT NULL,
+                            payload TEXT NOT NULL,
+                            enabled INTEGER NOT NULL DEFAULT 1,
+                            next_run_at TEXT NOT NULL,
+                            last_run_at TEXT,
+                            last_status TEXT,
+                            last_error TEXT,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )
+                    """)
+                    conn.execute("""
+                        INSERT INTO schedules__migration (
+                            schedule_id, name, kind, trigger_kind, trigger_value,
+                            timezone, payload, enabled, next_run_at, last_run_at,
+                            last_status, last_error, created_at, updated_at
+                        )
+                        SELECT
+                            schedule_id, name, kind, trigger_kind, trigger_value,
+                            timezone, payload, enabled, next_run_at, last_run_at,
+                            last_status, last_error, created_at, updated_at
+                        FROM schedules
+                    """)
+                    conn.execute("DROP TABLE schedules")
+                    conn.execute(
+                        "ALTER TABLE schedules__migration RENAME TO schedules"
+                    )
+                    for statement in index_sql:
+                        conn.execute(statement)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS schedules_due_idx
+                    ON schedules(enabled, next_run_at)
+            """)
+            conn.commit()
+        except BaseException:
+            conn.rollback()
+            raise
 
 
 # ── Validation helpers ──────────────────────────────────────────────
+
+
+def validate_app_callback_url(value: Any) -> str:
+    """Return a stripped HTTP(S) URL or raise ``ValueError``."""
+    message = (
+        "url must start with 'http://' or 'https://' and include a valid host"
+    )
+    if not isinstance(value, str):
+        raise ValueError(message)
+
+    value = value.strip()
+    try:
+        parsed = urlsplit(value)
+        # Accessing port validates malformed and out-of-range port values.
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError(message) from exc
+
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or any(character.isspace() for character in value)
+    ):
+        raise ValueError(message)
+    return value
 
 
 def _validate_schedule_fields(
@@ -143,6 +234,30 @@ def _validate_schedule_fields(
             raise ValueError(
                 f"Unknown payload keys for kind=brief: {sorted(unknown)}"
             )
+    elif kind == "app_callback":
+        unknown = set(payload) - _APP_CALLBACK_PAYLOAD_KEYS
+        if unknown:
+            raise ValueError(
+                f"Unknown payload keys for kind=app_callback: {sorted(unknown)}"
+            )
+        if "url" not in payload or not payload["url"]:
+            raise ValueError("kind=app_callback requires 'url' in payload")
+        payload["url"] = validate_app_callback_url(payload["url"])
+        method = payload.get("method") or "POST"
+        if not isinstance(method, str) or method.upper() not in ALLOWED_HTTP_METHODS:
+            raise ValueError(
+                f"method must be one of {sorted(ALLOWED_HTTP_METHODS)}, got {method!r}"
+            )
+        payload["method"] = method.upper()
+        if "headers" in payload and payload["headers"] is not None:
+            if not isinstance(payload["headers"], dict) or not all(
+                isinstance(k, str) and isinstance(v, str)
+                for k, v in payload["headers"].items()
+            ):
+                raise ValueError("headers must be a dict of string key-value pairs")
+        if "body" in payload and payload["body"] is not None:
+            if not isinstance(payload["body"], dict):
+                raise ValueError("body must be a dict")
 
 
 # ── CRUD ────────────────────────────────────────────────────────────
@@ -151,7 +266,7 @@ def _validate_schedule_fields(
 def create_schedule(
     *,
     name: str,
-    kind: Literal["run", "brief"],
+    kind: Literal["run", "brief", "app_callback"],
     trigger_kind: Literal["cron", "interval"],
     trigger_value: str,
     timezone: str = "UTC",
@@ -162,7 +277,7 @@ def create_schedule(
 
     Validates all fields before touching the database.
     """
-    payload = payload or {}
+    payload = dict(payload or {})
     _validate_schedule_fields(
         kind=kind,
         trigger_kind=trigger_kind,

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
+
 from agent_os import runs
 from agent_os.brief_runtime import execute_brief
 from agent_os.schedules import claim_due_schedules, record_schedule_result
@@ -85,6 +87,78 @@ async def dispatch_schedule(
                 status="completed",
                 ref=ref,
             )
+
+        if kind == "app_callback":
+            url = payload.get("url", "")
+            method = payload.get("method", "POST").upper()
+            headers = payload.get("headers")
+            body = payload.get("body")
+
+            if not url:
+                error_msg = "kind=app_callback requires 'url' in payload"
+                record_schedule_result(
+                    schedule_id, status="error", error=error_msg
+                )
+                return ScheduleDispatchResult(
+                    schedule_id=schedule_id,
+                    kind=kind,
+                    status="error",
+                    error=error_msg,
+                )
+
+            try:
+                async with httpx.AsyncClient(
+                    timeout=30.0, follow_redirects=True, max_redirects=5
+                ) as client:
+                    response = await client.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        json=body if body is not None else None,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Callback request failed for schedule %s (%s)",
+                    schedule_id,
+                    type(exc).__name__,
+                )
+                error_msg = f"HTTP request failed: {type(exc).__name__}"
+                record_schedule_result(
+                    schedule_id, status="error", error=error_msg
+                )
+                return ScheduleDispatchResult(
+                    schedule_id=schedule_id,
+                    kind=kind,
+                    status="error",
+                    error=error_msg,
+                )
+
+            if response.is_success:
+                status = "completed"
+                ref = str(response.status_code)
+                record_schedule_result(schedule_id, status=status)
+                return ScheduleDispatchResult(
+                    schedule_id=schedule_id,
+                    kind=kind,
+                    status=status,
+                    ref=ref,
+                )
+            else:
+                status = "error"
+                error_msg = f"HTTP {response.status_code}"
+                ref = str(response.status_code)
+                record_schedule_result(
+                    schedule_id, status=status, error=error_msg
+                )
+                return ScheduleDispatchResult(
+                    schedule_id=schedule_id,
+                    kind=kind,
+                    status=status,
+                    ref=ref,
+                    error=error_msg,
+                )
 
         error_msg = f"Unknown schedule kind: {kind}"
         record_schedule_result(

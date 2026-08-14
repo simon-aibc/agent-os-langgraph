@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched_add = sched_sub.add_parser("add", help="Create a new schedule")
     p_sched_add.add_argument("--name", required=True, help="Human-readable schedule name")
     p_sched_add.add_argument(
-        "--kind", required=True, choices=["run", "brief"],
+        "--kind", required=True, choices=["run", "brief", "app_callback"],
         help="Schedule kind",
     )
     p_sched_add.add_argument("--cron", help="Five-field POSIX cron expression")
@@ -120,9 +120,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched_add.add_argument("--task", help="Task description (required for kind=run)")
     p_sched_add.add_argument("--timezone", default="UTC", help="IANA timezone (default: UTC)")
     p_sched_add.add_argument("--workspace", help="Workspace path (optional for kind=run)")
+    p_sched_add.add_argument("--url", help="Callback URL (required for kind=app_callback)")
+    p_sched_add.add_argument(
+        "--method",
+        choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"],
+        help="HTTP method (default: POST)",
+    )
+    p_sched_add.add_argument("--headers", help="HTTP headers as JSON object string")
+    p_sched_add.add_argument("--body", help="HTTP request body as JSON string")
 
     p_sched_list = sched_sub.add_parser("list", help="List schedules")
-    p_sched_list.add_argument("--kind", choices=["run", "brief"], help="Filter by kind")
+    p_sched_list.add_argument("--kind", choices=["run", "brief", "app_callback"], help="Filter by kind")
     p_sched_list.add_argument("--enabled", choices=["true", "false"], help="Filter by enabled")
     p_sched_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
 
@@ -674,6 +682,28 @@ async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFor
     if args.schedule_command == "add":
         from agent_os.schedule_models import ScheduleInput
 
+        headers = None
+        if getattr(args, "headers", None):
+            try:
+                headers = _json.loads(args.headers)
+                if not isinstance(headers, dict):
+                    formatter.print_error("--headers must be a JSON object")
+                    return 2
+            except _json.JSONDecodeError as exc:
+                formatter.print_error(f"Invalid JSON for --headers: {exc}")
+                return 2
+
+        body = None
+        if getattr(args, "body", None):
+            try:
+                body = _json.loads(args.body)
+                if not isinstance(body, dict):
+                    formatter.print_error("--body must be a JSON object")
+                    return 2
+            except _json.JSONDecodeError as exc:
+                formatter.print_error(f"Invalid JSON for --body: {exc}")
+                return 2
+
         try:
             schedule_input = ScheduleInput(
                 name=args.name,
@@ -683,6 +713,10 @@ async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFor
                 timezone=args.timezone,
                 task=args.task,
                 workspace=args.workspace,
+                url=getattr(args, "url", None),
+                method=getattr(args, "method", None),
+                headers=headers,
+                body=body,
             )
         except (ValueError, Exception) as exc:
             formatter.print_error(str(exc))
@@ -757,7 +791,9 @@ async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFor
             return 1
         if result.run_id:
             formatter.print_info(f"Run {result.run_id}: {result.status}")
-        if result.ref:
+        elif result.kind == "app_callback":
+            formatter.print_info(f"Callback {result.status} (status code: {result.ref})")
+        elif result.ref:
             formatter.print_info(f"Written: {result.ref}")
         return 0
 
