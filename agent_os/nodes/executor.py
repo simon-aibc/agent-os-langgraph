@@ -14,6 +14,21 @@ from agent_os.schemas import (
 from agent_os.state import SimonState
 
 
+def _is_quota_or_rate_limit_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    quota_indicators = [
+        "hit your usage limit",
+        "usage limit",
+        "rate limit",
+        "purchase more credits",
+        "too many requests",
+        "insufficient_quota",
+        "quota exceeded",
+        "429",
+    ]
+    return any(ind in text for ind in quota_indicators)
+
+
 def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
     """
     R4 Executor node.
@@ -39,6 +54,25 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
         try:
             report = invoker(copied_state)
         except (CliBackendError, ValueError) as exc:
+            fallback_backend = os.getenv(
+                "LLM_EXECUTOR_FALLBACK",
+                "claude-code" if backend == "codex" else "",
+            )
+            if fallback_backend and _is_quota_or_rate_limit_error(exc):
+                fallback_name = (
+                    fallback_backend[4:]
+                    if fallback_backend.startswith("cli/")
+                    else fallback_backend
+                )
+                try:
+                    fallback_invoker = build_cli_executor_invoker(fallback_name)
+                    report = fallback_invoker(copied_state)
+                    return {"executor_output": report}
+                except Exception as fallback_exc:
+                    raise RuntimeError(
+                        f"CLI executor '{backend}' hit quota limit and fallback '{fallback_name}' also failed: {fallback_exc}"
+                    ) from fallback_exc
+
             raise RuntimeError(
                 f"CLI executor failed ({type(exc).__name__}). Partial sandbox "
                 "changes may exist and should be inspected before resume. "

@@ -139,3 +139,36 @@ def test_executor_node_cli_invalid_output_warns_about_partial_changes(monkeypatc
             executor_node(state)
 
     mock_invoker.assert_called_once()
+
+
+def test_executor_node_cli_quota_fallback(monkeypatch):
+    """Test that when codex hits a usage limit error, it falls back to claude-code."""
+    monkeypatch.setenv("LLM_EXECUTOR", "cli/codex")
+    plan = ArchitectBrief(files=["f1"], changes=["c1"], verify_cmd="v1")
+    report = ExecutorReport(diff="d", verify_output="vo", success=True)
+    state = {"messages": [], "task": "do", "plan": plan}
+
+    mock_codex_invoker = MagicMock(
+        side_effect=CliBackendError(
+            "Command 'codex' failed with return code 1. Stderr excerpt: ERROR: You've hit your usage limit. Upgrade to Pro"
+        )
+    )
+    mock_claude_invoker = MagicMock(return_value=report)
+
+    def mock_build_invoker(backend):
+        if backend == "codex":
+            return mock_codex_invoker
+        if backend == "claude-code":
+            return mock_claude_invoker
+        raise ValueError(f"Unknown backend: {backend}")
+
+    with patch(
+        "agent_os.nodes.executor.build_cli_executor_invoker",
+        side_effect=mock_build_invoker,
+    ):
+        result = executor_node(state)
+
+    mock_codex_invoker.assert_called_once()
+    mock_claude_invoker.assert_called_once()
+    assert result == {"executor_output": report}
+
