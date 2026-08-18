@@ -5,6 +5,8 @@ for public releases.
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-08-18
+
 ### Added
 
 - **Audit trace integrity & evidence provenance**: `strategy_assignments` table adds `strategy_version`, `selection_reason`, `selector_version`, and sanitized `evidence_summary` JSON blob columns with automatic schema migration.
