@@ -246,6 +246,14 @@ Useful endpoints include:
 | `POST /api/runs/{id}/approve` | Resume an interrupted run |
 | `POST /api/runs/{id}/cancel` | Cancel a nonterminal run |
 | `GET /api/graph` | Return memory graph nodes/edges when a memory connector is configured |
+| `GET /api/observations` | List bounded structured outcome evidence for the active workspace |
+| `POST /api/observations/{id}/outcome` | Record an explicit accepted, rejected, or edited outcome |
+
+Terminal runs create an `unknown` observation only; completion never implies
+user acceptance. Operators can inspect or label observations with
+`agent-os observations list` and `agent-os observations record-outcome`. The
+small, same-kind history supplied to the architect is advisory evidence only:
+it does not alter permissions, invoke tools, or make autonomous changes.
 
 The API is localhost-first and is not designed to be exposed directly to the
 internet.

@@ -149,6 +149,31 @@ until `AGENT_OS_PERMISSIONS_ADMIN_TOKEN` is set; then send that token using
 `X-Admin-Token` or `Authorization: Bearer …`. This prevents an exposed server
 from becoming an unauthenticated permission-administration surface.
 
+### Structured observation and outcome evidence
+
+Terminal Runtime runs add one structured observation with `outcome_signal =
+unknown`. A completed run is **not** evidence of user acceptance. Operators
+may explicitly label the observation `accepted`, `rejected`, or `edited`:
+
+```bash
+agent-os observations list --workspace path/to/workspace.toml
+agent-os observations record-outcome <observation-id> --signal edited \
+  --evidence "Adjusted the artifact before use" --workspace path/to/workspace.toml
+```
+
+The same data is available through the private execution API:
+
+- `GET /api/observations`
+- `POST /api/observations/{observation_id}/outcome`
+
+Stores live in `<workspace>/observations.db` (or standalone
+`./observations.db`), unless `AGENT_OS_OBSERVATIONS_DB` explicitly overrides
+the path. The records contain bounded operational metadata only; they never
+store the task, model output, tool arguments, or memory contents. Recent
+same-kind labelled outcomes may be supplied to the architect as clearly marked
+advisory evidence. They never grant a permission, execute a tool, or
+automatically change behaviour.
+
 Private Runtime API endpoints (runs, sessions, briefs, schedules, graph, and
 chat) are local-only by default. A non-loopback caller must configure
 `AGENT_OS_EXECUTION_TOKEN` and send it as `X-Execution-Token` or

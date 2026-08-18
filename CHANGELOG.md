@@ -5,6 +5,15 @@ for public releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Structured observation and outcome evidence foundation**: terminal Runtime
+  runs record bounded, workspace-isolated `unknown` observations in SQLite;
+  operators can explicitly mark them accepted, rejected, or edited through
+  the private API or `agent-os observations`. Compact same-kind historical
+  evidence is advisory context only: it does not grant permissions, execute
+  tools, or make autonomous behaviour changes.
+
 ## [2.1.0] — 2026-08-18
 
 ### Added

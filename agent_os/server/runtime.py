@@ -10,6 +10,11 @@ from langchain_core.messages import HumanMessage
 from agent_os.bindings import resolve_backend_binding
 from agent_os.connectors import GbrainConnector, MemoryConnector
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
+from agent_os.observations import (
+    observation_workspace_id,
+    open_observation_store,
+    render_advisory_context,
+)
 from agent_os.policy import LocalPolicy
 from agent_os.routing import build_runtime_config
 from agent_os.workspace import (
@@ -69,6 +74,13 @@ def initial_state(task: str) -> dict[str, object]:
         else resolve_backend_binding(None)
     )
     hot_context = runtime.hot_context if runtime is not None else None
+    workspace = runtime.workspace if runtime is not None else None
+    task_kind = _task_kind_for_input(task)
+    observation_context = render_advisory_context(
+        open_observation_store(workspace),
+        workspace_id=observation_workspace_id(workspace),
+        task_kind=task_kind,
+    )
     return {
         "messages": [HumanMessage(content=task)],
         "task": task,
@@ -76,9 +88,15 @@ def initial_state(task: str) -> dict[str, object]:
         "executor_output": None,
         "human_feedback": None,
         "hot_context": hot_context,
+        "observation_context": observation_context,
         "conversation_summary": None,
         "backend_binding": backend_binding,
     }
+
+
+def _task_kind_for_input(task: str) -> str:
+    """Classify only a known native command; never persist the task itself."""
+    return "memory_write" if task.lstrip().lower().startswith("memory_write") else "workflow"
 
 
 def build_runtime_graph(*, checkpointer: Any) -> Any:
