@@ -251,9 +251,11 @@ Useful endpoints include:
 
 Terminal runs create an `unknown` observation only; completion never implies
 user acceptance. Operators can inspect or label observations with
-`agent-os observations list` and `agent-os observations record-outcome`. The
-small, same-kind history supplied to the architect is advisory evidence only:
-it does not alter permissions, invoke tools, or make autonomous changes.
+`agent-os observations list` and `agent-os observations record-outcome`.
+Labelled outcomes can select only a fixed, versioned planning strategy for the
+same workspace and task kind. Raw evidence is never added to the architect
+prompt, and strategy selection cannot alter permissions, invoke tools, or make
+autonomous execution changes.
 
 The API is localhost-first and is not designed to be exposed directly to the
 internet.

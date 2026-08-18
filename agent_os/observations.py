@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import logging
 import os
@@ -56,6 +57,23 @@ class Observation:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class OutcomePattern:
+    """Aggregate of explicit outcomes for one workspace/task/strategy tuple."""
+
+    workspace_id: str
+    task_kind: str
+    strategy_id: str
+    accepted_count: int
+    rejected_count: int
+    edited_count: int
+    unknown_count: int
+    labelled_count: int
+    outcome_score: float
+    last_labelled_at: str | None
+    confidence: Literal["insufficient", "exploratory", "actionable"]
 
 
 def observation_workspace_id(workspace: object | None = None) -> str:
@@ -161,13 +179,17 @@ class SqliteObservationStore:
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=30000")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA busy_timeout=30000")
+            return conn
+        except Exception:
+            conn.close()
+            raise
 
     def _init_db(self) -> None:
         with contextlib.closing(self._connect()) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS observations (
@@ -192,6 +214,24 @@ class SqliteObservationStore:
                 """
                 CREATE INDEX IF NOT EXISTS observations_workspace_kind_created
                 ON observations (workspace_id, task_kind, created_at DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS strategy_assignments (
+                    run_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    task_kind TEXT NOT NULL,
+                    strategy_id TEXT NOT NULL,
+                    selected_at TEXT NOT NULL,
+                    UNIQUE (workspace_id, task_kind, run_id)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS strategy_assignments_scope
+                ON strategy_assignments (workspace_id, task_kind, strategy_id)
                 """
             )
             conn.commit()
@@ -316,6 +356,143 @@ class SqliteObservationStore:
         if cursor.rowcount != 1:
             return None
         return self.get(observation_id)
+
+    def aggregate_patterns(
+        self,
+        *,
+        workspace_id: str,
+        task_kind: str,
+        strategy_ids: tuple[str, ...],
+    ) -> list[OutcomePattern]:
+        """Aggregate labels only; free-text evidence never participates."""
+        if not strategy_ids:
+            return []
+        placeholders = ", ".join("?" for _ in strategy_ids)
+        query = f"""
+            SELECT approach AS strategy_id,
+                SUM(CASE WHEN outcome_signal = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
+                SUM(CASE WHEN outcome_signal = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+                SUM(CASE WHEN outcome_signal = 'edited' THEN 1 ELSE 0 END) AS edited_count,
+                SUM(CASE WHEN outcome_signal = 'unknown' THEN 1 ELSE 0 END) AS unknown_count,
+                MAX(CASE WHEN outcome_signal != 'unknown' THEN updated_at END) AS last_labelled_at
+            FROM observations
+            WHERE workspace_id = ? AND task_kind = ? AND approach IN ({placeholders})
+            GROUP BY approach
+        """
+        with contextlib.closing(self._connect()) as conn:
+            rows = conn.execute(query, (workspace_id, task_kind, *strategy_ids)).fetchall()
+        values = {row["strategy_id"]: row for row in rows}
+        patterns = []
+        for strategy_id in strategy_ids:
+            row = values.get(strategy_id)
+            accepted = int(row["accepted_count"] or 0) if row else 0
+            rejected = int(row["rejected_count"] or 0) if row else 0
+            edited = int(row["edited_count"] or 0) if row else 0
+            unknown = int(row["unknown_count"] or 0) if row else 0
+            labelled = accepted + rejected + edited
+            score = (accepted + 0.5 * edited) / labelled if labelled else 0.0
+            confidence: Literal["insufficient", "exploratory", "actionable"]
+            confidence = (
+                "actionable"
+                if labelled >= 5
+                else "exploratory"
+                if labelled > 0
+                else "insufficient"
+            )
+            patterns.append(
+                OutcomePattern(
+                    workspace_id=workspace_id,
+                    task_kind=task_kind,
+                    strategy_id=strategy_id,
+                    accepted_count=accepted,
+                    rejected_count=rejected,
+                    edited_count=edited,
+                    unknown_count=unknown,
+                    labelled_count=labelled,
+                    outcome_score=score,
+                    last_labelled_at=row["last_labelled_at"] if row else None,
+                    confidence=confidence,
+                )
+            )
+        return patterns
+
+    def get_strategy_assignment(self, run_id: str) -> str | None:
+        with contextlib.closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
+            ).fetchone()
+        return str(row["strategy_id"]) if row is not None else None
+
+    def assign_strategy(
+        self,
+        *,
+        workspace_id: str,
+        task_kind: str,
+        run_id: str,
+        strategy_id: str,
+    ) -> str:
+        """Persist an explicit or evidence-backed selection idempotently."""
+        with contextlib.closing(self._connect()) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO strategy_assignments
+                    (run_id, workspace_id, task_kind, strategy_id, selected_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (run_id, workspace_id, task_kind, strategy_id, _now()),
+                )
+                conn.commit()
+                return strategy_id
+            conn.commit()
+            return str(row["strategy_id"])
+
+    def assign_balanced_exploration(
+        self,
+        *,
+        workspace_id: str,
+        task_kind: str,
+        run_id: str,
+        strategy_ids: tuple[str, ...],
+    ) -> str:
+        """Atomically choose a least-assigned strategy with stable tie breaking."""
+        if not strategy_ids:
+            raise ObservationValidationError("strategy_ids must not be empty")
+        with contextlib.closing(self._connect()) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
+            ).fetchone()
+            if existing is not None:
+                conn.commit()
+                return str(existing["strategy_id"])
+            placeholders = ", ".join("?" for _ in strategy_ids)
+            query = f"""
+                SELECT strategy_id, COUNT(*) AS count
+                FROM strategy_assignments
+                WHERE workspace_id = ? AND task_kind = ? AND strategy_id IN ({placeholders})
+                GROUP BY strategy_id
+            """
+            rows = conn.execute(query, (workspace_id, task_kind, *strategy_ids)).fetchall()
+            counts = {str(row["strategy_id"]): int(row["count"]) for row in rows}
+            minimum = min(counts.get(strategy_id, 0) for strategy_id in strategy_ids)
+            tied = sorted(strategy_id for strategy_id in strategy_ids if counts.get(strategy_id, 0) == minimum)
+            digest = hashlib.sha256(f"{workspace_id}\0{task_kind}\0{run_id}".encode()).digest()
+            selected = tied[int.from_bytes(digest, "big") % len(tied)]
+            conn.execute(
+                """
+                INSERT INTO strategy_assignments
+                (run_id, workspace_id, task_kind, strategy_id, selected_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (run_id, workspace_id, task_kind, selected, _now()),
+            )
+            conn.commit()
+            return selected
 
 
 def render_advisory_context(

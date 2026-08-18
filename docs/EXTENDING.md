@@ -169,10 +169,15 @@ The same data is available through the private execution API:
 Stores live in `<workspace>/observations.db` (or standalone
 `./observations.db`), unless `AGENT_OS_OBSERVATIONS_DB` explicitly overrides
 the path. The records contain bounded operational metadata only; they never
-store the task, model output, tool arguments, or memory contents. Recent
-same-kind labelled outcomes may be supplied to the architect as clearly marked
-advisory evidence. They never grant a permission, execute a tool, or
-automatically change behaviour.
+store the task, model output, tool arguments, or memory contents. For the
+`workflow` task kind, labelled outcomes can select only one fixed versioned
+architect strategy: `default-v1`, `verification-first-v1`, or
+`concise-plan-v1`. Raw outcome evidence is never placed in the architect
+prompt. Selection is deterministic: a valid explicit override wins; otherwise
+an evidence-backed winner needs at least five labels for both compared
+strategies, score at least 0.70, and lead at least 0.15; otherwise runs use
+atomic balanced exploration. Strategy selection never grants a permission,
+executes a tool, or changes execution safety constraints.
 
 Private Runtime API endpoints (runs, sessions, briefs, schedules, graph, and
 chat) are local-only by default. A non-loopback caller must configure
