@@ -5,7 +5,7 @@ controllable AI agent systems - generic primitives an engineering team can
 clone, audit, extend, and self-host, without private context living in the
 public repository.**
 
-## Current State - v2.0.0
+## Current State - v2.2.1
 
 The first public backbone arc is complete:
 
@@ -22,6 +22,12 @@ The first public backbone arc is complete:
   to GHCR as a digest-pinned multi-arch image.
 - **v2.0.0:** stable `agent_os.api` extension surface, `py.typed`,
   compatibility tests, self-host Compose stack, and public extension docs.
+- **v2.1.0:** workspace-scoped, user-taught permission memory for native
+  memory writes, with explicit approval outcomes and fail-closed safety rules.
+- **v2.2.0:** structured outcome observations and deterministic bounded
+  selection among fixed, versioned planning strategies.
+- **v2.2.1:** audit-trace integrity that preserves the original strategy
+  selection reason and sanitized decision snapshot across replay.
 
 See [`CHANGELOG.md`](../CHANGELOG.md) for shipped release details.
 
@@ -59,13 +65,16 @@ decisions.
 | v1.8 | Complete | Scheduler, backend self-host container |
 | Console v1.9.2 | Complete | Public multi-arch GHCR operator console image |
 | v2.0 | Complete | Stable extension API and one-command self-host Compose |
+| v2.1 | Complete | Scoped, user-taught memory permissions with workspace isolation |
+| v2.2 | Complete | Structured outcome evidence and bounded adaptive planning |
+| v2.2.1 | Complete | Strategy assignment audit-trace integrity across replay |
 
 ## v2.x Direction
 
 v2.x should stay conservative: improve adoption, extension ergonomics, and
 deployment confidence before expanding the core.
 
-### v2.1 - Community Adoption Kit
+### v2.3 - Deployment Hardening and Adoption
 
 - Keep README, PRD, architecture, self-hosting, and extension docs current.
 - Add/expand example workspaces for common deployment shapes.
@@ -73,13 +82,15 @@ deployment confidence before expanding the core.
 - Document how to replace the default console with a private dashboard that
   calls the Runtime API.
 
-### v2.2 - Deployment Hardening
-
 - Add optional reverse-proxy guidance for authenticated private deployments.
 - Improve backup/restore examples and runtime state inspection.
 - Add more operational smoke tests for Compose, schedules, and event replay.
 
-### v2.3 - Integration Adapters
+The v2.2 planning loop remains deliberately bounded. A future behavioral
+learning system is not on the public roadmap until real usage produces enough
+labelled outcome data to justify a new, explicitly reviewed contract.
+
+### Future - Integration Adapters
 
 - Evaluate backend adapters only when their noninteractive contracts and
   permission modes are enforceable.
