@@ -2,10 +2,11 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import append_event, create_run, get_run, list_events, set_status
-from agent_os.server.api import app, build_graph_data
+from agent_os.server.api import EXECUTION_TOKEN_ENV, app, build_graph_data
 
 client = TestClient(app)
 
@@ -66,6 +67,30 @@ def test_cors_allows_console_origin():
     resp = client.get("/api/health", headers={"Origin": origin})
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == origin
+
+
+def test_private_api_rejects_an_untrusted_browser_origin():
+    response = client.get(
+        "/api/runs",
+        headers={"Origin": "https://untrusted.example"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Origin is not allowed"
+
+
+def test_private_api_requires_execution_token_when_configured(monkeypatch, tmp_path):
+    monkeypatch.setenv(EXECUTION_TOKEN_ENV, "execution-secret")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(tmp_path / "checkpoints.sqlite"))
+
+    blocked = client.get("/api/runs")
+    assert blocked.status_code == 403
+
+    allowed = client.get(
+        "/api/runs",
+        headers={"X-Execution-Token": "execution-secret"},
+    )
+    assert allowed.status_code == 200
 
 def test_api_sessions_list(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -302,10 +327,22 @@ def test_run_api_rejects_workspace_outside_sandbox(tmp_path, monkeypatch):
     assert "outside the sandbox" in response.json()["detail"]
 
 def test_run_api_cancel_path(tmp_path, monkeypatch):
+    from agent_os.policy import LocalPolicy, derive_permission_key
+    from agent_os.schemas import ActionProposal
+
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
     run_id = create_run("thread-cancel", "workspace-a", "task")
     set_status(run_id, "interrupted")
+    action = ActionProposal(
+        tool="memory.write",
+        connector="markdown_vault",
+        arguments={"ref": "AI/Decisions/cancel.md", "mode": "create"},
+        side_effect="write",
+    )
+    permission_key = derive_permission_key(action)
+    assert permission_key is not None
+    LocalPolicy.approve_session(run_id, permission_key)
 
     resp = client.post(f"/api/runs/{run_id}/cancel")
 
@@ -317,6 +354,7 @@ def test_run_api_cancel_path(tmp_path, monkeypatch):
     events = list_events(run_id)
     assert events[-1]["kind"] == "status"
     assert events[-1]["payload"] == {"status": "cancelled"}
+    assert LocalPolicy(session_key=run_id).evaluate(action).decision == "require_approval"
 
 def test_run_api_404s(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -374,6 +412,7 @@ def test_run_api_list_filters(tmp_path, monkeypatch):
 async def test_ws_chat_streams(monkeypatch, tmp_path):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv("CHECKPOINT_DB_ENV", db_path)
+    monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
     
     # Mock graph building and running
     class MockGraph:
@@ -381,6 +420,11 @@ async def test_ws_chat_streams(monkeypatch, tmp_path):
             from langchain_core.messages import AIMessageChunk
             yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="Hel")}}
             yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="lo")}}
+
+        async def aget_state(self, config):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(tasks=())
             
     def mock_build_graph(checkpointer=None):
         return MockGraph()
@@ -402,6 +446,221 @@ async def test_ws_chat_streams(monkeypatch, tmp_path):
         msg3 = websocket.receive_json()
         assert msg3["type"] == "done"
 
+
+def test_ws_chat_rejects_an_untrusted_browser_origin():
+    with pytest.raises(WebSocketDisconnect) as error:
+        with client.websocket_connect(
+            "/api/chat/untrusted-origin",
+            headers={"Origin": "https://untrusted.example"},
+        ):
+            pass
+
+    assert error.value.code == 1008
+
+
+def test_ws_chat_requires_execution_token_when_configured(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(EXECUTION_TOKEN_ENV, "execution-secret")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(tmp_path / "checkpoints.sqlite"))
+
+    class IdleGraph:
+        async def astream_events(self, state_update, config, version):
+            if False:
+                yield {}
+
+        async def aget_state(self, config):
+            return SimpleNamespace(tasks=(), values={})
+
+    monkeypatch.setattr(
+        "agent_os.server.api.build_runtime_graph",
+        lambda *, checkpointer: IdleGraph(),
+    )
+
+    with pytest.raises(WebSocketDisconnect) as error:
+        with client.websocket_connect("/api/chat/missing-token"):
+            pass
+    assert error.value.code == 1008
+
+    with client.websocket_connect(
+        "/api/chat/valid-token",
+        headers={"X-Execution-Token": "execution-secret"},
+    ):
+        pass
+
+    with client.websocket_connect(
+        "/api/chat/browser-token",
+        subprotocols=["agent-os", "agent-os-token.execution-secret"],
+    ) as websocket:
+        assert websocket.accepted_subprotocol == "agent-os"
+
+
+@pytest.mark.anyio
+async def test_ws_chat_binds_standalone_policy_to_nested_memory_write(monkeypatch, tmp_path):
+    from agent_os.connectors import MarkdownVaultConnector
+    from agent_os.memory_gate import gated_write
+    from agent_os.permission_store import PermissionRule, SqlitePermissionStore
+    from agent_os.policy import derive_permission_key
+    from agent_os.schemas import ActionProposal, MemoryWriteProposal
+
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(tmp_path / "checkpoints.sqlite"))
+    permission_db = tmp_path / "permissions.db"
+    monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(permission_db))
+    connector = MarkdownVaultConnector(str(tmp_path / "vault"))
+    proposal = MemoryWriteProposal(
+        connector="markdown_vault",
+        ref="AI/Decisions/websocket.md",
+        mode="create",
+        content_preview="websocket policy wiring",
+        side_effect="write",
+    )
+    key = derive_permission_key(
+        ActionProposal(
+            tool="memory.write",
+            connector="markdown_vault",
+            arguments={"ref": proposal.ref, "mode": proposal.mode},
+            side_effect="write",
+        )
+    )
+    assert key is not None
+    store = SqlitePermissionStore(str(permission_db))
+    store.upsert(
+        PermissionRule(
+            permission_key=key,
+            effect="always_approve",
+            tier_at_creation="low",
+        )
+    )
+
+    class PolicyGraph:
+        async def astream_events(self, state_update, config, version):
+            result = gated_write(connector, proposal, "websocket content")
+            assert result.committed is True
+            if False:
+                yield {}
+
+        async def aget_state(self, config):
+            from types import SimpleNamespace
+
+            return SimpleNamespace(tasks=())
+
+    monkeypatch.setattr("agent_os.server.api.build_runtime_graph", lambda *, checkpointer: PolicyGraph())
+    monkeypatch.setattr("agent_os.server.api.initial_state", lambda data: {"task": data})
+
+    with client.websocket_connect("/api/chat/policy-thread") as websocket:
+        websocket.send_text("write")
+        assert websocket.receive_json() == {"type": "done"}
+
+    assert (tmp_path / "vault" / proposal.ref).exists()
+
+
+@pytest.mark.anyio
+async def test_ws_chat_reports_unsuccessful_native_tool_result(monkeypatch, tmp_path):
+    """A rejected policy write must not be rendered as a successful chat turn."""
+    from types import SimpleNamespace
+
+    from agent_os.schemas import ToolExecutionResult
+
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(tmp_path / "checkpoints.sqlite"))
+    monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
+
+    class RejectedPolicyGraph:
+        async def astream_events(self, state_update, config, version):
+            if False:
+                yield {}
+
+        async def aget_state(self, config):
+            return SimpleNamespace(
+                tasks=(),
+                values={
+                    "tool_result": ToolExecutionResult(
+                        tool="memory_write",
+                        output=(
+                            '{"status": "cancelled", '
+                            '"errors": ["User rejected memory write"]}'
+                        ),
+                        success=False,
+                    )
+                },
+            )
+
+    monkeypatch.setattr(
+        "agent_os.server.api.build_runtime_graph",
+        lambda *, checkpointer: RejectedPolicyGraph(),
+    )
+    monkeypatch.setattr("agent_os.server.api.initial_state", lambda data: {"task": data})
+
+    with client.websocket_connect("/api/chat/ws-rejected-write") as websocket:
+        websocket.send_text("write memory")
+        assert websocket.receive_json() == {
+            "type": "error",
+            "status": "cancelled",
+            "error": "User rejected memory write",
+        }
+
+
+@pytest.mark.anyio
+async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(monkeypatch, tmp_path):
+    """WebSocket clients can reconnect, teach a rule, then reuse it."""
+    from langgraph.graph import END, START, StateGraph
+    from pydantic import BaseModel
+
+    from agent_os.connectors import MarkdownVaultConnector
+    from agent_os.memory_gate import gated_write
+    from agent_os.schemas import MemoryWriteProposal
+
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, str(tmp_path / "checkpoints.sqlite"))
+    monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
+    connector = MarkdownVaultConnector(str(tmp_path / "vault"))
+    proposal = MemoryWriteProposal(
+        connector="markdown_vault",
+        ref="AI/Decisions/ws-learning.md",
+        mode="append",
+        content_preview="websocket learning",
+        side_effect="write",
+    )
+
+    class WebsocketState(BaseModel):
+        task: str
+        committed: bool = False
+
+    def build_policy_graph(*, checkpointer):
+        builder = StateGraph(WebsocketState)
+
+        def write_node(state: WebsocketState) -> dict[str, object]:
+            result = gated_write(connector, proposal, "entry")
+            return {"committed": result.committed}
+
+        builder.add_node("write", write_node)
+        builder.add_edge(START, "write")
+        builder.add_edge("write", END)
+        return builder.compile(checkpointer=checkpointer)
+
+    monkeypatch.setattr("agent_os.server.api.build_runtime_graph", build_policy_graph)
+    monkeypatch.setattr("agent_os.server.api.initial_state", lambda data: {"task": data})
+
+    with client.websocket_connect("/api/chat/ws-learning-first") as websocket:
+        websocket.send_text("write memory")
+        interrupt = websocket.receive_json()
+        assert interrupt["type"] == "interrupt"
+        assert interrupt["prompt"].startswith("Policy approval required:")
+
+    # A new socket with the same thread restores the persisted policy
+    # interrupt, rather than treating the first reply as a brand-new task.
+    with client.websocket_connect("/api/chat/ws-learning-first") as websocket:
+        interrupt = websocket.receive_json()
+        assert interrupt["type"] == "interrupt"
+        assert interrupt["prompt"].startswith("Policy approval required:")
+
+        websocket.send_text("always_approve")
+        assert websocket.receive_json() == {"type": "done"}
+
+    with client.websocket_connect("/api/chat/ws-learning-second") as websocket:
+        websocket.send_text("write memory again")
+        assert websocket.receive_json() == {"type": "done"}
+
+    assert (tmp_path / "vault" / proposal.ref).read_text(encoding="utf-8") == "entry\nentry"
+
 def test_serve_missing_extra(monkeypatch, capsys):
     import asyncio
 
@@ -418,6 +677,18 @@ def test_serve_missing_extra(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "FastAPI dependencies not installed" in captured.out
     assert "pip install agent-os-langgraph[serve]" in captured.out
+
+
+@pytest.mark.anyio
+async def test_serve_refuses_remote_bind_without_execution_token(monkeypatch, capsys):
+    from agent_os.cli.app import async_main
+
+    monkeypatch.delenv(EXECUTION_TOKEN_ENV, raising=False)
+
+    exit_code = await async_main(["serve", "--host", "0.0.0.0"])
+
+    assert exit_code == 2
+    assert "AGENT_OS_EXECUTION_TOKEN" in capsys.readouterr().out
 
 def test_bind_localhost_default():
     from agent_os.cli.app import build_parser

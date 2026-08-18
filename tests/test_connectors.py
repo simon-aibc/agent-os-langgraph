@@ -345,7 +345,7 @@ def test_gbrain_write_uses_put_page(monkeypatch):
         mock_response.__enter__.return_value = mock_response
         mock_urlopen.return_value = mock_response
         
-        res = gbrain.write_note("my-slug", "hello")
+        res = gbrain.write_note("my-slug", "hello", mode="overwrite")
         
         assert res.committed is True
         assert res.ref == "agentos/my-slug"
@@ -373,11 +373,23 @@ def test_gbrain_write_prefixes_agentos(monkeypatch):
         mock_response.__enter__.return_value = mock_response
         mock_urlopen.return_value = mock_response
         
-        res1 = gbrain.write_note("test1", "hello")
+        res1 = gbrain.write_note("test1", "hello", mode="overwrite")
         assert res1.ref == "agentos/test1"
         
-        res2 = gbrain.write_note("agentos/test2", "hello")
+        res2 = gbrain.write_note("agentos/test2", "hello", mode="overwrite")
         assert res2.ref == "agentos/test2"
+
+
+@pytest.mark.parametrize("mode", ("create", "append"))
+def test_gbrain_rejects_modes_that_would_silently_upsert(monkeypatch, mode):
+    monkeypatch.setenv("GBRAIN_TOKEN", "test-token")
+    gbrain = GbrainConnector()
+
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        with pytest.raises(NotImplementedError, match="only supports explicit overwrite"):
+            gbrain.write_note("existing-page", "replacement", mode=mode)
+
+    mock_urlopen.assert_not_called()
 
 
 @pytest.mark.integration

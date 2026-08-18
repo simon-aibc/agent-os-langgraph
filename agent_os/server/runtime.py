@@ -10,8 +10,14 @@ from langchain_core.messages import HumanMessage
 from agent_os.bindings import resolve_backend_binding
 from agent_os.connectors import GbrainConnector, MemoryConnector
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
+from agent_os.policy import LocalPolicy
 from agent_os.routing import build_runtime_config
-from agent_os.workspace import ComposedWorkspace, compose_workspace, load_workspace
+from agent_os.workspace import (
+    ComposedWorkspace,
+    compose_workspace,
+    load_workspace,
+    open_permission_store,
+)
 
 PACKAGE_NAME = "agent-os-langgraph"
 
@@ -45,6 +51,14 @@ def runtime_config(thread_id: str) -> dict[str, object]:
     if isinstance(recursion_limit, int) and recursion_limit > 0:
         config["recursion_limit"] = recursion_limit
     return config
+
+
+def runtime_policy_for_session(session_key: str | None) -> LocalPolicy:
+    """Return the active workspace policy bound to one run/session."""
+    runtime = composed_workspace()
+    if runtime is not None:
+        return runtime.policy.with_session(session_key)
+    return LocalPolicy(store=open_permission_store(), session_key=session_key)
 
 
 def initial_state(task: str) -> dict[str, object]:

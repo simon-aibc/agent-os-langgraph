@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import datetime as dt
+import ipaddress
 import os
 import sys
 import traceback
@@ -104,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_brief.add_argument("--date", help="Target date YYYY-MM-DD")
     p_brief.add_argument("--profile", help="Named configuration profile to use.")
     p_brief.add_argument("--connector", help="Memory connector to use")
+    p_brief.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
 
     # agent-os schedule add|list|remove|run-once
     p_schedule = subparsers.add_parser("schedule", help="Manage schedules")
@@ -140,6 +146,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_sched_runonce = sched_sub.add_parser("run-once", help="Manually dispatch a schedule")
     p_sched_runonce.add_argument("schedule_id", help="Schedule ID to dispatch")
 
+    # agent-os permissions list|revoke
+    p_permissions = subparsers.add_parser("permissions", help="Manage learned permission rules")
+    perm_sub = p_permissions.add_subparsers(dest="permissions_command")
+
+    p_perm_list = perm_sub.add_parser("list", help="List learned permission rules")
+    p_perm_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+    p_perm_list.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+
+    p_perm_revoke = perm_sub.add_parser("revoke", help="Revoke a learned permission rule")
+    p_perm_revoke.add_argument("permission_key", help="Permission key to revoke (e.g., memory_write:write:*)")
+    p_perm_revoke.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+
     return parser
 
 
@@ -150,7 +176,7 @@ def _generate_thread_id() -> str:
 
 
 def _normalize_argv(argv: list[str]) -> list[str]:
-    commands = ("run", "doctor", "chat", "sessions", "serve", "brief", "schedule")
+    commands = ("run", "doctor", "chat", "sessions", "serve", "brief", "schedule", "permissions")
     if not argv:
         return ["run"]
     if argv[0] in commands:
@@ -164,6 +190,17 @@ def _normalize_argv(argv: list[str]) -> list[str]:
             return argv
         return [argv[0], "run", *argv[1:]]
     return ["run"] + argv
+
+
+def _is_loopback_bind_host(host: str) -> bool:
+    """Whether a server bind address is limited to this machine."""
+    normalized = host.strip().lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 def _initial_state(
@@ -321,17 +358,24 @@ def _read_feedback(
     input_fn: InputFunction,
 ) -> str:
     from agent_os.nodes.human_gate import normalize_human_feedback
+    from agent_os.policy import POLICY_APPROVAL_PROMPT_PREFIX, normalize_policy_feedback
 
     formatter.print_human_prompt(str(prompt))
+    is_policy_prompt = str(prompt).startswith(POLICY_APPROVAL_PROMPT_PREFIX)
+    normalizer = normalize_policy_feedback if is_policy_prompt else normalize_human_feedback
+    guidance = (
+        "Enter 'approved', 'session', 'always_approve', 'always_deny', or "
+        "'rejected: <reason>'."
+        if is_policy_prompt
+        else "Enter 'approved', 'y', or 'rejected: <reason>'."
+    )
     while True:
         raw_feedback = input_fn("> ")
         try:
-            return normalize_human_feedback(raw_feedback)
+            return normalizer(raw_feedback)
         except ValueError as error:
             formatter.print_error(f"Invalid feedback: {error}")
-            formatter.print_info(
-                "Enter 'approved', 'y', or 'rejected: <reason>'."
-            )
+            formatter.print_info(guidance)
 
 
 async def _stream_pass(
@@ -341,12 +385,31 @@ async def _stream_pass(
     formatter: EventFormatter,
     verbose: bool,
 ) -> None:
-    async for event in graph.astream_events(
-        graph_input,
-        config=config,
-        version="v2",
-    ):
-        format_event(event, formatter, verbose=verbose)
+    from agent_os.policy import LocalPolicy, policy_scope
+
+    configurable = config.get("configurable", {})
+    if not isinstance(configurable, dict):
+        configurable = {}
+    thread_id = configurable.get("thread_id")
+    session_key = str(thread_id) if isinstance(thread_id, str) and thread_id else None
+    workspace_runtime = configurable.get("workspace")
+    base_policy = getattr(workspace_runtime, "policy", None)
+    if isinstance(base_policy, LocalPolicy):
+        policy = base_policy.with_session(session_key)
+    else:
+        from agent_os.workspace import open_permission_store
+
+        policy = LocalPolicy(store=open_permission_store(), session_key=session_key)
+
+    # ContextVars propagate through the graph's async work, allowing a memory
+    # write invoked deep in a runtime node to use this workspace/session policy.
+    with policy_scope(policy):
+        async for event in graph.astream_events(
+            graph_input,
+            config=config,
+            version="v2",
+        ):
+            format_event(event, formatter, verbose=verbose)
     formatter.finish_stream()
 
 
@@ -645,12 +708,16 @@ async def _chat_loop(
             from agent_os.session_log import write_session_summary
             from agent_os.sessions import _get_db
             
-            connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
-            if connector_name == "gbrain":
-                connector = GbrainConnector()
+            workspace_connector = getattr(workspace_runtime, "memory_connector", None)
+            if workspace_connector is not None and hasattr(workspace_connector, "write_note"):
+                connector = workspace_connector
             else:
-                vault_path = os.getenv("AGENT_OS_VAULT_PATH", backend_binding.sandbox_root)
-                connector = MarkdownVaultConnector(vault_path)
+                connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
+                if connector_name == "gbrain":
+                    connector = GbrainConnector()
+                else:
+                    vault_path = os.getenv("AGENT_OS_VAULT_PATH", backend_binding.sandbox_root)
+                    connector = MarkdownVaultConnector(vault_path)
                 
             with _get_db() as db:
                 c = db.execute("SELECT turn_count, created_at, title FROM sessions WHERE thread_id = ?", (thread_id,))
@@ -661,7 +728,30 @@ async def _chat_loop(
                 "created_at": row[1] if row else "",
                 "title": row[2] if row else "Untitled Session"
             }
-            write_session_summary(connector, thread_id, summary, session_meta)
+            from agent_os.policy import LocalPolicy
+
+            runtime_policy = getattr(workspace_runtime, "policy", None)
+            if isinstance(runtime_policy, LocalPolicy):
+                session_policy = runtime_policy.with_session(thread_id)
+            else:
+                from agent_os.workspace import open_permission_store
+
+                session_policy = LocalPolicy(
+                    store=open_permission_store(),
+                    session_key=thread_id,
+                )
+            session_log_result = write_session_summary(
+                connector,
+                thread_id,
+                summary,
+                session_meta,
+                engine=session_policy,
+            )
+            if not session_log_result.committed:
+                formatter.print_warning(
+                    "Session log was not saved: "
+                    f"{session_log_result.error or 'write was not committed'}"
+                )
     except Exception as e:
         formatter.print_warning(f"Failed to write session log: {e}")
 
@@ -801,6 +891,73 @@ async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFor
     return 2
 
 
+def _open_permissions_store_for_command(workspace_path: str | None) -> Any:
+    """Open the same learned-permissions store selected for a workspace run."""
+    from agent_os.permission_store import SqlitePermissionStore
+    from agent_os.workspace import load_workspace, resolve_permission_db_path
+
+    workspace = load_workspace(workspace_path) if workspace_path else None
+    return SqlitePermissionStore(resolve_permission_db_path(workspace))
+
+
+def _handle_permissions_command(args: argparse.Namespace, formatter: EventFormatter) -> int:
+    import json as _json
+    from dataclasses import asdict
+
+    try:
+        store = _open_permissions_store_for_command(getattr(args, "workspace", None))
+    except Exception as e:
+        formatter.print_error(f"Failed to open permissions store: {e}")
+        return 2
+
+    if args.permissions_command == "list":
+        try:
+            rules = store.list()
+        except Exception as e:
+            formatter.print_error(f"Failed to list permissions: {e}")
+            return 2
+
+        if getattr(args, "json_output", False):
+            print(_json.dumps([asdict(r) for r in rules], indent=2))
+            return 0
+
+        if not rules:
+            formatter.print_info("No learned permission rules found.")
+            return 0
+
+        for r in rules:
+            formatter.print_info(
+                f"{r.permission_key}  [{r.effect}]  tier={r.tier_at_creation}  "
+                f"approved={r.approve_count}  denied={r.deny_count}"
+            )
+        return 0
+
+    if args.permissions_command == "revoke":
+        perm_key = getattr(args, "permission_key", "")
+        if perm_key:
+            perm_key = perm_key.strip()
+        if not perm_key:
+            formatter.print_error("Permission key is required to revoke.")
+            return 2
+        try:
+            rule = store.get(perm_key)
+            if not rule:
+                formatter.print_error(f"Permission rule '{perm_key}' not found.")
+                return 1
+            store.delete(perm_key)
+            formatter.print_info(f"Revoked permission rule '{perm_key}'.")
+            return 0
+        except ValueError as e:
+            formatter.print_error(f"Invalid permission key: {e}")
+            return 2
+        except Exception as e:
+            formatter.print_error(f"Failed to revoke permission rule: {e}")
+            return 2
+
+    formatter.print_error("Unknown permissions subcommand. See: agent-os permissions --help")
+    return 2
+
+
 async def async_main(
     argv: list[str] | None = None,
     *,
@@ -817,6 +974,9 @@ async def async_main(
     argv = _normalize_argv(argv)
 
     args = build_parser().parse_args(argv)
+
+    if args.command == "permissions":
+        return _handle_permissions_command(args, EventFormatter(console=console))
 
     if args.command == "sessions":
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -873,6 +1033,7 @@ async def async_main(
     if args.command == "brief":
         from agent_os.backends import build_default_registry
         from agent_os.brief_runtime import execute_brief
+        from agent_os.policy import LocalPolicy
         from agent_os.profiles import (
             load_profiles,
             resolve_profile,
@@ -897,15 +1058,41 @@ async def async_main(
         except Exception:
             pass
 
-        res = execute_brief(
-            date=getattr(args, "date", None),
-            connector_name=getattr(args, "connector", None),
-            write=True,
-        )
-        if res.ref:
+        workspace_runtime = None
+        session_key = f"brief:{uuid.uuid4()}"
+        try:
+            if getattr(args, "workspace", None):
+                from agent_os.workspace import compose_workspace, load_workspace
+
+                workspace_runtime = compose_workspace(load_workspace(args.workspace))
+            if workspace_runtime is not None:
+                policy = workspace_runtime.policy.with_session(session_key)
+            else:
+                from agent_os.workspace import open_permission_store
+
+                policy = LocalPolicy(
+                    store=open_permission_store(),
+                    session_key=session_key,
+                )
+            res = execute_brief(
+                date=getattr(args, "date", None),
+                connector_name=getattr(args, "connector", None),
+                connector=(workspace_runtime.memory_connector if workspace_runtime else None),
+                write=True,
+                engine=policy,
+            )
+        finally:
+            LocalPolicy.clear_session(session_key)
+        if res.saved:
             print(f"Morning Brief generated and saved to: {res.ref}")
+        else:
+            print(
+                f"Morning Brief was generated but not saved: "
+                f"{res.error or 'brief write was not committed'}",
+                file=sys.stderr,
+            )
         print(res.content)
-        return 0
+        return 0 if res.saved else 1
 
     if args.command == "serve":
         previous_env = {
@@ -931,6 +1118,7 @@ async def async_main(
                 os.environ["AGENT_OS_WORKSPACE"] = str(
                     composed_workspace.workspace.base_path / "workspace.toml"
                 )
+            from agent_os.server.api import EXECUTION_TOKEN_ENV
             from agent_os.server.api import app as fastapi_app
         except ImportError:
             print("FastAPI dependencies not installed. Please run: pip install agent-os-langgraph[serve]")
@@ -942,6 +1130,16 @@ async def async_main(
         # We also need to set the profile if provided so the server uses it for backend_binding
         if args.profile and not args.workspace:
             os.environ["AGENT_OS_PROFILE"] = args.profile
+
+        if (
+            not _is_loopback_bind_host(args.host)
+            and not os.getenv(EXECUTION_TOKEN_ENV, "").strip()
+        ):
+            print(
+                "Refusing to bind the execution API outside localhost without "
+                "AGENT_OS_EXECUTION_TOKEN."
+            )
+            return 2
             
         try:
             # We are already inside a running asyncio loop (async_main), so
@@ -1169,6 +1367,10 @@ async def async_main(
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+        # Session grants exist only for the lifetime of this CLI invocation.
+        from agent_os.policy import LocalPolicy
+
+        LocalPolicy.clear_session(thread_id)
 
 
 def main(argv: list[str] | None = None) -> int:

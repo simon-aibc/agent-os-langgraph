@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any
 
@@ -7,11 +8,13 @@ from pydantic import BaseModel
 from agent_os import runs
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.cli.app import _pending_interrupt
+from agent_os.policy import LocalPolicy, policy_scope
 from agent_os.sandbox import sandbox_scope
 from agent_os.server.runtime import (
     build_runtime_graph,
     initial_state,
     runtime_config,
+    runtime_policy_for_session,
 )
 
 
@@ -52,6 +55,40 @@ def _result_payload(snapshot: object) -> dict[str, Any]:
     return {}
 
 
+def terminal_tool_failure(snapshot: object) -> tuple[str, str] | None:
+    """Return a terminal ledger status and diagnostic for an unsuccessful tool.
+
+    The dispatcher deliberately serializes native ``ExecutionResult`` objects
+    into ``ToolExecutionResult.output``.  Preserve their cancellation/error
+    semantics at the HTTP run boundary instead of marking every terminal graph
+    snapshot as successful.
+    """
+    result = _result_payload(snapshot).get("tool_result")
+    if not isinstance(result, dict) or result.get("success") is not False:
+        return None
+
+    tool = str(result.get("tool") or "tool")
+    raw_output = result.get("output")
+    status = "error"
+    errors: list[str] = []
+    if isinstance(raw_output, str):
+        try:
+            parsed = json.loads(raw_output)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            if parsed.get("status") == "cancelled":
+                status = "cancelled"
+            raw_errors = parsed.get("errors")
+            if isinstance(raw_errors, list):
+                errors = [str(item) for item in raw_errors if str(item).strip()]
+        if not errors and raw_output.strip():
+            errors = [raw_output]
+
+    message = "; ".join(errors) or f"{tool} did not complete successfully"
+    return status, message
+
+
 async def execute_run(
     run_id: str,
     thread_id: str,
@@ -63,42 +100,57 @@ async def execute_run(
 
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
     config = runtime_config(thread_id)
+    # A run can be interrupted and resumed through multiple HTTP requests, so
+    # the run id—not the process-global thread id—is the session grant boundary.
+    session_policy = runtime_policy_for_session(run_id)
+    preserve_session = False
 
     try:
         run = runs.get_run(run_id)
         if run is None:
             raise ValueError(f"Run {run_id} does not exist")
         runs.set_status(run_id, "running")
-        with sandbox_scope(run.get("workspace")):
-            async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
-                # Match the ledger's busy_timeout so the async checkpointer waits for
-                # the shared-file write lock instead of failing with "database is
-                # locked" when the synchronous ledger is mid-write.
-                await saver.conn.execute("PRAGMA busy_timeout=30000")
-                graph = build_runtime_graph(checkpointer=saver)
-                graph_input: object
-                if resume_feedback is None:
-                    graph_input = initial_state(task)
-                else:
-                    graph_input = Command(resume=resume_feedback)
+        with policy_scope(session_policy):
+            with sandbox_scope(run.get("workspace")):
+                async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
+                    # Match the ledger's busy_timeout so the async checkpointer waits for
+                    # the shared-file write lock instead of failing with "database is
+                    # locked" when the synchronous ledger is mid-write.
+                    await saver.conn.execute("PRAGMA busy_timeout=30000")
+                    graph = build_runtime_graph(checkpointer=saver)
+                    graph_input: object
+                    if resume_feedback is None:
+                        graph_input = initial_state(task)
+                    else:
+                        graph_input = Command(resume=resume_feedback)
 
-                async for event in graph.astream_events(graph_input, config, version="v1"):
-                    if isinstance(event, dict):
-                        _append_stream_event(run_id, event)
+                    async for event in graph.astream_events(graph_input, config, version="v2"):
+                        if isinstance(event, dict):
+                            _append_stream_event(run_id, event)
 
-                snapshot = await graph.aget_state(config)
-                interrupt_prompt = _pending_interrupt(snapshot)
-                if interrupt_prompt is not None:
-                    runs.append_event(
-                        run_id,
-                        "interrupt",
-                        {"prompt": str(interrupt_prompt)},
-                    )
-                    runs.set_status(run_id, "interrupted")
-                else:
-                    runs.append_event(run_id, "result", _result_payload(snapshot))
-                    runs.set_status(run_id, "completed", ended=True)
+                    snapshot = await graph.aget_state(config)
+                    interrupt_prompt = _pending_interrupt(snapshot)
+                    if interrupt_prompt is not None:
+                        runs.append_event(
+                            run_id,
+                            "interrupt",
+                            {"prompt": str(interrupt_prompt)},
+                        )
+                        runs.set_status(run_id, "interrupted")
+                        preserve_session = True
+                    else:
+                        result_payload = _result_payload(snapshot)
+                        runs.append_event(run_id, "result", result_payload)
+                        failure = terminal_tool_failure(snapshot)
+                        if failure is None:
+                            runs.set_status(run_id, "completed", ended=True)
+                        else:
+                            status, message = failure
+                            runs.set_status(run_id, status, error=message, ended=True)
     except Exception as error:
         message = str(error)
         runs.append_event(run_id, "error", {"message": message})
         runs.set_status(run_id, "error", error=message, ended=True)
+    finally:
+        if not preserve_session:
+            LocalPolicy.clear_session(run_id)

@@ -3,6 +3,7 @@ from typing import Any
 
 from agent_os.connectors import MemoryWriteResult, WritableMemory
 from agent_os.memory_gate import gated_write
+from agent_os.policy import PolicyEngine
 from agent_os.schemas import MemoryWriteProposal
 
 
@@ -10,7 +11,9 @@ def write_session_summary(
     connector: WritableMemory,
     thread_id: str,
     summary: str,
-    session_meta: dict[str, Any]
+    session_meta: dict[str, Any],
+    *,
+    engine: PolicyEngine | None = None,
 ) -> MemoryWriteResult:
     """Write the session summary to the vault via auto-approved append."""
     
@@ -51,11 +54,11 @@ def write_session_summary(
     content = "\n".join(content_lines)
     
     proposal = MemoryWriteProposal(
-        connector="memory",
+        connector=str(getattr(connector, "name", "memory")),
         ref=ref,
         mode="append",
         content_preview=summary[:100] + ("..." if len(summary) > 100 else ""),
         side_effect=f"Append session summary to {ref}",
     )
     
-    return gated_write(connector, proposal, content, frontmatter=frontmatter)
+    return gated_write(connector, proposal, content, frontmatter=frontmatter, engine=engine)

@@ -1,6 +1,8 @@
 import re
 from unittest.mock import MagicMock
 
+import pytest
+from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
 from pydantic import BaseModel
 
@@ -122,6 +124,27 @@ def test_dispatcher_tool_failure():
     assert cmd.update["router_escalated"] is True
     assert cmd.update["tool_result"].success is False
     assert cmd.update["tool_result"].output == "Tool crashed"
+
+
+def test_dispatcher_propagates_langgraph_interrupts():
+    """A policy/human interrupt must pause the graph instead of escalating."""
+    registry = SkillRegistry()
+
+    def requires_approval(path: str, content: str) -> None:
+        raise GraphInterrupt()
+
+    registry.register(
+        RegisteredSkill(
+            name="write_file",
+            aliases=["write"],
+            handler=requires_approval,
+        )
+    )
+
+    node = build_tool_dispatcher_node(registry=registry, router_llm=MagicMock())
+
+    with pytest.raises(GraphInterrupt):
+        node(make_state("write path/to/f.txt :: contents"))
 
 
 def test_dispatcher_bash_nonzero_returncode_marks_failure():

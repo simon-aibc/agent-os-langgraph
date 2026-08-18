@@ -358,7 +358,8 @@ def test_build_default_registry_native_only():
     assert registry.get("read_file") is not None
     assert registry.get("write_file") is not None
     assert registry.get("bash") is not None
-    assert len(registry.names()) == 3
+    assert registry.get("memory_write") is not None
+    assert set(registry.names()) == {"read_file", "write_file", "bash", "memory_write"}
 
 
 def test_build_default_registry_with_mcp_tools():
@@ -370,7 +371,8 @@ def test_build_default_registry_with_mcp_tools():
     my_mcp_tool.name = "mcp_s1_my_mcp_tool"
     registry = build_default_registry(mcp_tools=[my_mcp_tool])
 
-    assert len(registry.names()) == 4
+    assert len(registry.names()) == 5
+    assert registry.get("memory_write") is not None
     mcp_skill = registry.get("mcp_s1_my_mcp_tool")
     assert mcp_skill is not None
     assert mcp_skill.invoke({"x": "hello"}) == "hello!"
@@ -387,7 +389,8 @@ def test_build_default_registry_collision(caplog):
     with caplog.at_level(logging.WARNING):
         registry = build_default_registry(mcp_tools=[duplicate_tool])
 
-    assert len(registry.names()) == 3
+    assert len(registry.names()) == 4
+    assert registry.get("memory_write") is not None
     assert "Skipping MCP tool 'read_file' due to registry collision" in caplog.text
 
 
@@ -399,6 +402,7 @@ async def test_build_default_registry_with_mcp_async():
         client_factory=FakeClient,
     )
 
-    assert len(registry.names()) == 4
+    assert len(registry.names()) == 5
     assert registry.get("mcp_s1_tool_from_s1") is not None
     assert registry.get("read_file") is not None
+    assert registry.get("memory_write") is not None

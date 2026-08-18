@@ -3,6 +3,24 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [Unreleased]
+
+### Added
+
+- **User-taught memory-write permissions**: explicit one-time, session, always-approve, and always-deny choices; durable SQLite rules with usage counters; local CLI list/revoke commands; and token-gated Runtime API management endpoints.
+- **Runtime policy binding**: CLI graph streams and server runs carry the composed workspace policy into nested memory writes, with session grants cleared on terminal completion.
+
+### Security
+
+- Learned/session grants are limited to exact `memory.write` connector + mode + ref scopes. Generic network, communication, filesystem, payment, and privileged actions cannot create a reusable grant.
+- High-risk taxonomy denial occurs before rule lookup. Workspace rules are isolated in `<workspace>/permissions.db` unless an explicit `AGENT_OS_PERMISSIONS_DB` override is configured. Runtime API administration requires `AGENT_OS_PERMISSIONS_ADMIN_TOKEN`.
+- Private Runtime execution endpoints are loopback-only by default; remote binds require `AGENT_OS_EXECUTION_TOKEN`, and browser WebSocket approvals require a configured exact origin.
+
+### Fixed
+
+- Connector write failures propagate to callers instead of being reported as an indistinguishable rejected write.
+- Native memory-write failures are surfaced as failed CLI, Runtime API, and WebSocket outcomes rather than a successful completion; Gbrain's upsert-only write API now requires explicit `overwrite`.
+
 ## [2.0.0] — 2026-08-09
 
 ### Added
