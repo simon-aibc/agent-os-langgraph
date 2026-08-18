@@ -15,7 +15,7 @@ def test_health_version():
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "2.0.0"
+    assert payload["version"] == "2.2.1"
     assert payload["workspace"]["status"] == "not_configured"
     assert payload["active_runs"] == 0
 
