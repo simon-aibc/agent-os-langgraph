@@ -92,6 +92,16 @@ def test_private_api_requires_execution_token_when_configured(monkeypatch, tmp_p
     )
     assert allowed.status_code == 200
 
+
+def test_run_api_rejects_invalid_strategy_override():
+    response = client.post(
+        "/api/runs",
+        json={"task": "ship it", "strategy_id": "untrusted-v1"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Strategy is not allowed for this task kind"
+
 def test_api_sessions_list(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv("CHECKPOINT_DB_ENV", db_path)

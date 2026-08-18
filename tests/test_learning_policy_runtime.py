@@ -154,7 +154,11 @@ async def test_server_run_binds_workspace_policy_to_nested_memory_write(
         "build_runtime_graph",
         lambda *, checkpointer: graph,
     )
-    monkeypatch.setattr(run_executor, "initial_state", lambda task: {"task": task})
+    monkeypatch.setattr(
+        run_executor,
+        "initial_state",
+        lambda task, **_: {"task": task},
+    )
 
     try:
         run_id = runs.create_run("server-runtime-thread", None, "write")

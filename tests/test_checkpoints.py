@@ -17,6 +17,7 @@ from agent_os.schemas import (
     ExecutionResult,
     PlanArtifact,
 )
+from agent_os.strategies import StrategyHint
 
 
 def test_get_default_checkpointer_uses_configured_path(tmp_path, monkeypatch):
@@ -104,3 +105,19 @@ def test_checkpoint_serializer_round_trips_generic_and_coding_models():
 
     assert restored["coding_result"] == state_to_serialize["coding_result"]
     assert isinstance(restored["coding_result"], CodingResult)
+
+
+def test_checkpoint_serializer_round_trips_strategy_hint():
+    serializer = get_checkpoint_serializer()
+    hint = StrategyHint(
+        strategy_id="verification-first-v1",
+        version=1,
+        task_kind="workflow",
+        selection_reason="exploration",
+        directive="Inspect constraints before planning.",
+    )
+
+    restored = serializer.loads_typed(serializer.dumps_typed({"strategy_hint": hint}))
+
+    assert restored["strategy_hint"] == hint
+    assert isinstance(restored["strategy_hint"], StrategyHint)

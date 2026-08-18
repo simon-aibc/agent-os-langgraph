@@ -58,8 +58,10 @@ from agent_os.server.runtime import (
     runtime_config,
     runtime_policy_for_session,
     runtime_summary,
+    task_kind_for_input,
 )
 from agent_os.sessions import delete_session, list_sessions
+from agent_os.strategies import strategies_for
 
 
 @asynccontextmanager
@@ -110,6 +112,7 @@ class CreateRunRequest(BaseModel):
     task: str
     thread_id: str | None = None
     workspace: str | None = None
+    strategy_id: str | None = None
 
 
 class ApproveRunRequest(BaseModel):
@@ -441,6 +444,7 @@ def _start_run_task(
     task: str,
     *,
     resume_feedback: str | None = None,
+    strategy_override: str | None = None,
 ) -> None:
     existing = ACTIVE_RUN_TASKS.get(run_id)
     if existing is not None and not existing.done():
@@ -448,12 +452,10 @@ def _start_run_task(
 
     async def runner() -> None:
         try:
-            await execute_run(
-                run_id,
-                thread_id,
-                task,
-                resume_feedback=resume_feedback,
-            )
+            run_kwargs: dict[str, str | None] = {"resume_feedback": resume_feedback}
+            if strategy_override is not None:
+                run_kwargs["strategy_override"] = strategy_override
+            await execute_run(run_id, thread_id, task, **run_kwargs)
         except asyncio.CancelledError:
             run = get_run(run_id)
             if run is not None and run["status"] not in TERMINAL_RUN_STATUSES:
@@ -471,13 +473,22 @@ def _start_run_task(
 
 @app.post("/api/runs")
 async def create_run_endpoint(request: CreateRunRequest) -> dict[str, str]:
+    if request.strategy_id is not None:
+        allowed = {item.strategy_id for item in strategies_for(task_kind_for_input(request.task))}
+        if request.strategy_id not in allowed:
+            raise HTTPException(status_code=422, detail="Strategy is not allowed for this task kind")
     try:
         workspace = str(resolve_workspace_root(request.workspace))
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     thread_id = request.thread_id or str(uuid.uuid4())
     run_id = create_run(thread_id, workspace, request.task)
-    _start_run_task(run_id, thread_id, request.task)
+    _start_run_task(
+        run_id,
+        thread_id,
+        request.task,
+        strategy_override=request.strategy_id,
+    )
     return {"run_id": run_id, "thread_id": thread_id, "status": "queued"}
 
 @app.get("/api/runs")

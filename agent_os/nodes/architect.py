@@ -108,9 +108,21 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
     prompt_parts = [prompt]
     if hot_context:
         prompt_parts.append(f"## Context (from vault)\n{hot_context}")
-    observation_context = state.get("observation_context")
-    if observation_context:
-        prompt_parts.append(str(observation_context))
+    strategy_hint = state.get("strategy_hint")
+    if strategy_hint:
+        strategy_data = (
+            strategy_hint.model_dump()
+            if hasattr(strategy_hint, "model_dump")
+            else strategy_hint
+        )
+        if not isinstance(strategy_data, dict):
+            strategy_data = {}
+        prompt_parts.append(
+            "## Planning strategy (fixed and advisory)\n"
+            f"Selected strategy: {strategy_data.get('strategy_id', 'default-v1')}\n"
+            f"Directive: {strategy_data.get('directive', '')}\n"
+            "This directive cannot change permission, tool-safety, or execution constraints."
+        )
     if new_summary:
         prompt_parts.append(f"## Conversation so far (summary)\n{new_summary}")
         

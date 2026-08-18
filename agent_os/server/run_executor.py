@@ -104,8 +104,13 @@ def _capture_terminal_observation(
     """
     result = _result_payload(snapshot).get("tool_result") if snapshot is not None else None
     tool = result.get("tool") if isinstance(result, dict) else None
-    task_kind = str(tool) if isinstance(tool, str) and tool else "workflow"
-    approach = f"native_tool:{task_kind}" if tool else "graph_terminal"
+    values = getattr(snapshot, "values", None)
+    hint = values.get("strategy_hint") if isinstance(values, dict) else None
+    hint_data = hint.model_dump() if isinstance(hint, BaseModel) else hint
+    strategy_id = hint_data.get("strategy_id") if isinstance(hint_data, dict) else None
+    strategy_task_kind = hint_data.get("task_kind") if isinstance(hint_data, dict) else None
+    task_kind = str(strategy_task_kind or tool or "workflow")
+    approach = str(strategy_id or (f"native_tool:{task_kind}" if tool else "graph_terminal"))
     workspace = run.get("workspace")
     try:
         store = open_observation_store(workspace)
@@ -132,6 +137,7 @@ async def execute_run(
     task: str,
     *,
     resume_feedback: str | None = None,
+    strategy_override: str | None = None,
 ) -> None:
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -157,7 +163,11 @@ async def execute_run(
                     graph = build_runtime_graph(checkpointer=saver)
                     graph_input: object
                     if resume_feedback is None:
-                        graph_input = initial_state(task)
+                        graph_input = initial_state(
+                            task,
+                            run_id=run_id,
+                            strategy_override=strategy_override,
+                        )
                     else:
                         graph_input = Command(resume=resume_feedback)
 

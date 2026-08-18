@@ -289,3 +289,29 @@ async def test_observation_failure_does_not_change_terminal_run_status(runs_db, 
     await execute_run(run_id, "thread-no-observation", "task")
 
     assert get_run(run_id)["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_terminal_observation_uses_selected_strategy(runs_db, monkeypatch):
+    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
+    workspace = runs_db.parent / "strategy-workspace"
+    workspace.mkdir()
+    graph = FakeGraph(
+        [],
+        _completed_snapshot(
+            {
+                "strategy_hint": {
+                    "strategy_id": "verification-first-v1",
+                    "task_kind": "workflow",
+                }
+            }
+        ),
+    )
+    _patch_graph(monkeypatch, graph)
+    run_id = create_run("thread-strategy", str(workspace), "task")
+
+    await execute_run(run_id, "thread-strategy", "task")
+
+    observation = _observations_for_workspace(workspace)[0]
+    assert observation.task_kind == "workflow"
+    assert observation.approach == "verification-first-v1"

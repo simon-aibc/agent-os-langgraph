@@ -13,6 +13,7 @@ from agent_os.schemas import (
     PlanArtifact,
     ToolExecutionResult,
 )
+from agent_os.strategies import StrategyHint
 
 PlanField = str | PlanArtifact | ArchitectBrief | None
 ResultField = str | ExecutionResult | ExecutorReport | None
@@ -49,6 +50,7 @@ class SimonState(TypedDict):
     human_feedback: str | None
     hot_context: str | None
     observation_context: NotRequired[str | None]
+    strategy_hint: NotRequired[StrategyHint | None]
     conversation_summary: NotRequired[str | None]
 
     # R7a fields

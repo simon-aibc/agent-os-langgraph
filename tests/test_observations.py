@@ -100,7 +100,7 @@ def test_advisory_retrieval_is_bounded_relevant_and_not_unknown(tmp_path: Path) 
     assert "not relevant" not in context
 
 
-def test_runtime_initial_state_injects_only_labelled_advisory_evidence(
+def test_runtime_initial_state_injects_fixed_strategy_not_raw_evidence(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -113,12 +113,13 @@ def test_runtime_initial_state_injects_only_labelled_advisory_evidence(
     record = _record(store, "standalone")
     store.record_outcome(record.observation_id, signal="edited", evidence="Operator refined it")
 
-    state = runtime.initial_state("memory_write create note.md :: private task text")
+    state = runtime.initial_state("private task text", run_id="run-strategy")
 
-    context = str(state["observation_context"])
-    assert "Historical outcome evidence" in context
-    assert "Operator refined it" in context
-    assert "private task text" not in context
+    assert state["observation_context"] is None
+    hint = state["strategy_hint"]
+    assert hint is not None
+    assert "Operator refined it" not in hint.directive
+    assert "private task text" not in hint.directive
 
 
 @pytest.mark.anyio

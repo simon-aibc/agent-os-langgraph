@@ -13,10 +13,10 @@ from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
 from agent_os.observations import (
     observation_workspace_id,
     open_observation_store,
-    render_advisory_context,
 )
 from agent_os.policy import LocalPolicy
 from agent_os.routing import build_runtime_config
+from agent_os.strategies import select_strategy
 from agent_os.workspace import (
     ComposedWorkspace,
     compose_workspace,
@@ -66,7 +66,12 @@ def runtime_policy_for_session(session_key: str | None) -> LocalPolicy:
     return LocalPolicy(store=open_permission_store(), session_key=session_key)
 
 
-def initial_state(task: str) -> dict[str, object]:
+def initial_state(
+    task: str,
+    *,
+    run_id: str | None = None,
+    strategy_override: str | None = None,
+) -> dict[str, object]:
     runtime = composed_workspace()
     backend_binding = (
         runtime.backend_binding
@@ -75,11 +80,15 @@ def initial_state(task: str) -> dict[str, object]:
     )
     hot_context = runtime.hot_context if runtime is not None else None
     workspace = runtime.workspace if runtime is not None else None
-    task_kind = _task_kind_for_input(task)
-    observation_context = render_advisory_context(
-        open_observation_store(workspace),
+    task_kind = task_kind_for_input(task)
+    selection = select_strategy(
+        # WebSocket/chat inputs do not yet have a durable run id, so they use
+        # the fixed fallback rather than opening a store they cannot attribute.
+        open_observation_store(workspace) if run_id is not None else None,
         workspace_id=observation_workspace_id(workspace),
         task_kind=task_kind,
+        run_id=run_id,
+        explicit_strategy_id=strategy_override,
     )
     return {
         "messages": [HumanMessage(content=task)],
@@ -88,13 +97,16 @@ def initial_state(task: str) -> dict[str, object]:
         "executor_output": None,
         "human_feedback": None,
         "hot_context": hot_context,
-        "observation_context": observation_context,
+        # Raw outcome evidence stays review-only; the architect gets only a
+        # fixed, structured directive selected from aggregated labels.
+        "observation_context": None,
+        "strategy_hint": selection.hint,
         "conversation_summary": None,
         "backend_binding": backend_binding,
     }
 
 
-def _task_kind_for_input(task: str) -> str:
+def task_kind_for_input(task: str) -> str:
     """Classify only a known native command; never persist the task itself."""
     return "memory_write" if task.lstrip().lower().startswith("memory_write") else "workflow"
 
