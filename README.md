@@ -3,7 +3,6 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11-3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-![Tests: 586 passing](https://img.shields.io/badge/tests-586%20passing-brightgreen.svg)
 [![Release](https://img.shields.io/github/v/release/simon-aibc/agent-os-langgraph)](https://github.com/simon-aibc/agent-os-langgraph/releases/latest)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
@@ -13,7 +12,7 @@ deterministic tools, read-only architect planning, human approval gates,
 sandbox-scoped execution, durable runtime state, stable extension APIs, and
 self-hosted operation.
 
-**Current release:** [v2.0.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.0.0) |
+**Current release:** [v2.2.1](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.2.1) |
 [Changelog](CHANGELOG.md) |
 [Product specification](docs/PRD.md) |
 [Architecture](docs/architecture.md) |
@@ -69,17 +68,26 @@ flowchart TD
     supervisor -->|"execution complete"| END
 ```
 
-### What v2.0.0 Demonstrates
+### What v2.2.1 Ships
 
 | Area | Capability | Why it matters |
 |---|---|---|
 | Runtime | Runtime API, run ledger, SSE event stream, approve/cancel | External dashboards and operators can observe and control runs |
 | Persistence | SQLite checkpoints, separate run/scheduler databases | Work survives restarts without cross-locking the graph checkpointer |
 | Control | Architect, human gate, policy engine, executor boundary | Agent-planned side effects are reviewable and auditable |
-| Memory | Connector framework, gated write path, hot context | Private memory can be attached without committing private data |
+| Memory | Connector framework, gated write path, hot context, native `memory_write` | Private memory can be attached with explicit, scoped consent |
+| Evidence | Structured outcome observations and sanitized strategy assignments | Planning can use labelled evidence without exposing raw task or model data |
 | Scheduling | Local cron/interval schedules for runs and briefs | Long-running self-hosted instances can fire background work |
 | Self-hosting | Docker Compose backend + digest-pinned console image | A fresh clone can run the runtime and operator console locally |
 | Extensions | Stable `agent_os.api`, `py.typed`, conformance tests | Community users can build connectors, skills, backends, and policies |
+
+The v2.x learning surface is deliberately bounded. v2.1.0 adds explicit,
+user-taught permission memory for exact memory-write scopes. v2.2.0 adds
+structured outcome evidence and deterministic selection among three fixed,
+versioned planning strategies; v2.2.1 preserves the original selection reason
+and sanitized decision snapshot for replay. These features do not claim
+autonomous self-learning, unrestricted strategy invention, or autonomous
+changes to permissions and execution safety.
 
 ### Public vs Private Boundary
 
@@ -248,6 +256,7 @@ Useful endpoints include:
 | `GET /api/graph` | Return memory graph nodes/edges when a memory connector is configured |
 | `GET /api/observations` | List bounded structured outcome evidence for the active workspace |
 | `POST /api/observations/{id}/outcome` | Record an explicit accepted, rejected, or edited outcome |
+| `GET /api/observations/assignments/{run_id}` | Inspect the sanitized strategy assignment trace for a run |
 
 Terminal runs create an `unknown` observation only; completion never implies
 user acceptance. Operators can inspect or label observations with
@@ -256,6 +265,10 @@ Labelled outcomes can select only a fixed, versioned planning strategy for the
 same workspace and task kind. Raw evidence is never added to the architect
 prompt, and strategy selection cannot alter permissions, invoke tools, or make
 autonomous execution changes.
+
+Assignment decisions can be inspected after a run with
+`agent-os observations assignment <run_id>`; the record includes the original
+selection reason and sanitized evidence summary, not raw task or model data.
 
 The API is localhost-first and is not designed to be exposed directly to the
 internet.
@@ -355,9 +368,13 @@ The first public backbone arc is complete through v2.0.0:
   backend container
 - v1.9 console: public multi-arch operator console image
 - v2.0: stable extension API and one-command self-host Compose
+- v2.1: scoped, user-taught memory permissions with workspace isolation
+- v2.2: structured outcome evidence and bounded adaptive planning
+- v2.2.1: audit-trace integrity for strategy assignment replay
 
-Current v2.x work is focused on community adoption and private deployment
-integration rather than expanding the public core by default. See
+Current v2.x work is focused on community adoption, operational hardening, and
+private deployment integration rather than expanding the public core by
+default. See
 [docs/roadmap.md](docs/roadmap.md) for the live roadmap and public/private
 boundary.
 

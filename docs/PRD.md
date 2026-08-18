@@ -1,11 +1,11 @@
 # Agent OS LangGraph - public product specification
 
-- **Current version:** 2.0.0
+- **Current version:** 2.2.1
 - **Status:** Released
 - **License:** MIT
 - **Runtime:** Python 3.11+
 - **Repository:** https://github.com/simon-aibc/agent-os-langgraph
-- **Quality gate:** 586 offline tests, `pytest -W error`, Ruff, Python 3.11/3.12 CI
+- **Quality gate:** offline tests with `pytest -W error`, Ruff, dependency checks, and Python 3.11/3.12 CI
 
 ## 1. Product summary
 
@@ -25,7 +25,14 @@ to provide operating-system isolation:
 - native, MCP, API-model, and subscription-CLI extension points;
 - Runtime API, run ledger, scheduler, and self-host Compose for long-running
   operation;
+- explicit, workspace-scoped permission memory for native memory writes;
+- structured outcome observations and bounded, deterministic strategy selection;
 - stable `agent_os.api` contracts for community and private extensions.
+
+The v2.2 planning loop is intentionally bounded: it selects only fixed,
+versioned strategies from structured evidence. Agent OS does not claim
+autonomous self-learning, unrestricted strategy invention, or autonomous
+changes to permissions and execution safety.
 
 ## 2. Target users
 
@@ -129,6 +136,23 @@ For a semantic request such as "add type hints and verify compilation":
 - Architect, executor, router, dispatcher, and checkpointer implementations
   can be injected for tests or deployment-specific behavior.
 
+### Permission memory and outcome evidence
+
+- Native `memory_write` actions use explicit human outcomes (`approved`,
+  `session`, `always_approve`, `always_deny`, or rejection).
+- Persistent rules are limited to exact connector, mode, and note-reference
+  scopes and are isolated per workspace.
+- Terminal Runtime runs record a bounded `unknown` observation; operators may
+  label it `accepted`, `rejected`, or `edited`.
+- For the `workflow` task kind, the selector chooses only the fixed,
+  versioned strategies `default-v1`, `verification-first-v1`, or
+  `concise-plan-v1` using deterministic explicit, evidence-backed,
+  exploration, and default precedence.
+- v2.2.1 preserves the original selection reason and a sanitized decision
+  snapshot across replay. Raw task content, model output, tool arguments, and
+  memory contents are not stored in observation or assignment evidence; raw
+  outcome evidence is never added to the architect prompt.
+
 ## 5. Security requirements and limits
 
 - Secrets and credential-like environment variables are removed from child
@@ -161,7 +185,7 @@ Claude-only, Codex-only, and mixed Claude/Codex role configurations are valid.
 Other agent CLIs require a new delegator that implements the same structured
 contracts; they are not automatically supported by accepting a model name.
 
-## 7. Non-goals for v2.0
+## 7. Non-goals for v2.x
 
 - OS-level isolation for untrusted code.
 - Hosted multi-user service or distributed checkpoint database.
@@ -171,6 +195,10 @@ contracts; they are not automatically supported by accepting a model name.
 - Supported adapters for Hermes, Antigravity, or arbitrary third-party agent
   CLIs without enforceable noninteractive contracts and permission modes.
 - Display of private model reasoning or chain-of-thought.
+- Autonomous self-improvement or a general-purpose behavioral learning system;
+  outcome evidence only selects the fixed planning strategies documented above.
+- Centralized enterprise governance, immutable compliance audit, or SOC 2
+  readiness; the shipped audit trace is local and workspace-scoped.
 
 ## 8. Release acceptance
 
