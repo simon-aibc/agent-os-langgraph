@@ -706,3 +706,69 @@ def test_bind_localhost_default():
     args = parser.parse_args(["serve"])
     assert args.host == "127.0.0.1"
     assert args.port == 4680
+
+
+def test_get_strategy_assignment_api_and_workspace_scoping(tmp_path, monkeypatch):
+    from agent_os.observations import SqliteObservationStore
+    from agent_os.server import runtime
+
+    database = tmp_path / "observations.db"
+    monkeypatch.setenv("AGENT_OS_OBSERVATIONS_DB", str(database))
+    monkeypatch.setattr(runtime, "composed_workspace", lambda: None)
+    store = SqliteObservationStore(str(database))
+
+    summary = {
+        "labelled_counts": {"default-v1": 7, "verification-first-v1": 6},
+        "scores": {"default-v1": 0.43, "verification-first-v1": 0.83},
+        "winner": "verification-first-v1",
+        "threshold_met": True,
+        "margin": 0.40,
+    }
+    store.assign_strategy(
+        workspace_id="standalone",
+        task_kind="workflow",
+        run_id="audit-run-123",
+        strategy_id="verification-first-v1",
+        strategy_version=1,
+        selection_reason="evidence_backed",
+        selector_version="v1.0",
+        evidence_summary=summary,
+    )
+    store.assign_strategy(
+        workspace_id="other-workspace",
+        task_kind="workflow",
+        run_id="other-run-456",
+        strategy_id="concise-plan-v1",
+        strategy_version=1,
+        selection_reason="explicit",
+        selector_version="v1.0",
+        evidence_summary=None,
+    )
+
+    # 404 on unknown run_id
+    resp_404 = client.get("/api/observations/assignments/nonexistent")
+    assert resp_404.status_code == 404
+    assert resp_404.json()["detail"] == "Strategy assignment not found"
+
+    # 404 on cross-workspace access
+    resp_other = client.get("/api/observations/assignments/other-run-456")
+    assert resp_other.status_code == 404
+
+    # 200 on matching workspace
+    resp_ok = client.get("/api/observations/assignments/audit-run-123")
+    assert resp_ok.status_code == 200
+    data = resp_ok.json()
+    assert data["run_id"] == "audit-run-123"
+    assert data["workspace_id"] == "standalone"
+    assert data["strategy_id"] == "verification-first-v1"
+    assert data["strategy_version"] == 1
+    assert data["selection_reason"] == "evidence_backed"
+    assert data["selector_version"] == "v1.0"
+    assert data["evidence_summary"] == summary
+    assert "selected_at" in data
+
+    del store
+    import gc
+
+    gc.collect()
+

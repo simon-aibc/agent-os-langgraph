@@ -701,6 +701,21 @@ def record_observation_outcome_endpoint(
         raise HTTPException(status_code=500, detail="Failed to record observation outcome") from exc
 
 
+@app.get("/api/observations/assignments/{run_id}")
+def get_strategy_assignment_endpoint(run_id: str) -> dict[str, object]:
+    """Retrieve strategy assignment audit record for the active workspace."""
+    try:
+        store, workspace_id = _runtime_observation_store()
+        assignment = store.get_strategy_assignment(run_id)
+        if assignment is None or assignment.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Strategy assignment not found")
+        return assignment.to_dict()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read strategy assignment") from exc
+
+
 @app.websocket("/api/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
     if _private_api_access_error(websocket) is not None:
