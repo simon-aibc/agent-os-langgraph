@@ -7,6 +7,7 @@ from langgraph.types import Command
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import create_run, get_run, list_events
 from agent_os.schemas import ToolExecutionResult
+from agent_os.server import run_executor
 from agent_os.server.run_executor import execute_run
 
 
@@ -71,17 +72,16 @@ def _patch_graph(monkeypatch, graph: FakeGraph) -> None:
     monkeypatch.setattr("agent_os.graph.build_graph", build_graph)
 
 
-def _observations_for_workspace(workspace) -> list[object]:
+def _observations_for_store(store_path, workspace) -> list[object]:
     from agent_os.observations import SqliteObservationStore, observation_workspace_id
 
-    return SqliteObservationStore(str(workspace / "observations.db")).list(
+    return SqliteObservationStore(str(store_path)).list(
         workspace_id=observation_workspace_id(workspace)
     )
 
 
 @pytest.mark.anyio
 async def test_execute_run_translates_node_token_and_result_events(runs_db, monkeypatch):
-    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
     graph = FakeGraph(
         [
             {"event": "on_chain_start", "name": "planner"},
@@ -121,7 +121,7 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
     ]
     assert events[0]["payload"] == {"name": "planner", "event": "on_chain_start"}
     assert events[1]["payload"] == {"content": "Hel"}
-    observations = _observations_for_workspace(workspace)
+    observations = _observations_for_store(runs_db.parent / "observations.db", None)
     assert len(observations) == 1
     assert observations[0].outcome_signal == "unknown"
     assert observations[0].outcome_evidence == "terminal_status=completed"
@@ -251,7 +251,6 @@ async def test_execute_run_records_error_path(runs_db, monkeypatch):
 
 @pytest.mark.anyio
 async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, monkeypatch):
-    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
     secret = "TOP-SECRET-task-and-output"
     graph = FakeGraph(
         [],
@@ -272,7 +271,7 @@ async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, mon
 
     await execute_run(run_id, "thread-private", f"task {secret}")
 
-    observation = _observations_for_workspace(workspace)[0]
+    observation = _observations_for_store(runs_db.parent / "observations.db", None)[0]
     serialized = str(observation.to_dict())
     assert secret not in serialized
     assert observation.task_kind == "memory_write"
@@ -283,7 +282,30 @@ async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, mon
 async def test_observation_failure_does_not_change_terminal_run_status(runs_db, monkeypatch):
     graph = FakeGraph([], _completed_snapshot())
     _patch_graph(monkeypatch, graph)
-    monkeypatch.setattr("agent_os.server.run_executor.open_observation_store", lambda _: None)
+    from agent_os import server
+    from agent_os.policy import LocalPolicy
+
+    monkeypatch.setattr(
+        server.runtime,
+        "composed_workspace",
+        lambda: (_ for _ in ()).throw(RuntimeError("workspace unavailable")),
+    )
+    monkeypatch.setattr(
+        run_executor,
+        "runtime_config",
+        lambda thread_id: {"configurable": {"thread_id": thread_id}},
+    )
+    monkeypatch.setattr(
+        run_executor,
+        "runtime_policy_for_session",
+        lambda session_key: LocalPolicy(session_key=session_key),
+    )
+    monkeypatch.setattr(run_executor, "build_runtime_graph", lambda *, checkpointer: graph)
+    monkeypatch.setattr(
+        run_executor,
+        "initial_state",
+        lambda task, **_kwargs: {"task": task},
+    )
     run_id = create_run("thread-no-observation", None, "task")
 
     await execute_run(run_id, "thread-no-observation", "task")
@@ -293,7 +315,6 @@ async def test_observation_failure_does_not_change_terminal_run_status(runs_db, 
 
 @pytest.mark.anyio
 async def test_terminal_observation_uses_selected_strategy(runs_db, monkeypatch):
-    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
     workspace = runs_db.parent / "strategy-workspace"
     workspace.mkdir()
     graph = FakeGraph(
@@ -312,6 +333,56 @@ async def test_terminal_observation_uses_selected_strategy(runs_db, monkeypatch)
 
     await execute_run(run_id, "thread-strategy", "task")
 
-    observation = _observations_for_workspace(workspace)[0]
+    observation = _observations_for_store(runs_db.parent / "observations.db", None)[0]
     assert observation.task_kind == "workflow"
     assert observation.approach == "verification-first-v1"
+
+
+@pytest.mark.anyio
+async def test_terminal_observation_uses_composed_runtime_workspace(
+    runs_db, monkeypatch
+):
+    from agent_os import server
+    from agent_os.observations import observation_workspace_id
+    from agent_os.policy import LocalPolicy
+
+    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
+    execution_workspace = runs_db.parent / "execution-workspace"
+    runtime_workspace = runs_db.parent / "runtime-workspace"
+    execution_workspace.mkdir()
+    runtime_workspace.mkdir()
+    graph = FakeGraph([], _completed_snapshot())
+    _patch_graph(monkeypatch, graph)
+    monkeypatch.setattr(
+        server.runtime,
+        "composed_workspace",
+        lambda: SimpleNamespace(workspace=runtime_workspace),
+    )
+    monkeypatch.setattr(
+        run_executor,
+        "runtime_config",
+        lambda thread_id: {"configurable": {"thread_id": thread_id}},
+    )
+    monkeypatch.setattr(
+        run_executor,
+        "runtime_policy_for_session",
+        lambda session_key: LocalPolicy(session_key=session_key),
+    )
+    monkeypatch.setattr(run_executor, "build_runtime_graph", lambda *, checkpointer: graph)
+    monkeypatch.setattr(
+        run_executor,
+        "initial_state",
+        lambda task, **_kwargs: {"task": task},
+    )
+    run_id = create_run("thread-runtime-workspace", str(execution_workspace), "task")
+
+    await execute_run(run_id, "thread-runtime-workspace", "task")
+
+    observations = _observations_for_store(
+        runtime_workspace / "observations.db", runtime_workspace
+    )
+    assert get_run(run_id)["status"] == "completed"
+    assert len(observations) == 1
+    assert observations[0].workspace_id == observation_workspace_id(runtime_workspace)
+    assert observations[0].workspace_id != observation_workspace_id(execution_workspace)
+    assert not (execution_workspace / "observations.db").exists()

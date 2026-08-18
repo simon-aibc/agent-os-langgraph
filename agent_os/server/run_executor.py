@@ -111,8 +111,11 @@ def _capture_terminal_observation(
     strategy_task_kind = hint_data.get("task_kind") if isinstance(hint_data, dict) else None
     task_kind = str(strategy_task_kind or tool or "workflow")
     approach = str(strategy_id or (f"native_tool:{task_kind}" if tool else "graph_terminal"))
-    workspace = run.get("workspace")
     try:
+        from agent_os.server.runtime import composed_workspace
+
+        runtime = composed_workspace()
+        workspace = runtime.workspace if runtime is not None else None
         store = open_observation_store(workspace)
         if store is None:
             return
