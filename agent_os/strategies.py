@@ -18,6 +18,7 @@ Confidence = Literal["insufficient", "exploratory", "actionable"]
 MIN_LABELLED_PER_STRATEGY: Final = 5
 MIN_ACTIONABLE_SCORE: Final = 0.70
 MIN_ACTIONABLE_LEAD: Final = 0.15
+SELECTOR_VERSION: Final = "v1.0"
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,9 @@ def _hint(
     )
 
 
-def _evidence_winner(patterns: tuple[OutcomePattern, ...]) -> OutcomePattern | None:
+def _evidence_winner(
+    patterns: tuple[OutcomePattern, ...],
+) -> tuple[OutcomePattern, OutcomePattern] | None:
     eligible = [pattern for pattern in patterns if pattern.labelled_count >= MIN_LABELLED_PER_STRATEGY]
     if len(eligible) < 2:
         return None
@@ -107,7 +110,7 @@ def _evidence_winner(patterns: tuple[OutcomePattern, ...]) -> OutcomePattern | N
         return None
     if winner.outcome_score - comparator.outcome_score < MIN_ACTIONABLE_LEAD:
         return None
-    return winner
+    return winner, comparator
 
 
 def select_strategy(
@@ -131,16 +134,24 @@ def select_strategy(
 
     existing = store.get_strategy_assignment(run_id)
     if existing is not None:
-        definition = by_id.get(existing)
+        definition = by_id.get(existing.strategy_id)
         if definition is not None:
-            return StrategySelection(_hint(definition, "default"), ())
+            return StrategySelection(
+                _hint(definition, existing.selection_reason),
+                (),
+            )
 
     if explicit_strategy_id is not None:
+        defn = by_id[explicit_strategy_id]
         strategy_id = store.assign_strategy(
             workspace_id=workspace_id,
             task_kind=task_kind,
             run_id=run_id,
             strategy_id=explicit_strategy_id,
+            strategy_version=defn.version,
+            selection_reason="explicit",
+            selector_version=SELECTOR_VERSION,
+            evidence_summary=None,
         )
         return StrategySelection(_hint(by_id[strategy_id], "explicit"), ())
 
@@ -151,13 +162,26 @@ def select_strategy(
             strategy_ids=tuple(by_id),
         )
     )
-    winner = _evidence_winner(patterns)
-    if winner is not None:
+    winner_match = _evidence_winner(patterns)
+    if winner_match is not None:
+        winner, second = winner_match
+        defn = by_id[winner.strategy_id]
+        evidence_summary = {
+            "labelled_counts": {p.strategy_id: p.labelled_count for p in patterns},
+            "scores": {p.strategy_id: round(p.outcome_score, 4) for p in patterns},
+            "winner": winner.strategy_id,
+            "threshold_met": True,
+            "margin": round(winner.outcome_score - second.outcome_score, 4),
+        }
         strategy_id = store.assign_strategy(
             workspace_id=workspace_id,
             task_kind=task_kind,
             run_id=run_id,
             strategy_id=winner.strategy_id,
+            strategy_version=defn.version,
+            selection_reason="evidence_backed",
+            selector_version=SELECTOR_VERSION,
+            evidence_summary=evidence_summary,
         )
         return StrategySelection(_hint(by_id[strategy_id], "evidence_backed"), patterns)
 
@@ -166,5 +190,7 @@ def select_strategy(
         task_kind=task_kind,
         run_id=run_id,
         strategy_ids=tuple(by_id),
+        strategy_versions={item.strategy_id: item.version for item in definitions},
+        selector_version=SELECTOR_VERSION,
     )
     return StrategySelection(_hint(by_id[strategy_id], "exploration"), patterns)

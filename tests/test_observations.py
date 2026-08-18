@@ -184,3 +184,179 @@ def test_observations_api_uses_private_auth_and_updates_outcome(
     )
     assert updated.status_code == 200
     assert updated.json()["outcome_signal"] == "rejected"
+
+
+def test_migration_from_v220_schema(tmp_path: Path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "v220_observations.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        """
+        CREATE TABLE strategy_assignments (
+            run_id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            task_kind TEXT NOT NULL,
+            strategy_id TEXT NOT NULL,
+            selected_at TEXT NOT NULL,
+            UNIQUE (workspace_id, task_kind, run_id)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO strategy_assignments (run_id, workspace_id, task_kind, strategy_id, selected_at)
+        VALUES ('v220-run', 'ws-test', 'workflow', 'verification-first-v1', '2026-08-18T10:00:00Z')
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    store = _store(db_path)
+    assignment = store.get_strategy_assignment("v220-run")
+    assert assignment is not None
+    assert assignment.run_id == "v220-run"
+    assert assignment.workspace_id == "ws-test"
+    assert assignment.task_kind == "workflow"
+    assert assignment.strategy_id == "verification-first-v1"
+    assert assignment.strategy_version == 1
+    assert assignment.selection_reason == "default"
+    assert assignment.selector_version == "v1.0"
+    assert assignment.evidence_summary is None
+    assert assignment.selected_at == "2026-08-18T10:00:00Z"
+
+
+def test_strategy_assignment_crud_and_workspace_isolation(tmp_path: Path) -> None:
+    store = _store(tmp_path / "observations.db")
+    summary = {
+        "labelled_counts": {"default-v1": 5, "verification-first-v1": 5},
+        "scores": {"default-v1": 0.4, "verification-first-v1": 0.8},
+        "winner": "verification-first-v1",
+        "threshold_met": True,
+        "margin": 0.4,
+    }
+    store.assign_strategy(
+        workspace_id="workspace-a",
+        task_kind="workflow",
+        run_id="run-a",
+        strategy_id="verification-first-v1",
+        strategy_version=1,
+        selection_reason="evidence_backed",
+        selector_version="v1.0",
+        evidence_summary=summary,
+    )
+
+    assignment = store.get_strategy_assignment("run-a")
+    assert assignment is not None
+    assert assignment.run_id == "run-a"
+    assert assignment.workspace_id == "workspace-a"
+    assert assignment.selection_reason == "evidence_backed"
+    assert assignment.evidence_summary == summary
+    assert assignment.to_dict()["strategy_id"] == "verification-first-v1"
+
+    assert store.get_strategy_assignment("nonexistent-run") is None
+
+
+def test_strategy_assignment_evidence_summary_rejects_extra_keys(tmp_path: Path) -> None:
+    store = _store(tmp_path / "observations.db")
+    assignment = {
+        "workspace_id": "workspace-a",
+        "task_kind": "workflow",
+        "run_id": "run-summary",
+        "strategy_id": "verification-first-v1",
+    }
+
+    with pytest.raises(ObservationValidationError, match="must contain exactly"):
+        store.assign_strategy(**assignment, evidence_summary={"task": "raw text"})
+
+
+def test_strategy_assignment_evidence_summary_rejects_wrong_key_set(tmp_path: Path) -> None:
+    store = _store(tmp_path / "observations.db")
+    assignment = {
+        "workspace_id": "workspace-a",
+        "task_kind": "workflow",
+        "run_id": "run-summary",
+        "strategy_id": "verification-first-v1",
+    }
+
+    with pytest.raises(ObservationValidationError, match="must contain exactly"):
+        store.assign_strategy(
+            **assignment,
+            evidence_summary={"labelled_counts": {}, "extra_field": "bad"},
+        )
+
+
+
+def test_strategy_assignment_evidence_summary_accepts_full_shape(tmp_path: Path) -> None:
+    store = _store(tmp_path / "observations.db")
+    assignment = {
+        "workspace_id": "workspace-a",
+        "task_kind": "workflow",
+        "run_id": "run-summary",
+        "strategy_id": "verification-first-v1",
+    }
+    summary = {
+        "labelled_counts": {"default-v1": 5, "verification-first-v1": 6},
+        "scores": {"default-v1": 0.4, "verification-first-v1": 0.8},
+        "winner": "verification-first-v1",
+        "threshold_met": True,
+        "margin": 0.4,
+    }
+    store.assign_strategy(**assignment, evidence_summary=summary)
+    stored = store.get_strategy_assignment("run-summary")
+    assert stored is not None
+    assert stored.evidence_summary == summary
+
+
+@pytest.mark.anyio
+async def test_observations_cli_assignment_subcommand(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    workspace_path = workspace / "workspace.toml"
+    workspace_path.write_text('[workspace]\nname = "observations"\n', encoding="utf-8")
+    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
+    store = _store(workspace / "observations.db")
+    ws_id = observation_workspace_id(workspace)
+    summary = {
+        "labelled_counts": {"default-v1": 7, "verification-first-v1": 6},
+        "scores": {"default-v1": 0.43, "verification-first-v1": 0.83},
+        "winner": "verification-first-v1",
+        "threshold_met": True,
+        "margin": 0.40,
+    }
+    store.assign_strategy(
+        workspace_id=ws_id,
+        task_kind="workflow",
+        run_id="run-audit-cli",
+        strategy_id="verification-first-v1",
+        strategy_version=1,
+        selection_reason="evidence_backed",
+        selector_version="v1.0",
+        evidence_summary=summary,
+    )
+
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=False, color_system=None)
+
+    code = await async_main(
+        ["observations", "assignment", "run-audit-cli", "--workspace", str(workspace_path)],
+        console=console,
+    )
+    assert code == 0
+    text = output.getvalue()
+    assert "run-audit-cli" in text
+    assert "evidence_backed" in text
+    assert "verification-first-v1" in text
+
+    # Missing run returns 1
+    err_output = io.StringIO()
+    err_console = Console(file=err_output, force_terminal=False, color_system=None)
+    missing_code = await async_main(
+        ["observations", "assignment", "unknown-run", "--workspace", str(workspace_path)],
+        console=err_console,
+    )
+    assert missing_code == 1
+    assert "not found" in err_output.getvalue()

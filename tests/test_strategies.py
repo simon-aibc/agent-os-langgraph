@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from agent_os import strategies
 from agent_os.observations import SqliteObservationStore
-from agent_os.strategies import select_strategy
+from agent_os.strategies import StrategyDefinition, select_strategy
 
 
 def _labelled(
@@ -90,6 +91,29 @@ def test_exploration_balances_atomically_and_repeat_run_is_stable(tmp_path: Path
     assert first.hint.strategy_id == selected[0]
 
 
+def test_exploration_persists_selected_strategy_version(tmp_path: Path, monkeypatch) -> None:
+    definition = StrategyDefinition(
+        strategy_id="versioned-exploration-v2",
+        version=2,
+        task_kind="workflow",
+        directive="Use the versioned exploration strategy.",
+    )
+    monkeypatch.setitem(strategies._REGISTRY, "workflow", (definition,))
+    store = SqliteObservationStore(str(tmp_path / "observations.db"))
+
+    selection = select_strategy(
+        store,
+        workspace_id="workspace",
+        task_kind="workflow",
+        run_id="versioned-exploration-run",
+    )
+
+    assignment = store.get_strategy_assignment("versioned-exploration-run")
+    assert assignment is not None
+    assert assignment.strategy_id == selection.hint.strategy_id == definition.strategy_id
+    assert assignment.strategy_version == selection.hint.version == 2
+
+
 def test_explicit_override_and_safe_fallbacks(tmp_path: Path) -> None:
     store = SqliteObservationStore(str(tmp_path / "observations.db"))
     explicit = select_strategy(
@@ -119,3 +143,143 @@ def test_explicit_override_and_safe_fallbacks(tmp_path: Path) -> None:
         )
     assert select_strategy(None, workspace_id="workspace", task_kind="workflow", run_id="none").hint.strategy_id == "default-v1"
     assert select_strategy(store, workspace_id="workspace", task_kind="memory_write", run_id="tool").hint.selection_reason == "default"
+
+
+def test_replay_preserves_evidence_backed_reason_and_sanitized_provenance(tmp_path: Path) -> None:
+    store = SqliteObservationStore(str(tmp_path / "observations.db"))
+    _labelled(store, workspace="alpha", strategy="verification-first-v1", signal="accepted", count=6)
+    _labelled(store, workspace="alpha", strategy="default-v1", signal="rejected", count=7)
+
+    # Initial selection: evidence_backed
+    first = select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="run-evidence")
+    assert first.hint.strategy_id == "verification-first-v1"
+    assert first.hint.selection_reason == "evidence_backed"
+
+    # Replay: must preserve evidence_backed (NOT default)
+    replay = select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="run-evidence")
+    assert replay.hint.strategy_id == "verification-first-v1"
+    assert replay.hint.selection_reason == "evidence_backed"
+
+    # Check persisted StrategyAssignment record
+    assignment = store.get_strategy_assignment("run-evidence")
+    assert assignment is not None
+    assert assignment.strategy_id == "verification-first-v1"
+    assert assignment.strategy_version == 1
+    assert assignment.selection_reason == "evidence_backed"
+    assert assignment.selector_version == "v1.0"
+
+    summary = assignment.evidence_summary
+    assert summary is not None
+    assert set(summary.keys()) == {"labelled_counts", "scores", "winner", "threshold_met", "margin"}
+    assert summary["winner"] == "verification-first-v1"
+    assert summary["threshold_met"] is True
+    assert summary["labelled_counts"] == {"verification-first-v1": 6, "default-v1": 7, "concise-plan-v1": 0}
+    assert summary["scores"]["verification-first-v1"] == 1.0
+    assert summary["scores"]["default-v1"] == 0.0
+
+
+def test_replay_preserves_explicit_override_reason(tmp_path: Path) -> None:
+    store = SqliteObservationStore(str(tmp_path / "observations.db"))
+    first = select_strategy(
+        store,
+        workspace_id="alpha",
+        task_kind="workflow",
+        run_id="run-explicit",
+        explicit_strategy_id="concise-plan-v1",
+    )
+    assert first.hint.strategy_id == "concise-plan-v1"
+    assert first.hint.selection_reason == "explicit"
+
+    replay = select_strategy(
+        store,
+        workspace_id="alpha",
+        task_kind="workflow",
+        run_id="run-explicit",
+    )
+    assert replay.hint.strategy_id == "concise-plan-v1"
+    assert replay.hint.selection_reason == "explicit"
+
+    assignment = store.get_strategy_assignment("run-explicit")
+    assert assignment is not None
+    assert assignment.selection_reason == "explicit"
+    assert assignment.evidence_summary is None
+
+
+def test_replay_preserves_exploration_reason(tmp_path: Path) -> None:
+    store = SqliteObservationStore(str(tmp_path / "observations.db"))
+    first = select_strategy(
+        store,
+        workspace_id="alpha",
+        task_kind="workflow",
+        run_id="run-exploration",
+    )
+    assert first.hint.selection_reason == "exploration"
+
+    replay = select_strategy(
+        store,
+        workspace_id="alpha",
+        task_kind="workflow",
+        run_id="run-exploration",
+    )
+    assert replay.hint.strategy_id == first.hint.strategy_id
+    assert replay.hint.selection_reason == "exploration"
+
+    assignment = store.get_strategy_assignment("run-exploration")
+    assert assignment is not None
+    assert assignment.selection_reason == "exploration"
+    assert assignment.evidence_summary is None
+
+
+def test_audit_snapshot_contains_no_raw_text(tmp_path: Path) -> None:
+    store = SqliteObservationStore(str(tmp_path / "observations.db"))
+    # Create observations with raw task text, feedback, evidence
+    obs = store.create(
+        workspace_id="alpha",
+        run_id="raw-run-1",
+        thread_id="thread-secret",
+        task_kind="workflow",
+        approach="default-v1",
+        outcome_signal="unknown",
+        outcome_evidence="secret task instructions and private tokens",
+        source="server.run",
+    )
+    store.record_outcome(obs.observation_id, signal="rejected", evidence="private feedback on security credentials")
+
+    for idx in range(5):
+        obs2 = store.create(
+            workspace_id="alpha",
+            run_id=f"raw-run-v-{idx}",
+            thread_id="thread-secret",
+            task_kind="workflow",
+            approach="verification-first-v1",
+            outcome_signal="unknown",
+            outcome_evidence="super private task content",
+            source="server.run",
+        )
+        store.record_outcome(obs2.observation_id, signal="accepted", evidence="great result")
+
+    for idx in range(4):
+        obs3 = store.create(
+            workspace_id="alpha",
+            run_id=f"raw-run-d-{idx}",
+            thread_id="thread-secret",
+            task_kind="workflow",
+            approach="default-v1",
+            outcome_signal="unknown",
+            outcome_evidence="other confidential data",
+            source="server.run",
+        )
+        store.record_outcome(obs3.observation_id, signal="rejected", evidence="bad result")
+
+    select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="audit-run")
+    assignment = store.get_strategy_assignment("audit-run")
+    assert assignment is not None
+    assert assignment.selection_reason == "evidence_backed"
+    summary = assignment.evidence_summary
+    assert summary is not None
+
+    import json
+    summary_json = json.dumps(summary)
+    # Check no raw text strings leaked
+    for forbidden in ["secret", "private", "confidential", "credentials", "feedback", "instructions"]:
+        assert forbidden not in summary_json.lower()

@@ -5,6 +5,15 @@ for public releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Audit trace integrity & evidence provenance**: `strategy_assignments` table adds `strategy_version`, `selection_reason`, `selector_version`, and sanitized `evidence_summary` JSON blob columns with automatic schema migration.
+- **Audit read API & CLI**: added `GET /api/observations/assignments/{run_id}` endpoint and `agent-os observations assignment <run_id>` CLI subcommand for inspecting strategy assignment audit records with workspace isolation.
+
+### Fixed
+
+- Preserved original `selection_reason` (`explicit`, `evidence_backed`, `exploration`, `default`) on workflow replay and resume instead of hardcoding `default`.
+
 ## [2.2.0] — 2026-08-18
 
 ### Added

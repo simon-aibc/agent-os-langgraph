@@ -196,6 +196,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Path to workspace.toml or a workspace directory.",
     )
+    p_observation_assignment = observation_sub.add_parser(
+        "assignment",
+        help="Get strategy assignment audit record for a run.",
+    )
+    p_observation_assignment.add_argument("run_id", help="Run ID")
+    p_observation_assignment.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Output as JSON",
+    )
+    p_observation_assignment.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
 
     return parser
 
@@ -1060,6 +1076,25 @@ def _handle_observations_command(args: argparse.Namespace, formatter: EventForma
             return 2
         except Exception as error:
             formatter.print_error(f"Failed to record outcome: {error}")
+            return 2
+
+    if args.observations_command == "assignment":
+        try:
+            assignment = store.get_strategy_assignment(args.run_id)
+            if assignment is None or assignment.workspace_id != workspace_id:
+                formatter.print_error("Strategy assignment not found.")
+                return 1
+            if getattr(args, "json_output", False):
+                print(_json.dumps(assignment.to_dict(), indent=2))
+                return 0
+            for key, value in assignment.to_dict().items():
+                if key == "evidence_summary" and value is not None:
+                    formatter.print_info(f"{key}: {_json.dumps(value)}")
+                else:
+                    formatter.print_info(f"{key}: {value}")
+            return 0
+        except Exception as error:
+            formatter.print_error(f"Failed to get strategy assignment: {error}")
             return 2
 
     formatter.print_error("Unknown observations subcommand. See: agent-os observations --help")

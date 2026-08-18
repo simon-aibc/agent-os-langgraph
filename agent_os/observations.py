@@ -60,6 +60,22 @@ class Observation:
 
 
 @dataclass(frozen=True)
+class StrategyAssignment:
+    run_id: str
+    workspace_id: str
+    task_kind: str
+    strategy_id: str
+    strategy_version: int
+    selection_reason: Literal["explicit", "evidence_backed", "exploration", "default"]
+    selector_version: str
+    evidence_summary: dict | None  # parsed from JSON column
+    selected_at: str
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class OutcomePattern:
     """Aggregate of explicit outcomes for one workspace/task/strategy tuple."""
 
@@ -151,6 +167,37 @@ def _validate_artifact_refs(value: object) -> list[str]:
     return refs
 
 
+def _validate_evidence_summary(summary: dict) -> None:
+    """Ensure strategy evidence remains aggregate-only and JSON-safe."""
+    if not isinstance(summary, dict):
+        raise ObservationValidationError("evidence_summary must be a dictionary")
+    expected_keys = {"labelled_counts", "scores", "winner", "threshold_met", "margin"}
+    if set(summary) != expected_keys:
+        raise ObservationValidationError(
+            "evidence_summary must contain exactly: "
+            "labelled_counts, scores, winner, threshold_met, margin"
+        )
+
+    labelled_counts = summary["labelled_counts"]
+    if not isinstance(labelled_counts, dict) or any(
+        not isinstance(key, str) or type(value) is not int
+        for key, value in labelled_counts.items()
+    ):
+        raise ObservationValidationError("evidence_summary.labelled_counts must be dict[str, int]")
+
+    scores = summary["scores"]
+    if not isinstance(scores, dict) or any(
+        not isinstance(key, str) or type(value) is not float for key, value in scores.items()
+    ):
+        raise ObservationValidationError("evidence_summary.scores must be dict[str, float]")
+    if not isinstance(summary["winner"], str):
+        raise ObservationValidationError("evidence_summary.winner must be a string")
+    if type(summary["threshold_met"]) is not bool:
+        raise ObservationValidationError("evidence_summary.threshold_met must be a boolean")
+    if type(summary["margin"]) is not float:
+        raise ObservationValidationError("evidence_summary.margin must be a float")
+
+
 def _row_to_observation(row: sqlite3.Row) -> Observation:
     refs = json.loads(row["artifact_refs"])
     return Observation(
@@ -223,11 +270,35 @@ class SqliteObservationStore:
                     workspace_id TEXT NOT NULL,
                     task_kind TEXT NOT NULL,
                     strategy_id TEXT NOT NULL,
+                    strategy_version INTEGER NOT NULL DEFAULT 1,
+                    selection_reason TEXT NOT NULL DEFAULT 'default',
+                    selector_version TEXT NOT NULL DEFAULT 'v1.0',
+                    evidence_summary TEXT DEFAULT NULL,
                     selected_at TEXT NOT NULL,
                     UNIQUE (workspace_id, task_kind, run_id)
                 )
                 """
             )
+            existing_cols = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(strategy_assignments)").fetchall()
+            }
+            if "strategy_version" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE strategy_assignments ADD COLUMN strategy_version INTEGER NOT NULL DEFAULT 1"
+                )
+            if "selection_reason" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE strategy_assignments ADD COLUMN selection_reason TEXT NOT NULL DEFAULT 'default'"
+                )
+            if "selector_version" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE strategy_assignments ADD COLUMN selector_version TEXT NOT NULL DEFAULT 'v1.0'"
+                )
+            if "evidence_summary" not in existing_cols:
+                conn.execute(
+                    "ALTER TABLE strategy_assignments ADD COLUMN evidence_summary TEXT DEFAULT NULL"
+                )
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS strategy_assignments_scope
@@ -416,12 +487,33 @@ class SqliteObservationStore:
             )
         return patterns
 
-    def get_strategy_assignment(self, run_id: str) -> str | None:
+    def get_strategy_assignment(self, run_id: str) -> StrategyAssignment | None:
         with contextlib.closing(self._connect()) as conn:
             row = conn.execute(
-                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
+                """
+                SELECT run_id, workspace_id, task_kind, strategy_id,
+                       strategy_version, selection_reason, selector_version,
+                       evidence_summary, selected_at
+                FROM strategy_assignments
+                WHERE run_id = ?
+                """,
+                (run_id,),
             ).fetchone()
-        return str(row["strategy_id"]) if row is not None else None
+        if row is None:
+            return None
+        raw_evidence = row["evidence_summary"]
+        evidence_dict = json.loads(raw_evidence) if raw_evidence else None
+        return StrategyAssignment(
+            run_id=row["run_id"],
+            workspace_id=row["workspace_id"],
+            task_kind=row["task_kind"],
+            strategy_id=row["strategy_id"],
+            strategy_version=int(row["strategy_version"]),
+            selection_reason=row["selection_reason"],
+            selector_version=row["selector_version"],
+            evidence_summary=evidence_dict if isinstance(evidence_dict, dict) else None,
+            selected_at=row["selected_at"],
+        )
 
     def assign_strategy(
         self,
@@ -430,21 +522,40 @@ class SqliteObservationStore:
         task_kind: str,
         run_id: str,
         strategy_id: str,
+        strategy_version: int = 1,
+        selection_reason: str = "default",
+        selector_version: str = "v1.0",
+        evidence_summary: dict | None = None,
     ) -> str:
         """Persist an explicit or evidence-backed selection idempotently."""
+        if evidence_summary is not None:
+            _validate_evidence_summary(evidence_summary)
         with contextlib.closing(self._connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
             ).fetchone()
             if row is None:
+                raw_evidence = json.dumps(evidence_summary) if evidence_summary is not None else None
                 conn.execute(
                     """
                     INSERT INTO strategy_assignments
-                    (run_id, workspace_id, task_kind, strategy_id, selected_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    (run_id, workspace_id, task_kind, strategy_id,
+                     strategy_version, selection_reason, selector_version,
+                     evidence_summary, selected_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (run_id, workspace_id, task_kind, strategy_id, _now()),
+                    (
+                        run_id,
+                        workspace_id,
+                        task_kind,
+                        strategy_id,
+                        strategy_version,
+                        selection_reason,
+                        selector_version,
+                        raw_evidence,
+                        _now(),
+                    ),
                 )
                 conn.commit()
                 return strategy_id
@@ -458,10 +569,19 @@ class SqliteObservationStore:
         task_kind: str,
         run_id: str,
         strategy_ids: tuple[str, ...],
+        strategy_versions: dict[str, int],
+        selector_version: str = "v1.0",
     ) -> str:
         """Atomically choose a least-assigned strategy with stable tie breaking."""
         if not strategy_ids:
             raise ObservationValidationError("strategy_ids must not be empty")
+        if any(
+            strategy_id not in strategy_versions
+            or type(strategy_versions[strategy_id]) is not int
+            or strategy_versions[strategy_id] < 1
+            for strategy_id in strategy_ids
+        ):
+            raise ObservationValidationError("strategy_versions must provide a positive integer for every strategy")
         with contextlib.closing(self._connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
@@ -486,10 +606,22 @@ class SqliteObservationStore:
             conn.execute(
                 """
                 INSERT INTO strategy_assignments
-                (run_id, workspace_id, task_kind, strategy_id, selected_at)
-                VALUES (?, ?, ?, ?, ?)
+                (run_id, workspace_id, task_kind, strategy_id,
+                 strategy_version, selection_reason, selector_version,
+                 evidence_summary, selected_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_id, workspace_id, task_kind, selected, _now()),
+                (
+                    run_id,
+                    workspace_id,
+                    task_kind,
+                    selected,
+                    strategy_versions[selected],
+                    "exploration",
+                    selector_version,
+                    None,
+                    _now(),
+                ),
             )
             conn.commit()
             return selected
