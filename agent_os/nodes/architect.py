@@ -108,6 +108,9 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
     prompt_parts = [prompt]
     if hot_context:
         prompt_parts.append(f"## Context (from vault)\n{hot_context}")
+    observation_context = state.get("observation_context")
+    if observation_context:
+        prompt_parts.append(str(observation_context))
     if new_summary:
         prompt_parts.append(f"## Conversation so far (summary)\n{new_summary}")
         

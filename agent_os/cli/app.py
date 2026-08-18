@@ -166,6 +166,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workspace.toml or a workspace directory.",
     )
 
+    p_observations = subparsers.add_parser(
+        "observations",
+        help="Review structured outcome evidence (does not change agent policy).",
+    )
+    observation_sub = p_observations.add_subparsers(dest="observations_command")
+    p_observation_list = observation_sub.add_parser("list", help="List workspace observations")
+    p_observation_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+    p_observation_list.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+    p_observation_list.add_argument("--task-kind", help="Filter by task kind")
+    p_observation_record = observation_sub.add_parser(
+        "record-outcome",
+        help="Record an explicit accepted, rejected, or edited outcome.",
+    )
+    p_observation_record.add_argument("observation_id", help="Observation ID")
+    p_observation_record.add_argument(
+        "--signal",
+        required=True,
+        choices=["accepted", "rejected", "edited"],
+        help="Explicit operator outcome",
+    )
+    p_observation_record.add_argument("--evidence", help="Short operator-supplied evidence")
+    p_observation_record.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+
     return parser
 
 
@@ -176,7 +207,9 @@ def _generate_thread_id() -> str:
 
 
 def _normalize_argv(argv: list[str]) -> list[str]:
-    commands = ("run", "doctor", "chat", "sessions", "serve", "brief", "schedule", "permissions")
+    commands = (
+        "run", "doctor", "chat", "sessions", "serve", "brief", "schedule", "permissions", "observations"
+    )
     if not argv:
         return ["run"]
     if argv[0] in commands:
@@ -958,6 +991,81 @@ def _handle_permissions_command(args: argparse.Namespace, formatter: EventFormat
     return 2
 
 
+def _open_observations_store_for_command(workspace_path: str | None) -> tuple[Any, str]:
+    from agent_os.observations import observation_workspace_id, open_observation_store
+    from agent_os.workspace import load_workspace
+
+    workspace = load_workspace(workspace_path) if workspace_path else None
+    store = open_observation_store(workspace)
+    if store is None:
+        raise RuntimeError("Observations store is unavailable")
+    return store, observation_workspace_id(workspace)
+
+
+def _handle_observations_command(args: argparse.Namespace, formatter: EventFormatter) -> int:
+    import json as _json
+
+    from agent_os.observations import ObservationValidationError
+
+    try:
+        store, workspace_id = _open_observations_store_for_command(
+            getattr(args, "workspace", None)
+        )
+    except Exception as error:
+        formatter.print_error(f"Failed to open observations store: {error}")
+        return 2
+
+    if args.observations_command == "list":
+        try:
+            observations = store.list(
+                workspace_id=workspace_id,
+                task_kind=getattr(args, "task_kind", None),
+            )
+        except Exception as error:
+            formatter.print_error(f"Failed to list observations: {error}")
+            return 2
+        if getattr(args, "json_output", False):
+            print(_json.dumps([item.to_dict() for item in observations], indent=2))
+            return 0
+        if not observations:
+            formatter.print_info("No structured observations found.")
+            return 0
+        for item in observations:
+            formatter.print_info(
+                f"{item.observation_id}  [{item.outcome_signal}]  "
+                f"{item.task_kind}  {item.approach}"
+            )
+        return 0
+
+    if args.observations_command == "record-outcome":
+        try:
+            observation = store.get(args.observation_id)
+            if observation is None or observation.workspace_id != workspace_id:
+                formatter.print_error("Observation not found.")
+                return 1
+            updated = store.record_outcome(
+                args.observation_id,
+                signal=args.signal,
+                evidence=args.evidence,
+            )
+            if updated is None:
+                formatter.print_error("Observation not found.")
+                return 1
+            formatter.print_info(
+                f"Recorded {updated.outcome_signal} outcome for {updated.observation_id}."
+            )
+            return 0
+        except ObservationValidationError as error:
+            formatter.print_error(f"Invalid outcome: {error}")
+            return 2
+        except Exception as error:
+            formatter.print_error(f"Failed to record outcome: {error}")
+            return 2
+
+    formatter.print_error("Unknown observations subcommand. See: agent-os observations --help")
+    return 2
+
+
 async def async_main(
     argv: list[str] | None = None,
     *,
@@ -977,6 +1085,9 @@ async def async_main(
 
     if args.command == "permissions":
         return _handle_permissions_command(args, EventFormatter(console=console))
+
+    if args.command == "observations":
+        return _handle_observations_command(args, EventFormatter(console=console))
 
     if args.command == "sessions":
         from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver

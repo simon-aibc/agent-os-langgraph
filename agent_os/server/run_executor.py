@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from agent_os import runs
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.cli.app import _pending_interrupt
+from agent_os.observations import observation_workspace_id, open_observation_store
 from agent_os.policy import LocalPolicy, policy_scope
 from agent_os.sandbox import sandbox_scope
 from agent_os.server.runtime import (
@@ -89,6 +90,42 @@ def terminal_tool_failure(snapshot: object) -> tuple[str, str] | None:
     return status, message
 
 
+def _capture_terminal_observation(
+    run: dict[str, Any],
+    snapshot: object | None,
+    *,
+    terminal_status: str,
+) -> None:
+    """Best-effort, privacy-bounded terminal evidence for later user review.
+
+    This intentionally excludes the task, model output, tool arguments, and
+    serialized tool output.  A terminal execution is not user acceptance, so
+    every automatically captured record starts as ``unknown``.
+    """
+    result = _result_payload(snapshot).get("tool_result") if snapshot is not None else None
+    tool = result.get("tool") if isinstance(result, dict) else None
+    task_kind = str(tool) if isinstance(tool, str) and tool else "workflow"
+    approach = f"native_tool:{task_kind}" if tool else "graph_terminal"
+    workspace = run.get("workspace")
+    try:
+        store = open_observation_store(workspace)
+        if store is None:
+            return
+        store.create(
+            workspace_id=observation_workspace_id(workspace),
+            run_id=str(run["run_id"]),
+            thread_id=str(run["thread_id"]),
+            task_kind=task_kind,
+            approach=approach,
+            outcome_signal="unknown",
+            outcome_evidence=f"terminal_status={terminal_status}",
+            source="server.run",
+        )
+    except Exception:
+        # Observation evidence must never change a run's execution outcome.
+        return
+
+
 async def execute_run(
     run_id: str,
     thread_id: str,
@@ -144,13 +181,22 @@ async def execute_run(
                         failure = terminal_tool_failure(snapshot)
                         if failure is None:
                             runs.set_status(run_id, "completed", ended=True)
+                            _capture_terminal_observation(
+                                run, snapshot, terminal_status="completed"
+                            )
                         else:
                             status, message = failure
                             runs.set_status(run_id, status, error=message, ended=True)
+                            _capture_terminal_observation(
+                                run, snapshot, terminal_status=status
+                            )
     except Exception as error:
         message = str(error)
         runs.append_event(run_id, "error", {"message": message})
         runs.set_status(run_id, "error", error=message, ended=True)
+        run = runs.get_run(run_id)
+        if run is not None:
+            _capture_terminal_observation(run, None, terminal_status="error")
     finally:
         if not preserve_session:
             LocalPolicy.clear_session(run_id)

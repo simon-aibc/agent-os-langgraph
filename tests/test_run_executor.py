@@ -50,6 +50,7 @@ def runs_db(tmp_path, monkeypatch):
     monkeypatch.setenv(CHECKPOINT_DB_ENV, str(database_path))
     monkeypatch.setenv("AGENT_OS_SANDBOX", str(tmp_path))
     monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
+    monkeypatch.setenv("AGENT_OS_OBSERVATIONS_DB", str(tmp_path / "observations.db"))
     return database_path
 
 
@@ -70,8 +71,17 @@ def _patch_graph(monkeypatch, graph: FakeGraph) -> None:
     monkeypatch.setattr("agent_os.graph.build_graph", build_graph)
 
 
+def _observations_for_workspace(workspace) -> list[object]:
+    from agent_os.observations import SqliteObservationStore, observation_workspace_id
+
+    return SqliteObservationStore(str(workspace / "observations.db")).list(
+        workspace_id=observation_workspace_id(workspace)
+    )
+
+
 @pytest.mark.anyio
 async def test_execute_run_translates_node_token_and_result_events(runs_db, monkeypatch):
+    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
     graph = FakeGraph(
         [
             {"event": "on_chain_start", "name": "planner"},
@@ -111,6 +121,10 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
     ]
     assert events[0]["payload"] == {"name": "planner", "event": "on_chain_start"}
     assert events[1]["payload"] == {"content": "Hel"}
+    observations = _observations_for_workspace(workspace)
+    assert len(observations) == 1
+    assert observations[0].outcome_signal == "unknown"
+    assert observations[0].outcome_evidence == "terminal_status=completed"
 
 
 @pytest.mark.anyio
@@ -215,6 +229,7 @@ async def test_execute_run_records_interrupt_and_resume_command(runs_db, monkeyp
     events = list_events(run_id)
     assert [event["kind"] for event in events] == ["interrupt"]
     assert events[0]["payload"] == {"prompt": "Review plan"}
+    assert not (runs_db.parent / "observations.db").exists()
 
 
 @pytest.mark.anyio
@@ -232,3 +247,45 @@ async def test_execute_run_records_error_path(runs_db, monkeypatch):
     events = list_events(run_id)
     assert [event["kind"] for event in events] == ["error"]
     assert events[0]["payload"] == {"message": "boom"}
+
+
+@pytest.mark.anyio
+async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, monkeypatch):
+    monkeypatch.delenv("AGENT_OS_OBSERVATIONS_DB", raising=False)
+    secret = "TOP-SECRET-task-and-output"
+    graph = FakeGraph(
+        [],
+        _completed_snapshot(
+            {
+                "tool_result": ToolExecutionResult(
+                    tool="memory_write",
+                    output=secret,
+                    success=True,
+                )
+            }
+        ),
+    )
+    _patch_graph(monkeypatch, graph)
+    workspace = runs_db.parent / "private-workspace"
+    workspace.mkdir()
+    run_id = create_run("thread-private", str(workspace), f"task {secret}")
+
+    await execute_run(run_id, "thread-private", f"task {secret}")
+
+    observation = _observations_for_workspace(workspace)[0]
+    serialized = str(observation.to_dict())
+    assert secret not in serialized
+    assert observation.task_kind == "memory_write"
+    assert observation.approach == "native_tool:memory_write"
+
+
+@pytest.mark.anyio
+async def test_observation_failure_does_not_change_terminal_run_status(runs_db, monkeypatch):
+    graph = FakeGraph([], _completed_snapshot())
+    _patch_graph(monkeypatch, graph)
+    monkeypatch.setattr("agent_os.server.run_executor.open_observation_store", lambda _: None)
+    run_id = create_run("thread-no-observation", None, "task")
+
+    await execute_run(run_id, "thread-no-observation", "task")
+
+    assert get_run(run_id)["status"] == "completed"

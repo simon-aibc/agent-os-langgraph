@@ -22,6 +22,11 @@ from pydantic import BaseModel
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.connectors import MemoryConnector
+from agent_os.observations import (
+    ObservationValidationError,
+    observation_workspace_id,
+    open_observation_store,
+)
 from agent_os.public_concierge import (
     PublicChatRequest,
     PublicChatResponse,
@@ -109,6 +114,11 @@ class CreateRunRequest(BaseModel):
 
 class ApproveRunRequest(BaseModel):
     feedback: str | None = None
+
+
+class RecordObservationOutcomeRequest(BaseModel):
+    signal: str
+    evidence: str | None = None
 
 
 def _public_concierge_rate_limit(request: Request) -> None:
@@ -244,6 +254,18 @@ def _runtime_permission_store() -> Any:
     runtime = composed_workspace()
     workspace = runtime.workspace if runtime is not None else None
     return SqlitePermissionStore(resolve_permission_db_path(workspace))
+
+
+def _runtime_observation_store() -> tuple[Any, str]:
+    """Select the same workspace-scoped evidence store as the active runtime."""
+    from agent_os.server.runtime import composed_workspace
+
+    runtime = composed_workspace()
+    workspace = runtime.workspace if runtime is not None else None
+    store = open_observation_store(workspace)
+    if store is None:
+        raise RuntimeError("Observations store is unavailable")
+    return store, observation_workspace_id(workspace)
 
 
 @app.get("/api/health")
@@ -619,6 +641,53 @@ def revoke_permission_endpoint(permission_key: str, request: Request) -> dict[st
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to revoke permission rule") from exc
+
+
+@app.get("/api/observations")
+def list_observations_endpoint(
+    task_kind: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    """List structured outcome evidence for the active workspace only."""
+    try:
+        store, workspace_id = _runtime_observation_store()
+        return [
+            observation.to_dict()
+            for observation in store.list(
+                workspace_id=workspace_id,
+                task_kind=task_kind,
+                limit=limit,
+            )
+        ]
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read observations store") from exc
+
+
+@app.post("/api/observations/{observation_id}/outcome")
+def record_observation_outcome_endpoint(
+    observation_id: str,
+    request: RecordObservationOutcomeRequest,
+) -> dict[str, object]:
+    """Record an explicit operator outcome; automated runs never infer one."""
+    try:
+        store, workspace_id = _runtime_observation_store()
+        observation = store.get(observation_id)
+        if observation is None or observation.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="Observation not found")
+        updated = store.record_outcome(
+            observation_id,
+            signal=request.signal,  # validated by the store, with one contract source
+            evidence=request.evidence,
+        )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Observation not found")
+        return updated.to_dict()
+    except ObservationValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to record observation outcome") from exc
 
 
 @app.websocket("/api/chat/{thread_id}")
