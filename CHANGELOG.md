@@ -5,6 +5,8 @@ for public releases.
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-08-18
+
 ### Added
 
 - **User-taught memory-write permissions**: explicit one-time, session, always-approve, and always-deny choices; durable SQLite rules with usage counters; local CLI list/revoke commands; and token-gated Runtime API management endpoints.
