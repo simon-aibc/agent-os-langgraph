@@ -5,6 +5,8 @@ for public releases.
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-08-18
+
 ### Added
 
 - **Bounded adaptive planning foundation**: terminal Runtime runs record
