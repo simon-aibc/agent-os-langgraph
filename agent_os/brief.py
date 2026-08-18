@@ -5,6 +5,7 @@ from typing import Any
 from agent_os.connectors import MemoryConnector, MemoryWriteResult, WritableMemory
 from agent_os.hot_context import load_hot_context
 from agent_os.memory_gate import MemoryWriteProposal, gated_write
+from agent_os.policy import PolicyEngine
 
 
 def generate_brief(
@@ -96,7 +97,9 @@ Respond ONLY with the Markdown content for the brief.
 def write_brief(
     connector: WritableMemory,
     brief_md: str,
-    date: str
+    date: str,
+    *,
+    engine: PolicyEngine | None = None,
 ) -> MemoryWriteResult:
     """
     Write the generated brief to the vault via gated_write (which auto-approves AI/Briefs/).
@@ -117,7 +120,7 @@ def write_brief(
     # Wait, the spec says AI/Briefs/ append/create -> "auto".
     
     proposal = MemoryWriteProposal(
-        connector="memory",
+        connector=str(getattr(connector, "name", "memory")),
         ref=ref,
         mode="create",
         content_preview=brief_md[:100] + "...",
@@ -126,4 +129,4 @@ def write_brief(
     
     # Write using gated_write which checks evaluate_write_policy
     # (wait, gated_write signature: gated_write(connector, proposal, content, frontmatter))
-    return gated_write(connector, proposal, brief_md, frontmatter)
+    return gated_write(connector, proposal, brief_md, frontmatter, engine=engine)

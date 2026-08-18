@@ -53,10 +53,18 @@ class MemoryWriteResult:
     mode: str                # "create" | "append" | "overwrite"
     bytes_written: int | None
     committed: bool
+    # A policy rejection is not an I/O exception, but callers still need a
+    # machine-readable way to distinguish it from a successful write.  Native
+    # connectors leave these defaults intact; the memory gate fills them from
+    # the policy execution result when a write never reaches the connector.
+    status: Literal["completed", "failed", "cancelled"] = "completed"
+    error: str | None = None
 
 class WritableMemory(Protocol):
     @property
     def name(self) -> str: ...
+    @property
+    def supported_write_modes(self) -> frozenset[str]: ...
     def write_note(
         self,
         ref: str,
@@ -151,6 +159,8 @@ def _serialize_markdown_with_frontmatter(content: str, frontmatter: dict[str, An
     return "\n".join(fm_lines)
 
 class MarkdownVaultConnector(MemoryConnector):
+    supported_write_modes = frozenset({"append", "create", "overwrite"})
+
     def __init__(self, root_path: str):
         self.root_path = Path(root_path).resolve()
         
@@ -266,6 +276,11 @@ class MarkdownVaultConnector(MemoryConnector):
 
 
 class GbrainConnector(MemoryConnector):
+    # Gbrain currently exposes only ``put_page``, an unconditional upsert.
+    # Do not map the safer create/append vocabulary onto that destructive
+    # primitive; callers must explicitly request overwrite instead.
+    supported_write_modes = frozenset({"overwrite"})
+
     def __init__(self):
         self.url = os.getenv("GBRAIN_URL", "http://localhost:3131/mcp")
         self.token = os.getenv("GBRAIN_TOKEN")
@@ -416,7 +431,12 @@ class GbrainConnector(MemoryConnector):
         return results
 
     def describe_write_side_effect(self, ref: str, mode: str) -> str:
-        return f"put_page to gbrain slug '{ref}' (upsert)"
+        if mode == "overwrite":
+            return f"OVERWRITE gbrain page '{ref}' via put_page upsert"
+        return (
+            f"Gbrain does not support safe {mode} for '{ref}'; "
+            "its available write primitive is an upsert"
+        )
 
     def write_note(
         self,
@@ -425,8 +445,11 @@ class GbrainConnector(MemoryConnector):
         frontmatter: dict[str, Any] | None = None,
         mode: Literal["create", "append", "overwrite"] = "create",
     ) -> MemoryWriteResult:
-        if mode == "append":
-            raise NotImplementedError("GbrainConnector does not support append mode natively yet. Use read then overwrite.")
+        if mode != "overwrite":
+            raise NotImplementedError(
+                "GbrainConnector only supports explicit overwrite: its put_page "
+                "operation is an upsert and cannot safely implement create or append."
+            )
             
         if not ref.startswith("agentos/"):
             ref = f"agentos/{ref}"

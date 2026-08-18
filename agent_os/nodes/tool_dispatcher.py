@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import Literal
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from langgraph.errors import GraphBubbleUp
 from langgraph.graph import END
 from langgraph.types import Command
 from pydantic import BaseModel
@@ -11,7 +12,7 @@ from agent_os.default_registry import build_default_registry, parse_tier1_reques
 from agent_os.nodes.smart_router import classify_tool_request
 from agent_os.output_limits import DISPATCHER_OUTPUT_MAX_BYTES, truncate_utf8
 from agent_os.routing import get_router_mode
-from agent_os.schemas import BashResult, ToolExecutionResult
+from agent_os.schemas import BashResult, ExecutionResult, ToolExecutionResult
 from agent_os.skills import RegisteredSkill, SkillRegistry
 from agent_os.state import SimonState
 
@@ -50,6 +51,12 @@ def _invoke_skill(
 ) -> DispatcherCommand:
     try:
         raw_output = skill.invoke(arguments)
+    except GraphBubbleUp:
+        # ``interrupt()`` uses this control-flow exception.  It must reach
+        # LangGraph unchanged so a policy approval can pause and resume the
+        # actual tool invocation rather than being misreported as routing
+        # escalation.
+        raise
     except Exception as error:
         return _escalate(skill.name, error)
 
@@ -58,9 +65,13 @@ def _invoke_skill(
             "tool_result": ToolExecutionResult(
                 tool=skill.name,
                 output=_serialize_tool_output(raw_output),
-                success=not (
-                    isinstance(raw_output, BashResult)
-                    and raw_output.returncode not in (0, None)
+                success=(
+                    raw_output.success
+                    if isinstance(raw_output, ExecutionResult)
+                    else not (
+                        isinstance(raw_output, BashResult)
+                        and raw_output.returncode not in (0, None)
+                    )
                 ),
             ),
             "router_escalated": False,

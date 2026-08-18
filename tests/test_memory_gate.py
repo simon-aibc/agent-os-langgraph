@@ -1,8 +1,12 @@
 from unittest.mock import patch
 
+import pytest
+
 from agent_os.checkpoints import CHECKPOINT_MODEL_TYPES
-from agent_os.connectors import MarkdownVaultConnector
+from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
 from agent_os.memory_gate import evaluate_write_policy, gated_write
+from agent_os.permission_store import InMemoryPermissionStore
+from agent_os.policy import LocalPolicy
 from agent_os.schemas import MemoryWriteProposal
 
 
@@ -54,7 +58,7 @@ def test_gated_write_approved(tmp_path):
         side_effect="side effect"
     )
     
-    with patch("agent_os.memory_gate.interrupt", return_value="approved"):
+    with patch("agent_os.policy.interrupt", return_value="approved"):
         res = gated_write(connector, proposal, "real content")
         
     assert res.committed is True
@@ -74,9 +78,55 @@ def test_gated_write_rejected(tmp_path):
         side_effect="side effect"
     )
     
-    with patch("agent_os.memory_gate.interrupt", return_value="rejected: no"):
+    with patch("agent_os.policy.interrupt", return_value="rejected: no"):
         res = gated_write(connector, proposal, "real content")
         
     assert res.committed is False
     assert res.bytes_written is None
     assert not (vault / "AI/Decisions/x.md").exists()
+
+
+def test_gated_write_preserves_connector_execution_error():
+    """A connector failure is not converted into an indistinguishable denial."""
+
+    class ExplodingMemory:
+        name = "markdown_vault"
+
+        def write_note(self, *args, **kwargs):
+            raise RuntimeError("disk unavailable")
+
+    proposal = MemoryWriteProposal(
+        connector="markdown_vault",
+        ref="AI/Logs/x.md",
+        mode="append",
+        content_preview="preview",
+        side_effect="side effect",
+    )
+
+    with pytest.raises(RuntimeError, match="disk unavailable"):
+        gated_write(ExplodingMemory(), proposal, "real content")
+
+
+def test_gated_write_rejects_unsupported_gbrain_mode_before_learning():
+    """An upsert-only connector cannot acquire a misleading create grant."""
+    store = InMemoryPermissionStore()
+    proposal = MemoryWriteProposal(
+        connector="gbrain",
+        ref="AI/Decisions/existing-page",
+        mode="create",
+        content_preview="replacement",
+        side_effect="side effect",
+    )
+
+    with patch("agent_os.policy.interrupt", return_value="always_approve"):
+        result = gated_write(
+            GbrainConnector(),
+            proposal,
+            "replacement",
+            engine=LocalPolicy(store=store, session_key="gbrain-test"),
+        )
+
+    assert result.committed is False
+    assert result.status == "failed"
+    assert "does not safely support mode 'create'" in (result.error or "")
+    assert store.list() == []

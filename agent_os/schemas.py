@@ -2,6 +2,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+MemoryWriteMode = Literal["create", "append", "overwrite"]
+MEMORY_WRITE_MODES = frozenset({"append", "create", "overwrite"})
+
 
 class ReadFileResult(BaseModel):
     path: str
@@ -61,7 +64,7 @@ class MemoryWriteProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     connector: str
     ref: str
-    mode: str
+    mode: MemoryWriteMode
     content_preview: str
     side_effect: str
 

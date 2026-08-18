@@ -8,7 +8,7 @@
     "ConnectorRegistry.list_connectors": "(POSITIONAL_OR_KEYWORD self: unannotated) -> list[str]",
     "ConnectorRegistry.register": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD name: str; POSITIONAL_OR_KEYWORD connector: Any) -> None",
     "ConnectorRegistry.resolve": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD name: str) -> Any",
-    "LocalPolicy.__init__": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD rules: dict[str, Any] | None = None) -> None",
+    "LocalPolicy.__init__": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD rules: dict[str, Any] | None = None; KEYWORD_ONLY store: agent_os.permission_store.PermissionRuleStore | None = None; KEYWORD_ONLY mode: str = 'manual'; KEYWORD_ONLY session_key: str | None = None) -> None",
     "LocalPolicy.evaluate": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD proposal: ActionProposal; KEYWORD_ONLY workspace: Any = None; KEYWORD_ONLY context: Any = None) -> PolicyDecision",
     "MemoryConnector.list_notes": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD filters: dict[str, Any] | None = None) -> list[dict[str, Any]]",
     "MemoryConnector.read_note": "(POSITIONAL_OR_KEYWORD self: unannotated; POSITIONAL_OR_KEYWORD slug_or_path: str) -> dict[str, Any]",

@@ -77,7 +77,17 @@ async def dispatch_schedule(
 
         if kind == "brief":
             result = await asyncio.to_thread(execute_brief, write=True)
-            ref = getattr(result, "ref", None)
+            if not result.saved:
+                error_msg = result.error or "Brief write was not committed"
+                record_schedule_result(
+                    schedule_id, status="error", error=error_msg
+                )
+                return ScheduleDispatchResult(
+                    schedule_id=schedule_id,
+                    kind=kind,
+                    status="error",
+                    error=error_msg,
+                )
 
             record_schedule_result(schedule_id, status="completed")
 
@@ -85,7 +95,7 @@ async def dispatch_schedule(
                 schedule_id=schedule_id,
                 kind=kind,
                 status="completed",
-                ref=ref,
+                ref=result.ref,
             )
 
         if kind == "app_callback":

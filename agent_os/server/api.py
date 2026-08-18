@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import ipaddress
 import json
 import os
 import sqlite3
@@ -16,7 +17,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
@@ -43,13 +44,14 @@ from agent_os.runs import (
 from agent_os.sandbox import resolve_workspace_root
 from agent_os.schedule_models import ScheduleInput
 from agent_os.scheduler import SchedulerService
-from agent_os.server.run_executor import execute_run
+from agent_os.server.run_executor import execute_run, terminal_tool_failure
 from agent_os.server.runtime import (
     build_runtime_graph,
     initial_state,
     memory_connector,
     package_version,
     runtime_config,
+    runtime_policy_for_session,
     runtime_summary,
 )
 from agent_os.sessions import delete_session, list_sessions
@@ -93,6 +95,10 @@ GRAPH_MAX_NODES = 200
 ACTIVE_RUN_TASKS: dict[str, asyncio.Task[None]] = {}
 PUBLIC_CONCIERGE_BUCKETS: dict[str, list[float]] = {}
 PUBLIC_CONCIERGE_WINDOW_SECONDS = 60.0
+PERMISSIONS_ADMIN_TOKEN_ENV = "AGENT_OS_PERMISSIONS_ADMIN_TOKEN"
+EXECUTION_TOKEN_ENV = "AGENT_OS_EXECUTION_TOKEN"
+WEBSOCKET_TOKEN_PROTOCOL_PREFIX = "agent-os-token."
+WEBSOCKET_PROTOCOL = "agent-os"
 
 
 class CreateRunRequest(BaseModel):
@@ -128,6 +134,116 @@ def _public_concierge_rate_limit(request: Request) -> None:
         raise HTTPException(status_code=429, detail="Public concierge rate limit exceeded")
     bucket.append(now)
     PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
+
+
+def _require_permissions_admin(request: Request) -> None:
+    """Require an explicit operator token for permission-rule administration."""
+    token = os.getenv(PERMISSIONS_ADMIN_TOKEN_ENV, "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=404,
+            detail="Permissions administration is not configured",
+        )
+
+    provided = request.headers.get("x-admin-token", "").strip()
+    bearer = request.headers.get("authorization", "").strip()
+    if bearer.lower().startswith("bearer "):
+        provided = bearer[7:].strip()
+    if not hmac.compare_digest(provided, token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+def _is_loopback_client(host: object) -> bool:
+    """Return whether an ASGI peer is local to this host."""
+    if not isinstance(host, str):
+        return False
+    normalized = host.strip().lower()
+    # ``testclient`` is Starlette's in-process ASGI peer name, not a network
+    # address a remote caller can present to a real Uvicorn server.
+    if normalized in {"localhost", "testclient"}:
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _requested_websocket_protocols(websocket: WebSocket) -> list[str]:
+    return [
+        protocol.strip()
+        for protocol in websocket.headers.get("sec-websocket-protocol", "").split(",")
+        if protocol.strip()
+    ]
+
+
+def _execution_token_from_connection(connection: Request | WebSocket) -> str:
+    token = connection.headers.get("x-execution-token", "").strip()
+    bearer = connection.headers.get("authorization", "").strip()
+    if bearer.lower().startswith("bearer "):
+        token = bearer[7:].strip()
+    if token or not isinstance(connection, WebSocket):
+        return token
+
+    # Browsers cannot set arbitrary WebSocket headers. They can, however,
+    # offer a token-bearing subprotocol. The server later selects only the
+    # fixed ``agent-os`` protocol, so the secret is not reflected in the
+    # response or placed in a URL/query string.
+    for protocol in _requested_websocket_protocols(connection):
+        if protocol.startswith(WEBSOCKET_TOKEN_PROTOCOL_PREFIX):
+            return protocol.removeprefix(WEBSOCKET_TOKEN_PROTOCOL_PREFIX)
+    return token
+
+
+def _private_api_access_error(connection: Request | WebSocket) -> str | None:
+    """Authorize private runtime endpoints without exposing them to the web.
+
+    Local CLI/dashboard use stays zero-config. Any non-loopback peer requires
+    an explicit token; browser WebSocket/HTTP requests must additionally come
+    from a configured operator origin, because CORS does not secure WebSocket
+    handshakes and does not prevent cross-site form posts.
+    """
+    origin = connection.headers.get("origin", "").strip()
+    if origin and origin not in _cors_origins:
+        return "Origin is not allowed"
+
+    required_token = os.getenv(EXECUTION_TOKEN_ENV, "").strip()
+    client = connection.client
+    client_host = client.host if client is not None else None
+    if not required_token:
+        if _is_loopback_client(client_host):
+            return None
+        return (
+            "Private execution API requires AGENT_OS_EXECUTION_TOKEN "
+            "for non-loopback clients"
+        )
+
+    supplied_token = _execution_token_from_connection(connection)
+    if not hmac.compare_digest(supplied_token, required_token):
+        return "Forbidden"
+    return None
+
+
+@app.middleware("http")
+async def protect_private_api(request: Request, call_next: Any) -> Any:
+    path = request.url.path
+    if path.startswith("/api/") and not (
+        path == "/api/health" or path.startswith("/api/public/")
+    ):
+        error = _private_api_access_error(request)
+        if error is not None:
+            return JSONResponse(status_code=403, content={"detail": error})
+    return await call_next(request)
+
+
+def _runtime_permission_store() -> Any:
+    """Open the store selected by the active workspace/runtime configuration."""
+    from agent_os.permission_store import SqlitePermissionStore
+    from agent_os.server.runtime import composed_workspace
+    from agent_os.workspace import resolve_permission_db_path
+
+    runtime = composed_workspace()
+    workspace = runtime.workspace if runtime is not None else None
+    return SqlitePermissionStore(resolve_permission_db_path(workspace))
 
 
 @app.get("/api/health")
@@ -410,6 +526,9 @@ async def cancel_run_endpoint(run_id: str) -> dict[str, str]:
         active_task.cancel()
     set_status(run_id, "cancelled", ended=True)
     append_event(run_id, "status", {"status": "cancelled"})
+    from agent_os.policy import LocalPolicy
+
+    LocalPolicy.clear_session(run_id)
     return {"run_id": run_id, "status": "cancelled"}
 
 @app.get("/api/runs/{run_id}/events")
@@ -471,31 +590,118 @@ def create_schedule_endpoint(request: ScheduleInput) -> dict[str, Any]:
     return sched
 
 
+@app.get("/api/permissions")
+def list_permissions_endpoint(request: Request) -> list[dict[str, Any]]:
+    from dataclasses import asdict
+
+    _require_permissions_admin(request)
+    try:
+        store = _runtime_permission_store()
+        return [asdict(r) for r in store.list()]
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read permissions store") from exc
+
+
+@app.delete("/api/permissions/{permission_key:path}")
+def revoke_permission_endpoint(permission_key: str, request: Request) -> dict[str, Any]:
+    _require_permissions_admin(request)
+
+    try:
+        store = _runtime_permission_store()
+        rule = store.get(permission_key)
+        if not rule:
+            raise HTTPException(status_code=404, detail=f"Permission rule '{permission_key}' not found")
+        store.delete(permission_key)
+        return {"status": "ok", "revoked": permission_key}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to revoke permission rule") from exc
+
+
 @app.websocket("/api/chat/{thread_id}")
 async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
-    await websocket.accept()
+    if _private_api_access_error(websocket) is not None:
+        await websocket.close(code=1008, reason="Forbidden")
+        return
+    requested_protocols = _requested_websocket_protocols(websocket)
+    await websocket.accept(
+        subprotocol=(
+            WEBSOCKET_PROTOCOL if WEBSOCKET_PROTOCOL in requested_protocols else None
+        )
+    )
     import json
 
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from langgraph.types import Command
+
+    from agent_os.cli.app import _pending_interrupt
+    from agent_os.policy import LocalPolicy, policy_scope
 
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
-    
-    async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
-        graph = build_runtime_graph(checkpointer=saver)
-        config = runtime_config(thread_id)
-        
-        try:
-            while True:
-                data = await websocket.receive_text()
-                # Run graph
-                state_update = initial_state(data)
-                
-                async for event in graph.astream_events(state_update, config, version="v1"):
-                    if event["event"] == "on_chat_model_stream":
-                        chunk = event["data"]["chunk"]
-                        if chunk.content:
-                            await websocket.send_text(json.dumps({"type": "token", "content": chunk.content}))
-                await websocket.send_text(json.dumps({"type": "done"}))
-                
-        except WebSocketDisconnect:
-            pass
+    session_key = f"websocket:{thread_id}:{uuid.uuid4()}"
+    session_policy = runtime_policy_for_session(session_key)
+
+    try:
+        async with AsyncSqliteSaver.from_conn_string(db_path) as saver:
+            graph = build_runtime_graph(checkpointer=saver)
+            config = runtime_config(thread_id)
+
+            with policy_scope(session_policy):
+                try:
+                    # A browser can reconnect after the graph has persisted an
+                    # interrupt. Restore that pending approval before reading
+                    # new user text so the first message resumes it rather
+                    # than restarting the task with the same thread id.
+                    existing_snapshot = await graph.aget_state(config)
+                    existing_prompt = _pending_interrupt(existing_snapshot)
+                    pending_interrupt = existing_prompt is not None
+                    if existing_prompt is not None:
+                        await websocket.send_text(
+                            json.dumps(
+                                {"type": "interrupt", "prompt": str(existing_prompt)}
+                            )
+                        )
+                    while True:
+                        data = await websocket.receive_text()
+                        state_update: object = (
+                            Command(resume=data)
+                            if pending_interrupt
+                            else initial_state(data)
+                        )
+
+                        async for event in graph.astream_events(state_update, config, version="v2"):
+                            if event["event"] == "on_chat_model_stream":
+                                chunk = event["data"]["chunk"]
+                                if chunk.content:
+                                    await websocket.send_text(json.dumps({"type": "token", "content": chunk.content}))
+                        snapshot = await graph.aget_state(config)
+                        interrupt_prompt = _pending_interrupt(snapshot)
+                        if interrupt_prompt is not None:
+                            pending_interrupt = True
+                            await websocket.send_text(
+                                json.dumps({"type": "interrupt", "prompt": str(interrupt_prompt)})
+                            )
+                        else:
+                            pending_interrupt = False
+                            failure = terminal_tool_failure(snapshot)
+                            if failure is None:
+                                await websocket.send_text(json.dumps({"type": "done"}))
+                            else:
+                                status, message = failure
+                                await websocket.send_text(
+                                    json.dumps(
+                                        {
+                                            "type": "error",
+                                            "status": status,
+                                            "error": message,
+                                        }
+                                    )
+                                )
+
+                except WebSocketDisconnect:
+                    pass
+    finally:
+        LocalPolicy.clear_session(session_key)

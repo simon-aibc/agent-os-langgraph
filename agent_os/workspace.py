@@ -1,5 +1,6 @@
 """Workspace loading and runtime composition."""
 
+import logging
 import os
 import tomllib
 from collections.abc import Iterator
@@ -18,13 +19,21 @@ from agent_os.connectors import (
     GbrainConnector,
     MarkdownVaultConnector,
     MemoryConnector,
+    WritableMemory,
 )
 from agent_os.default_registry import build_default_registry as build_skill_registry
 from agent_os.hot_context import load_hot_context
+from agent_os.permission_store import (
+    DEFAULT_PERMISSION_DB,
+    PERMISSION_DB_ENV,
+    SqlitePermissionStore,
+)
 from agent_os.policy import LocalPolicy
 from agent_os.skill_packages import SkillPackageLoader
 from agent_os.skills import SkillRegistry
 from agent_os.state import BackendBinding
+
+logger = logging.getLogger(__name__)
 
 
 class WorkspaceLoadError(ValueError):
@@ -77,6 +86,31 @@ _PATH_KEYS = frozenset({"path", "root", "root_path", "vault_path"})
 _RESTRICTED_FILENAMES = frozenset({"db_config.php", "mail_config.php", ".env"})
 
 
+def resolve_permission_db_path(workspace: Workspace | None = None) -> str:
+    """Resolve the permissions DB without sharing rules across workspaces.
+
+    An explicitly configured environment path remains an operator override.
+    Otherwise, a workspace owns a ``permissions.db`` beside its TOML file;
+    standalone local use keeps the historical default path.
+    """
+    configured = os.getenv(PERMISSION_DB_ENV, "").strip()
+    if configured:
+        return str(Path(configured).expanduser().resolve())
+    if workspace is not None:
+        return str((workspace.base_path / "permissions.db").resolve())
+    return DEFAULT_PERMISSION_DB
+
+
+def open_permission_store(workspace: Workspace | None = None) -> SqlitePermissionStore | None:
+    """Open the workspace (or standalone) rule store with a fail-safe fallback."""
+    db_path = resolve_permission_db_path(workspace)
+    try:
+        return SqlitePermissionStore(db_path)
+    except Exception as exc:
+        logger.warning(f"Failed to initialize SqlitePermissionStore at '{db_path}': {exc}")
+        return None
+
+
 def load_workspace(path: str | Path) -> Workspace:
     """Load and validate a workspace TOML file."""
 
@@ -105,8 +139,8 @@ def load_workspace(path: str | Path) -> Workspace:
     workspace._base_path = workspace_path.parent
     workspace = _resolve_workspace_paths(workspace)
     _validate_backend_bindings(workspace, build_default_registry())
-    _build_workspace_skill_registry(workspace)
-    connector_registry, _ = _build_connector_registry(workspace)
+    connector_registry, memory_connector = _build_connector_registry(workspace)
+    _build_workspace_skill_registry(workspace, memory_connector)
     _validate_connector_references(workspace, connector_registry)
     return workspace
 
@@ -116,8 +150,8 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
 
     backend_registry = build_default_registry()
     _validate_backend_bindings(ws, backend_registry)
-    skill_registry = _build_workspace_skill_registry(ws)
     connector_registry, memory_connector = _build_connector_registry(ws)
+    skill_registry = _build_workspace_skill_registry(ws, memory_connector)
     _validate_connector_references(ws, connector_registry)
 
     environment = _workspace_environment(ws)
@@ -133,6 +167,11 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
         sources=sources,
     )
 
+    store = open_permission_store(ws)
+
+    policy_rules = dict(ws.policy)
+    policy_mode = str(policy_rules.get("mode", "manual"))
+
     return ComposedWorkspace(
         workspace=ws,
         backend_binding=backend_binding,
@@ -140,7 +179,7 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
         skill_registry=skill_registry,
         connector_registry=connector_registry,
         memory_connector=memory_connector,
-        policy=LocalPolicy(dict(ws.policy)),
+        policy=LocalPolicy(policy_rules, store=store, mode=policy_mode),
         hot_context=hot_context,
         limits=dict(ws.limits),
         environment=environment,
@@ -220,11 +259,14 @@ def _validate_backend_bindings(
             ) from exc
 
 
-def _build_workspace_skill_registry(ws: Workspace) -> SkillRegistry:
+def _build_workspace_skill_registry(
+    ws: Workspace,
+    memory_connector: WritableMemory | None = None,
+) -> SkillRegistry:
     if str(ws.policy.get("mode", "")).strip().lower() == "public-read-only":
         registry = SkillRegistry()
     else:
-        registry = build_skill_registry()
+        registry = build_skill_registry(memory_connector=memory_connector)
     loader = SkillPackageLoader(registry)
 
     for entry in ws.skills:
@@ -264,7 +306,7 @@ def _build_workspace_skill_registry(ws: Workspace) -> SkillRegistry:
     return registry
 
 
-def _build_connector_registry(ws: Workspace) -> tuple[ConnectorRegistry, MemoryConnector]:
+def _build_connector_registry(ws: Workspace) -> tuple[ConnectorRegistry, WritableMemory]:
     registry = ConnectorRegistry()
     registry.register("filesystem", FilesystemConnector())
 
@@ -277,7 +319,7 @@ def _build_connector_registry(ws: Workspace) -> tuple[ConnectorRegistry, MemoryC
     return registry, memory_connector
 
 
-def _build_memory_connector(ws: Workspace) -> MemoryConnector:
+def _build_memory_connector(ws: Workspace) -> WritableMemory:
     memory_type = str(
         ws.memory.get("type", ws.memory.get("connector", "markdown"))
     ).strip().lower()

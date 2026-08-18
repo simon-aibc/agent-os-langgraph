@@ -49,6 +49,7 @@ def runs_db(tmp_path, monkeypatch):
     database_path = tmp_path / "checkpoints.db"
     monkeypatch.setenv(CHECKPOINT_DB_ENV, str(database_path))
     monkeypatch.setenv("AGENT_OS_SANDBOX", str(tmp_path))
+    monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
     return database_path
 
 
@@ -98,7 +99,7 @@ async def test_execute_run_translates_node_token_and_result_events(runs_db, monk
         "recursion_limit": 7,
         "configurable": {"thread_id": "thread-1"},
     }
-    assert graph.seen_version == "v1"
+    assert graph.seen_version == "v2"
     assert get_run(run_id)["status"] == "completed"
     events = list_events(run_id)
     assert [event["kind"] for event in events] == [
@@ -142,6 +143,40 @@ async def test_execute_run_includes_workspace_skill_output_in_result_event(
             "success": True,
         }
     }
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("tool_status", "expected_run_status"),
+    (("cancelled", "cancelled"), ("failed", "error")),
+)
+async def test_execute_run_preserves_unsuccessful_native_tool_outcome(
+    runs_db, monkeypatch, tool_status, expected_run_status
+):
+    graph = FakeGraph(
+        [],
+        _completed_snapshot(
+            {
+                "tool_result": ToolExecutionResult(
+                    tool="memory_write",
+                    output=(
+                        '{"status": "' + tool_status + '", '
+                        '"errors": ["Policy did not commit the write"]}'
+                    ),
+                    success=False,
+                )
+            }
+        ),
+    )
+    _patch_graph(monkeypatch, graph)
+    run_id = create_run("thread-unsuccessful-tool", None, "memory_write note.md :: x")
+
+    await execute_run(run_id, "thread-unsuccessful-tool", "memory_write note.md :: x")
+
+    run = get_run(run_id)
+    assert run["status"] == expected_run_status
+    assert run["error"] == "Policy did not commit the write"
+    assert run["ended_at"] is not None
 
 
 @pytest.mark.anyio

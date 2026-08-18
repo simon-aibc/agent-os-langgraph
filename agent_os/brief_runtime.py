@@ -11,8 +11,10 @@ from agent_os.connectors import (
     GbrainConnector,
     MarkdownVaultConnector,
     MemoryConnector,
+    MemoryWriteResult,
 )
 from agent_os.llm import get_architect_llm
+from agent_os.policy import PolicyEngine
 from agent_os.sandbox import get_sandbox_root
 from agent_os.sessions import list_sessions
 
@@ -22,6 +24,13 @@ class BriefExecutionResult:
     date: str
     content: str
     ref: str | None = None
+    write_result: MemoryWriteResult | None = None
+    error: str | None = None
+
+    @property
+    def saved(self) -> bool:
+        """Whether the requested brief write reached durable storage."""
+        return self.write_result is not None and self.write_result.committed
 
 
 def resolve_brief_connector(name: str | None = None) -> MemoryConnector:
@@ -64,29 +73,43 @@ def execute_brief(
     *,
     date: str | None = None,
     connector_name: str | None = None,
-    write: bool = True
+    connector: MemoryConnector | None = None,
+    write: bool = True,
+    engine: PolicyEngine | None = None,
 ) -> BriefExecutionResult:
     if date is None:
         date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d")
 
-    connector = resolve_brief_connector(connector_name)
+    resolved_connector = connector or resolve_brief_connector(connector_name)
     sessions = list_sessions()
     summarizer = build_brief_summarizer()
 
     brief_md = generate_brief(
-        connector,
+        resolved_connector,
         sessions,
         date=date,
         summarizer=summarizer
     )
 
     ref = None
-    if write and hasattr(connector, "write_note"):
-        write_result = write_brief(connector, brief_md, date)
-        ref = write_result.ref if hasattr(write_result, "ref") else str(write_result)
+    write_result: MemoryWriteResult | None = None
+    error = None
+    if write:
+        if not hasattr(resolved_connector, "write_note"):
+            error = "Configured memory connector does not support writing briefs."
+        else:
+            write_result = write_brief(resolved_connector, brief_md, date, engine=engine)
+            if write_result.committed:
+                ref = write_result.ref
+            else:
+                error = write_result.error or (
+                    f"Brief write {write_result.status} before it was committed."
+                )
 
     return BriefExecutionResult(
         date=date,
         content=brief_md,
-        ref=ref
+        ref=ref,
+        write_result=write_result,
+        error=error,
     )

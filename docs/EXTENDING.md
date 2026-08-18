@@ -92,6 +92,74 @@ class ReadOnlyPolicy:
 # result = apply_policy(ReadOnlyPolicy(), proposal, execute_fn=execute)
 ```
 
+### Policy Modes
+
+- **`manual` (default)**: Evaluates safely scoped learned memory rules, active session grants, built-in log/brief rules, and the 7-level taxonomy (`read`/`none` → `allow`, `write`/`network`/`communication` → `require_approval`, `payment`/`privileged` → `deny`). Requires interactive human approval for unknown low/medium actions.
+- **`smart`**: Operates as a tested alias of `manual` with identical safety boundaries.
+- **`off`**: Explicit **unsafe local-only escape hatch** that bypasses all policy checks and auto-allows all actions (including `payment` and `privileged`). Intended strictly for isolated sandbox testing.
+
+### User-Taught Permission Learning
+
+Agent OS uses explicit, user-taught permission learning rather than autonomous self-learning:
+- **Approve once** (`approved`, `y`): Grants access only for the immediate action.
+- **Session** (`session`): Grants access to the same safely scoped memory action for the current CLI invocation or server run. It is cleared when that session ends.
+- **Always approve** (`always_approve`): Persists an allow rule to SQLite across restarts.
+- **Always deny** (`always_deny`): Persists a deny rule to SQLite across restarts.
+- **Reject** (`rejected`, `n`): Cancels the action execution.
+
+In this release, remembered rules deliberately apply **only** to `memory.write`.
+Each key includes the actual connector, write mode, and full note ref:
+
+```text
+memory_write:write:<connector>:<create|append|overwrite>:<ref>
+```
+
+For example, approval to create a note never authorizes overwriting that note,
+and a `markdown_vault` rule never authorizes a `gbrain` write. Generic file,
+network, and communication tools do not yet expose a canonical destination
+schema, so `session` and `always_*` are rejected for them; use one-time
+`approved` instead. `payment` and `privileged` are denied before any rule is
+read (except the explicitly unsafe `mode = "off"` escape hatch).
+
+The shipped native action is `memory_write [create|append|overwrite] <ref> :: <content>`.
+`MarkdownVaultConnector` supports all three modes. Gbrain currently exposes
+only an upsert (`put_page`), so it accepts only an explicit `overwrite`;
+`create` and `append` fail before prompting or saving a learned rule rather
+than silently overwriting a page.
+
+For a workspace, rules live in `<workspace>/permissions.db`. Set
+`AGENT_OS_PERMISSIONS_DB` to explicitly override that location. The composed
+workspace policy is bound into CLI graph streams and server runs, so a nested
+`gated_write()` uses the right workspace and session without callers having to
+manually thread an engine.
+
+Learned rules can be inspected and revoked via the CLI:
+```bash
+agent-os permissions list
+agent-os permissions list --json
+agent-os permissions revoke <permission-key>
+agent-os permissions list --workspace path/to/workspace.toml
+```
+Or via the Runtime API:
+- `GET /api/permissions`
+- `DELETE /api/permissions/{permission_key}`
+
+The local CLI does not need an admin token. Runtime API management is disabled
+until `AGENT_OS_PERMISSIONS_ADMIN_TOKEN` is set; then send that token using
+`X-Admin-Token` or `Authorization: Bearer …`. This prevents an exposed server
+from becoming an unauthenticated permission-administration surface.
+
+Private Runtime API endpoints (runs, sessions, briefs, schedules, graph, and
+chat) are local-only by default. A non-loopback caller must configure
+`AGENT_OS_EXECUTION_TOKEN` and send it as `X-Execution-Token` or
+`Authorization: Bearer …`; `agent-os serve --host 0.0.0.0` refuses to start
+without it. Browser-originated requests must also use an exact origin listed in
+`AGENT_OS_CORS_ORIGINS`; this includes WebSocket handshakes and prevents a
+third-party page from submitting an approval to the local agent. For a browser
+WebSocket, offer `agent-os` and `agent-os-token.<base64url-token>` as
+subprotocols; the server selects only `agent-os`, so the token is not placed in
+a query string or echoed in the response.
+
 Policy implementations are trusted code. They should be deterministic for the same
 proposal and context and should use `deny` for errors that cannot be safely recovered.
 
