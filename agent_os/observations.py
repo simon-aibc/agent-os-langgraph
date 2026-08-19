@@ -106,6 +106,21 @@ class OutcomePattern:
     confidence: Literal["insufficient", "exploratory", "actionable"]
 
 
+@dataclass(frozen=True)
+class TaskSignaturePattern:
+    """Read-only aggregate for deterministic capability-candidate mining."""
+
+    workspace_id: str
+    task_kind: str
+    task_signature: str
+    accepted_count: int
+    rejected_count: int
+    edited_count: int
+    occurrence_count: int
+    outcome_score: float
+    sample_run_ids: tuple[str, ...]
+
+
 def observation_workspace_id(workspace: object | None = None) -> str:
     """Return a stable, non-secret workspace identifier.
 
@@ -554,6 +569,67 @@ class SqliteObservationStore:
                     confidence=confidence,
                 )
             )
+        return patterns
+
+    def aggregate_task_signatures(
+        self,
+        *,
+        workspace_id: str,
+        sample_limit: int = 3,
+    ) -> list[TaskSignaturePattern]:
+        """Aggregate explicitly labelled, non-legacy task-signature buckets.
+
+        This is intentionally read-only. Unknown outcomes and historic rows
+        without a signature never qualify as evidence for a new capability.
+        """
+        safe_sample_limit = max(1, min(int(sample_limit), 10))
+        query = """
+            SELECT task_kind, task_signature,
+                SUM(CASE WHEN outcome_signal = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
+                SUM(CASE WHEN outcome_signal = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+                SUM(CASE WHEN outcome_signal = 'edited' THEN 1 ELSE 0 END) AS edited_count
+            FROM observations
+            WHERE workspace_id = ?
+              AND task_signature IS NOT NULL
+              AND outcome_signal IN ('accepted', 'rejected', 'edited')
+            GROUP BY task_kind, task_signature
+            ORDER BY task_kind ASC, task_signature ASC
+        """
+        with contextlib.closing(self._connect()) as conn:
+            rows = conn.execute(query, (workspace_id,)).fetchall()
+            patterns = []
+            for row in rows:
+                accepted = int(row["accepted_count"] or 0)
+                rejected = int(row["rejected_count"] or 0)
+                edited = int(row["edited_count"] or 0)
+                occurrence_count = accepted + rejected + edited
+                if occurrence_count == 0:  # defensive: SQL predicate above guarantees this.
+                    continue
+                sample_rows = conn.execute(
+                    """
+                    SELECT run_id
+                    FROM observations
+                    WHERE workspace_id = ? AND task_kind = ? AND task_signature = ?
+                      AND outcome_signal IN ('accepted', 'rejected', 'edited')
+                      AND run_id IS NOT NULL
+                    ORDER BY created_at DESC, observation_id DESC
+                    LIMIT ?
+                    """,
+                    (workspace_id, row["task_kind"], row["task_signature"], safe_sample_limit),
+                ).fetchall()
+                patterns.append(
+                    TaskSignaturePattern(
+                        workspace_id=workspace_id,
+                        task_kind=str(row["task_kind"]),
+                        task_signature=str(row["task_signature"]),
+                        accepted_count=accepted,
+                        rejected_count=rejected,
+                        edited_count=edited,
+                        occurrence_count=occurrence_count,
+                        outcome_score=(accepted + 0.5 * edited) / occurrence_count,
+                        sample_run_ids=tuple(str(sample["run_id"]) for sample in sample_rows),
+                    )
+                )
         return patterns
 
     def get_strategy_assignment(self, run_id: str) -> StrategyAssignment | None:
