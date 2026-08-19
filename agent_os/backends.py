@@ -33,6 +33,7 @@ class _CodexCodingPlanOutput(BaseModel):
 
     summary: str = ""
     steps: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
     files: list[str]
     changes: list[str]
     verify_cmd: str

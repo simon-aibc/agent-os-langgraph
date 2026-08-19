@@ -65,3 +65,23 @@ def test_human_gate_node_interrupts(mock_interrupt):
     assert '"verify_cmd": "ls"' in args[0]
 
     assert result == {"human_feedback": "approved"}
+
+
+@patch("agent_os.nodes.human_gate.interrupt")
+def test_human_gate_node_includes_acceptance_criteria(mock_interrupt):
+    mock_interrupt.return_value = "approved"
+
+    plan = CodingPlan(
+        summary="Clarify plan",
+        files=["file1.py"],
+        changes=["modify"],
+        verify_cmd="pytest",
+        acceptance_criteria=["Criterion 1: binary check", "Criterion 2: reversibility classification"],
+    )
+    result = human_gate_node(make_state(plan))
+
+    mock_interrupt.assert_called_once()
+    args = mock_interrupt.call_args.args
+    assert '"acceptance_criteria"' in args[0]
+    assert '"Criterion 1: binary check"' in args[0]
+    assert result == {"human_feedback": "approved"}
