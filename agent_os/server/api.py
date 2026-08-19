@@ -808,6 +808,8 @@ def confirm_skill_registration_endpoint(
         result = _runtime_skill_authoring_service().confirm_registration(
             request_id, confirm=request.confirm, now=int(time.time() * 1000)
         )
+        from agent_os.server.runtime import composed_workspace
+        composed_workspace.cache_clear()
         return result.model_dump(mode="json")
     except SkillAuthoringError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
