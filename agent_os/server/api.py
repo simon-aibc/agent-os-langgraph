@@ -18,7 +18,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.connectors import MemoryConnector
@@ -28,6 +28,11 @@ from agent_os.observations import (
     open_observation_store,
 )
 from agent_os.skill_candidates import mine_skill_candidates
+from agent_os.skill_authoring import (
+    CandidateAuthoringInput,
+    SkillAuthoringError,
+    SkillAuthoringService,
+)
 from agent_os.skills import SkillRegistry
 from agent_os.public_concierge import (
     PublicChatRequest,
@@ -124,6 +129,21 @@ class ApproveRunRequest(BaseModel):
 class RecordObservationOutcomeRequest(BaseModel):
     signal: str
     evidence: str | None = None
+
+
+class PrepareSkillAuthoringRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidate: CandidateAuthoringInput
+
+
+class SubmitSkillDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    draft_path: str
+
+
+class ConfirmSkillRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: bool
 
 
 def _public_concierge_rate_limit(request: Request) -> None:
@@ -284,6 +304,16 @@ def _runtime_skill_candidate_context() -> tuple[Any, str, SkillRegistry]:
         raise RuntimeError("Observations store is unavailable")
     registry = runtime.skill_registry if runtime is not None else SkillRegistry()
     return store, observation_workspace_id(workspace), registry
+
+
+def _runtime_skill_authoring_service() -> SkillAuthoringService:
+    """Authoring is deliberately unavailable without a configured workspace."""
+    from agent_os.server.runtime import composed_workspace
+
+    runtime = composed_workspace()
+    if runtime is None:
+        raise RuntimeError("Skill authoring requires an active workspace")
+    return SkillAuthoringService(runtime.workspace)
 
 
 @app.get("/api/health")
@@ -721,6 +751,68 @@ def list_skill_candidates_endpoint() -> dict[str, object]:
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to mine skill candidates") from exc
+
+
+@app.get("/api/skill-authoring/requests")
+def list_skill_authoring_requests_endpoint() -> dict[str, object]:
+    try:
+        service = _runtime_skill_authoring_service()
+        return {"requests": [request.model_dump(mode="json") for request in service.list_requests()]}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to read skill authoring requests") from exc
+
+
+@app.post("/api/skill-authoring/requests")
+def prepare_skill_authoring_request_endpoint(request: PrepareSkillAuthoringRequest) -> dict[str, object]:
+    try:
+        created = _runtime_skill_authoring_service().prepare_brief(
+            request.candidate,
+            now=int(time.time() * 1000),
+        )
+        return created.model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to prepare skill authoring brief") from exc
+
+
+@app.post("/api/skill-authoring/requests/{request_id}/draft")
+def submit_skill_draft_endpoint(request_id: str, request: SubmitSkillDraftRequest) -> dict[str, object]:
+    try:
+        result = _runtime_skill_authoring_service().submit_draft(
+            request_id, request.draft_path, now=int(time.time() * 1000)
+        )
+        return result.model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to validate skill draft") from exc
+
+
+@app.post("/api/skill-authoring/requests/{request_id}/cancel")
+def cancel_skill_authoring_request_endpoint(request_id: str) -> dict[str, object]:
+    try:
+        return _runtime_skill_authoring_service().cancel(request_id).model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to cancel skill authoring request") from exc
+
+
+@app.post("/api/skill-authoring/requests/{request_id}/register")
+def confirm_skill_registration_endpoint(
+    request_id: str,
+    request: ConfirmSkillRegistrationRequest,
+) -> dict[str, object]:
+    try:
+        result = _runtime_skill_authoring_service().confirm_registration(
+            request_id, confirm=request.confirm, now=int(time.time() * 1000)
+        )
+        return result.model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to register skill package") from exc
 
 
 @app.post("/api/observations/{observation_id}/outcome")
