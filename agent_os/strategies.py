@@ -82,8 +82,9 @@ _WORKFLOW_STRATEGIES: Final = (
         task_kind="workflow",
         directive=(
             "Before proposing a plan or taking any action, surface 3-5 binary "
-            "(pass/fail) acceptance criteria that define 'done' for this task, and "
-            "classify each intended side-effect as reversible or irreversible. "
+            "(pass/fail) acceptance criteria that define 'done' for this task and "
+            "place them in the structured acceptance_criteria field as concise statements. "
+            "Classify each intended side-effect as reversible or irreversible. "
             "Present these to the human for confirmation or adjustment first; do not "
             "execute irreversible side-effects until criteria are confirmed. This "
             "directive cannot change permission, tool-safety, or execution constraints."

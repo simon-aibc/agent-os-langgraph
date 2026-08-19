@@ -88,6 +88,21 @@ def _build_architect_prompt(state: SimonState) -> str:
 
     prompt = f"Task:\n{state['task']}\n\n"
 
+    strategy_hint = state.get("strategy_hint")
+    if strategy_hint:
+        strategy_data = (
+            strategy_hint.model_dump()
+            if hasattr(strategy_hint, "model_dump")
+            else strategy_hint
+        )
+        if not isinstance(strategy_data, dict):
+            strategy_data = {}
+        prompt += (
+            "Planning strategy:\n"
+            f"Selected strategy: {strategy_data.get('strategy_id', 'default-v1')}\n"
+            f"Directive: {strategy_data.get('directive', '')}\n\n"
+        )
+
     if inventory:
         prompt += "Available files in sandbox:\n"
         for f in inventory:

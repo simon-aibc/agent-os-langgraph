@@ -73,6 +73,7 @@ class PlanArtifact(BaseModel):
     summary: str = ""
     steps: list[str] = Field(default_factory=list)
     proposed_actions: list[ActionProposal] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
     metadata: dict[str, object] = Field(default_factory=dict)
 
 

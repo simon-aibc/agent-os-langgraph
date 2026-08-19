@@ -189,6 +189,61 @@ def test_build_cli_architect_invoker_codex_success(monkeypatch, tmp_path):
         assert brief.verify_cmd == "v2"
 
 
+def test_build_cli_architect_invoker_carries_acceptance_criteria(monkeypatch, tmp_path):
+    import json
+
+    from agent_os.agents.cli_architect import build_cli_architect_invoker
+    from agent_os.schemas import CodingPlan
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(sandbox))
+
+    # 1. Claude-code with acceptance_criteria
+    invoker_claude = build_cli_architect_invoker("claude-code")
+    state = {
+        "task": "clarify task",
+        "human_feedback": None,
+        "strategy_hint": {
+            "strategy_id": "clarify-first-v1",
+            "version": 1,
+            "task_kind": "workflow",
+            "selection_reason": "explicit",
+            "directive": "surface 3-5 binary criteria in acceptance_criteria",
+        },
+    }
+
+    with patch("agent_os.backends.run_cli_command") as mock_run:
+        mock_run.return_value = MagicMock(
+            stdout='{"type": "result", "structured_output": {"summary": "s", "files": ["f"], "changes": ["c"], "verify_cmd": "v", "acceptance_criteria": ["Crit 1", "Crit 2"]}}'
+        )
+        brief = invoker_claude(state)
+        assert isinstance(brief, CodingPlan)
+        assert brief.acceptance_criteria == ["Crit 1", "Crit 2"]
+
+    # 2. Codex with acceptance_criteria
+    invoker_codex = build_cli_architect_invoker("codex")
+
+    def mock_run_command(binary, args):
+        idx = args.index("--output-last-message")
+        out_path = args[idx + 1]
+        with open(out_path, "w") as f:
+            json.dump({
+                "summary": "s_codex",
+                "files": ["f_codex"],
+                "changes": ["c_codex"],
+                "verify_cmd": "v_codex",
+                "acceptance_criteria": ["Crit A", "Crit B", "Crit C"],
+            }, f)
+        return MagicMock()
+
+    with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
+        brief_codex = invoker_codex(state)
+        assert isinstance(brief_codex, CodingPlan)
+        assert brief_codex.acceptance_criteria == ["Crit A", "Crit B", "Crit C"]
+
+
+
 def test_build_cli_architect_invoker_claude_security_contract(monkeypatch, tmp_path):
     import json
     from unittest.mock import MagicMock
