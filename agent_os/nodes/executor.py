@@ -1,4 +1,5 @@
 import os
+import re
 
 from agent_os.agents.cli_executor import build_cli_executor_invoker
 from agent_os.agents.executor import build_executor_agent
@@ -12,6 +13,81 @@ from agent_os.schemas import (
     PlanArtifact,
 )
 from agent_os.state import SimonState
+from agent_os.validation import ValidationRule, run_validation, summarize
+
+_EXPLICIT_CHECK = re.compile(r"^(file_exists|regex|contains|verify_cmd)\s*:\s*(.+)$", re.IGNORECASE)
+_FILE_EXISTS = re.compile(
+    r"(?:file|tệp)\s+[`\"']?([\w./-]+)[`\"']?\s+(?:exists|is present|tồn tại)(?:[.!?]|\s|$)",
+    re.IGNORECASE,
+)
+_VERIFY_EXIT_CODE = re.compile(r"\b(?:exit[_ ]?code|returncode)\s*[:=]\s*(-?\d+)\b", re.IGNORECASE)
+
+
+def _validation_rule_for_criterion(index: int, criterion: str) -> ValidationRule:
+    """Map only explicit machine-checkable prose to deterministic checks."""
+    normalized = criterion.strip()
+    match = _EXPLICIT_CHECK.match(normalized)
+    if match is not None:
+        check, param = match.groups()
+        return ValidationRule(
+            id=f"criterion-{index}",
+            description=normalized,
+            kind="deterministic",
+            check=check.lower(),
+            param=param.strip(),
+        )
+
+    file_match = _FILE_EXISTS.search(normalized)
+    if file_match is not None:
+        return ValidationRule(
+            id=f"criterion-{index}",
+            description=normalized,
+            kind="deterministic",
+            check="file_exists",
+            param=file_match.group(1),
+        )
+
+    return ValidationRule(
+        id=f"criterion-{index}",
+        description=normalized,
+        kind="llm",
+    )
+
+
+def _execution_evidence(plan: PlanArtifact, report: ExecutionResult) -> dict[str, object]:
+    verify_output = getattr(report, "verify_output", "")
+    context: dict[str, object] = {
+        "verify_output": verify_output,
+        "diff": getattr(report, "diff", ""),
+        "artifacts": report.artifacts,
+    }
+    if isinstance(plan, ArchitectBrief) and isinstance(verify_output, str):
+        exit_match = _VERIFY_EXIT_CODE.search(verify_output)
+        if exit_match is not None:
+            context["verify_commands"] = {
+                plan.verify_cmd: {
+                    "exit_code": int(exit_match.group(1)),
+                    "output": verify_output,
+                }
+            }
+    return context
+
+
+def _attach_self_check(report: ExecutionResult, plan: PlanArtifact) -> ExecutionResult:
+    """Attach M/N from report evidence without changing graph control flow."""
+    if not plan.acceptance_criteria:
+        return report
+
+    rules = [
+        _validation_rule_for_criterion(index, criterion)
+        for index, criterion in enumerate(plan.acceptance_criteria, start=1)
+        if criterion.strip()
+    ]
+    if not rules:
+        return report
+
+    context = _execution_evidence(plan, report)
+    return report.model_copy(update={"self_check": summarize(run_validation(rules, context))})
 
 
 def _is_quota_or_rate_limit_error(exc: Exception) -> bool:
@@ -67,7 +143,7 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
                 try:
                     fallback_invoker = build_cli_executor_invoker(fallback_name)
                     report = fallback_invoker(copied_state)
-                    return {"executor_output": report}
+                    return {"executor_output": _attach_self_check(report, plan)}
                 except Exception as fallback_exc:
                     raise RuntimeError(
                         f"CLI executor '{backend}' hit quota limit and fallback '{fallback_name}' also failed: {fallback_exc}"
@@ -79,7 +155,7 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
                 f"Details: {exc}"
             ) from exc
 
-        return {"executor_output": report}
+        return {"executor_output": _attach_self_check(report, plan)}
 
     agent = build_executor_agent()
     result = invoke_with_llm_retry(lambda: agent.invoke({"messages": trimmed}))
@@ -89,4 +165,4 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
     ):
         raise ValueError("Executor agent failed to return a valid ExecutionResult or ExecutorReport.")
 
-    return {"executor_output": result["structured_response"]}
+    return {"executor_output": _attach_self_check(result["structured_response"], plan)}

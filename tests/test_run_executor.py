@@ -6,7 +6,7 @@ from langgraph.types import Command
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import create_run, get_run, list_events
-from agent_os.schemas import ToolExecutionResult
+from agent_os.schemas import ExecutorReport, ToolExecutionResult
 from agent_os.server import run_executor
 from agent_os.server.run_executor import execute_run
 
@@ -155,6 +155,51 @@ async def test_execute_run_includes_workspace_skill_output_in_result_event(
             "tool": "hermes_chat",
             "output": '{"content":"hello"}',
             "success": True,
+        }
+    }
+
+
+@pytest.mark.anyio
+async def test_execute_run_surfaces_executor_self_check_in_result_event(runs_db, monkeypatch):
+    graph = FakeGraph(
+        [],
+        _completed_snapshot(
+            {
+                "executor_output": ExecutorReport(
+                    status="completed",
+                    self_check={
+                        "total": 2,
+                        "met": 1,
+                        "results": [
+                            {
+                                "rule_id": "one",
+                                "passed": True,
+                                "method": "deterministic",
+                                "evidence": "ok",
+                            }
+                        ],
+                    },
+                )
+            }
+        ),
+    )
+    _patch_graph(monkeypatch, graph)
+    run_id = create_run("thread-self-check", None, "validate")
+
+    await execute_run(run_id, "thread-self-check", "validate")
+
+    assert list_events(run_id)[-1]["payload"] == {
+        "self_check": {
+            "total": 2,
+            "met": 1,
+            "results": [
+                {
+                    "rule_id": "one",
+                    "passed": True,
+                    "method": "deterministic",
+                    "evidence": "ok",
+                }
+            ],
         }
     }
 
