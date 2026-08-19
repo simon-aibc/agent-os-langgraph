@@ -13,6 +13,7 @@ from agent_os.observations import (
     observation_workspace_id,
     open_observation_store,
     render_advisory_context,
+    task_signature_for_input,
 )
 from agent_os.server.api import EXECUTION_TOKEN_ENV, app
 
@@ -53,6 +54,63 @@ def test_observations_persist_and_require_explicit_outcomes(tmp_path: Path) -> N
     assert updated is not None
     assert updated.outcome_signal == "edited"
     assert updated.outcome_evidence == "Operator adjusted the delivered artifact."
+
+
+def test_task_signature_is_deterministic_private_and_persisted_for_new_writes(tmp_path: Path) -> None:
+    first_task = (
+        "SimonOS private task 01AAA: Prepare weekly report\n\n"
+        "Prepare weekly report for leadership\n\n"
+        "Private application context:\n- Requested workspace: /private/path"
+    )
+    same_shape = (
+        "SimonOS private task 01BBB: Prepare weekly report\n\n"
+        "Prepare weekly report for leadership\n\n"
+        "Private application context:\n- Requested workspace: /different/path"
+    )
+    signature = task_signature_for_input(first_task)
+
+    assert signature is not None
+    assert signature == task_signature_for_input(same_shape)
+    assert "weekly report" not in signature
+
+    store = _store(tmp_path / "observations.db")
+    observation = store.create(
+        workspace_id="workspace-a",
+        run_id="run-signature",
+        thread_id="thread-signature",
+        task_kind="workflow",
+        task_signature=signature,
+        approach="default-v1",
+        source="server.run",
+    )
+
+    assert _store(tmp_path / "observations.db").get(observation.observation_id) == observation
+    assert observation.task_signature == signature
+
+
+def test_existing_observations_table_migrates_task_signature_additively(tmp_path: Path) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy-observations.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE observations (
+            observation_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+            workspace_id TEXT NOT NULL, run_id TEXT, thread_id TEXT,
+            task_kind TEXT NOT NULL, approach TEXT NOT NULL, artifact_refs TEXT NOT NULL,
+            outcome_signal TEXT NOT NULL, outcome_evidence TEXT, source TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    _store(db_path)
+    with sqlite3.connect(db_path) as migrated:
+        columns = {row[1] for row in migrated.execute("PRAGMA table_info(observations)")}
+    assert "task_signature" in columns
 
 
 def test_observation_validation_and_workspace_isolation(tmp_path: Path) -> None:
