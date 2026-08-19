@@ -52,8 +52,16 @@ def _result_payload(snapshot: object) -> dict[str, Any]:
     if isinstance(tool_result, BaseModel):
         tool_result = tool_result.model_dump(mode="json")
     if isinstance(tool_result, dict):
-        return {"tool_result": tool_result}
-    return {}
+        payload = {"tool_result": tool_result}
+    else:
+        payload = {}
+
+    executor_output = values.get("executor_output")
+    if isinstance(executor_output, BaseModel):
+        executor_output = executor_output.model_dump(mode="json")
+    if isinstance(executor_output, dict) and isinstance(executor_output.get("self_check"), dict):
+        payload["self_check"] = executor_output["self_check"]
+    return payload
 
 
 def terminal_tool_failure(snapshot: object) -> tuple[str, str] | None:

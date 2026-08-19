@@ -374,6 +374,28 @@ def test_run_api_404s(tmp_path, monkeypatch):
     assert client.post("/api/runs/missing/approve", json={}).status_code == 404
     assert client.post("/api/runs/missing/cancel").status_code == 404
 
+
+def test_completed_run_api_surfaces_result_self_check(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    run_id = create_run("thread-self-check", None, "validate")
+    self_check = {
+        "total": 3,
+        "met": 2,
+        "results": [{"rule_id": "one", "passed": True}],
+    }
+    append_event(run_id, "result", {"self_check": self_check})
+    set_status(run_id, "completed", ended=True)
+
+    detail = client.get(f"/api/runs/{run_id}")
+    listing = client.get("/api/runs")
+
+    assert detail.status_code == listing.status_code == 200
+    assert detail.json()["self_check"] == self_check
+    assert next(item for item in listing.json() if item["run_id"] == run_id)[
+        "self_check"
+    ] == self_check
+
 def test_run_api_approve_conflict_when_not_interrupted(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
@@ -771,4 +793,3 @@ def test_get_strategy_assignment_api_and_workspace_scoping(tmp_path, monkeypatch
     import gc
 
     gc.collect()
-

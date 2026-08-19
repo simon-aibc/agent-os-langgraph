@@ -497,7 +497,26 @@ def list_runs_endpoint(
     workspace: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    return list_runs(status=status, workspace=workspace, limit=limit)
+    return [_with_result_self_check(run) for run in list_runs(status=status, workspace=workspace, limit=limit)]
+
+
+def _latest_result_self_check(run_id: str) -> dict[str, Any] | None:
+    for event in reversed(list_events(run_id)):
+        if event["kind"] != "result" or not isinstance(event["payload"], dict):
+            continue
+        self_check = event["payload"].get("self_check")
+        if isinstance(self_check, dict):
+            return self_check
+    return None
+
+
+def _with_result_self_check(run: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(run)
+    if enriched.get("status") == "completed":
+        self_check = _latest_result_self_check(str(enriched["run_id"]))
+        if self_check is not None:
+            enriched["self_check"] = self_check
+    return enriched
 
 def _latest_interrupt_prompt(run_id: str) -> object | None:
     for event in reversed(list_events(run_id)):
@@ -513,6 +532,7 @@ def get_run_endpoint(run_id: str) -> dict[str, Any]:
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    run = _with_result_self_check(run)
     run["interrupt"] = (
         _latest_interrupt_prompt(run_id)
         if run["status"] == "interrupted"

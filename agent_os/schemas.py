@@ -83,6 +83,7 @@ class ExecutionResult(BaseModel):
     artifacts: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     usage: dict[str, float] = Field(default_factory=dict)
+    self_check: dict = Field(default_factory=dict)
 
     @property
     def success(self) -> bool:
