@@ -8,7 +8,11 @@ from pydantic import BaseModel
 from agent_os import runs
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.cli.app import _pending_interrupt
-from agent_os.observations import observation_workspace_id, open_observation_store
+from agent_os.observations import (
+    observation_workspace_id,
+    open_observation_store,
+    task_signature_for_input,
+)
 from agent_os.policy import LocalPolicy, policy_scope
 from agent_os.sandbox import sandbox_scope
 from agent_os.server.runtime import (
@@ -132,6 +136,7 @@ def _capture_terminal_observation(
             run_id=str(run["run_id"]),
             thread_id=str(run["thread_id"]),
             task_kind=task_kind,
+            task_signature=task_signature_for_input(run.get("task")),
             approach=approach,
             outcome_signal="unknown",
             outcome_evidence=f"terminal_status={terminal_status}",

@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass
@@ -30,6 +31,18 @@ MAX_ARTIFACT_REFS: Final = 8
 MAX_ARTIFACT_REF_CHARS: Final = 160
 MAX_ADVISORIES: Final = 3
 MAX_ADVISORY_CHARS: Final = 900
+TASK_SIGNATURE_PREFIX: Final = "sha256:v1:"
+TASK_SIGNATURE_HEX_LENGTH: Final = 64
+_TASK_SIGNATURE_RE = re.compile(
+    rf"^sha256:v1:[0-9a-f]{{{TASK_SIGNATURE_HEX_LENGTH}}}$"
+)
+_PRIVATE_CONTEXT_MARKER: Final = "private application context:"
+_SIGNATURE_STOPWORDS: Final = frozenset(
+    {
+        "a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with",
+        "please", "private", "application", "context", "requested", "workspace",
+    }
+)
 
 OutcomeSignal = Literal["accepted", "rejected", "edited", "unknown"]
 _OUTCOME_SIGNALS: Final = frozenset({"accepted", "rejected", "edited", "unknown"})
@@ -47,6 +60,7 @@ class Observation:
     run_id: str | None
     thread_id: str | None
     task_kind: str
+    task_signature: str | None
     approach: str
     artifact_refs: list[str]
     outcome_signal: OutcomeSignal
@@ -90,6 +104,21 @@ class OutcomePattern:
     outcome_score: float
     last_labelled_at: str | None
     confidence: Literal["insufficient", "exploratory", "actionable"]
+
+
+@dataclass(frozen=True)
+class TaskSignaturePattern:
+    """Read-only aggregate for deterministic capability-candidate mining."""
+
+    workspace_id: str
+    task_kind: str
+    task_signature: str
+    accepted_count: int
+    rejected_count: int
+    edited_count: int
+    occurrence_count: int
+    outcome_score: float
+    sample_run_ids: tuple[str, ...]
 
 
 def observation_workspace_id(workspace: object | None = None) -> str:
@@ -167,6 +196,39 @@ def _validate_artifact_refs(value: object) -> list[str]:
     return refs
 
 
+def task_signature_for_input(task: object) -> str | None:
+    """Hash a normalized task shape without persisting its source text.
+
+    The SimonOS dispatch envelope includes per-run ids and a fixed private
+    context suffix, neither of which should split repeated-work buckets.
+    Only the deterministic digest is stored in an observation.
+    """
+    if not isinstance(task, str):
+        return None
+    raw = task.strip()
+    if not raw:
+        return None
+    task_body = raw.lower().split(_PRIVATE_CONTEXT_MARKER, maxsplit=1)[0]
+    task_body = re.sub(r"^simonos\s+private\s+task\s+[^:\n]+:\s*", "", task_body)
+    tokens = [
+        token
+        for token in re.findall(r"[^\W_]+", task_body, flags=re.UNICODE)
+        if token not in _SIGNATURE_STOPWORDS
+    ]
+    if not tokens:
+        return None
+    digest = hashlib.sha256(" ".join(tokens).encode("utf-8")).hexdigest()
+    return f"{TASK_SIGNATURE_PREFIX}{digest}"
+
+
+def _validate_task_signature(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _TASK_SIGNATURE_RE.fullmatch(value):
+        raise ObservationValidationError("task_signature must be a sha256:v1 digest")
+    return value
+
+
 def _validate_evidence_summary(summary: dict) -> None:
     """Ensure strategy evidence remains aggregate-only and JSON-safe."""
     if not isinstance(summary, dict):
@@ -207,6 +269,7 @@ def _row_to_observation(row: sqlite3.Row) -> Observation:
         run_id=row["run_id"],
         thread_id=row["thread_id"],
         task_kind=row["task_kind"],
+        task_signature=row["task_signature"],
         approach=row["approach"],
         artifact_refs=refs if isinstance(refs, list) else [],
         outcome_signal=row["outcome_signal"],
@@ -246,6 +309,7 @@ class SqliteObservationStore:
                     run_id TEXT,
                     thread_id TEXT,
                     task_kind TEXT NOT NULL,
+                    task_signature TEXT,
                     approach TEXT NOT NULL,
                     artifact_refs TEXT NOT NULL,
                     outcome_signal TEXT NOT NULL,
@@ -257,10 +321,22 @@ class SqliteObservationStore:
                 )
                 """
             )
+            observation_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(observations)").fetchall()
+            }
+            if "task_signature" not in observation_columns:
+                conn.execute("ALTER TABLE observations ADD COLUMN task_signature TEXT")
             conn.execute(
                 """
                 CREATE INDEX IF NOT EXISTS observations_workspace_kind_created
                 ON observations (workspace_id, task_kind, created_at DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS observations_workspace_signature_created
+                ON observations (workspace_id, task_signature, created_at DESC)
                 """
             )
             conn.execute(
@@ -314,6 +390,7 @@ class SqliteObservationStore:
         run_id: str | None,
         thread_id: str | None,
         task_kind: str,
+        task_signature: str | None = None,
         approach: str,
         artifact_refs: list[str] | None = None,
         outcome_signal: OutcomeSignal = "unknown",
@@ -327,6 +404,7 @@ class SqliteObservationStore:
         evidence = _bounded_text(outcome_evidence, field="outcome_evidence", limit=MAX_EVIDENCE_CHARS)
         safe_run_id = _bounded_text(run_id, field="run_id", limit=100)
         safe_thread_id = _bounded_text(thread_id, field="thread_id", limit=160)
+        safe_signature = _validate_task_signature(task_signature)
         refs = _validate_artifact_refs(artifact_refs)
         if outcome_signal not in _OUTCOME_SIGNALS:
             raise ObservationValidationError("outcome_signal must be accepted, rejected, edited, or unknown")
@@ -339,6 +417,7 @@ class SqliteObservationStore:
             run_id=safe_run_id,
             thread_id=safe_thread_id,
             task_kind=task,
+            task_signature=safe_signature,
             approach=strategy,
             artifact_refs=refs,
             outcome_signal=outcome_signal,
@@ -350,7 +429,11 @@ class SqliteObservationStore:
         with contextlib.closing(self._connect()) as conn:
             conn.execute(
                 """
-                INSERT INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO observations (
+                    observation_id, schema_version, workspace_id, run_id, thread_id,
+                    task_kind, task_signature, approach, artifact_refs, outcome_signal,
+                    outcome_evidence, source, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     observation.observation_id,
@@ -359,6 +442,7 @@ class SqliteObservationStore:
                     observation.run_id,
                     observation.thread_id,
                     observation.task_kind,
+                    observation.task_signature,
                     observation.approach,
                     json.dumps(observation.artifact_refs),
                     observation.outcome_signal,
@@ -485,6 +569,67 @@ class SqliteObservationStore:
                     confidence=confidence,
                 )
             )
+        return patterns
+
+    def aggregate_task_signatures(
+        self,
+        *,
+        workspace_id: str,
+        sample_limit: int = 3,
+    ) -> list[TaskSignaturePattern]:
+        """Aggregate explicitly labelled, non-legacy task-signature buckets.
+
+        This is intentionally read-only. Unknown outcomes and historic rows
+        without a signature never qualify as evidence for a new capability.
+        """
+        safe_sample_limit = max(1, min(int(sample_limit), 10))
+        query = """
+            SELECT task_kind, task_signature,
+                SUM(CASE WHEN outcome_signal = 'accepted' THEN 1 ELSE 0 END) AS accepted_count,
+                SUM(CASE WHEN outcome_signal = 'rejected' THEN 1 ELSE 0 END) AS rejected_count,
+                SUM(CASE WHEN outcome_signal = 'edited' THEN 1 ELSE 0 END) AS edited_count
+            FROM observations
+            WHERE workspace_id = ?
+              AND task_signature IS NOT NULL
+              AND outcome_signal IN ('accepted', 'rejected', 'edited')
+            GROUP BY task_kind, task_signature
+            ORDER BY task_kind ASC, task_signature ASC
+        """
+        with contextlib.closing(self._connect()) as conn:
+            rows = conn.execute(query, (workspace_id,)).fetchall()
+            patterns = []
+            for row in rows:
+                accepted = int(row["accepted_count"] or 0)
+                rejected = int(row["rejected_count"] or 0)
+                edited = int(row["edited_count"] or 0)
+                occurrence_count = accepted + rejected + edited
+                if occurrence_count == 0:  # defensive: SQL predicate above guarantees this.
+                    continue
+                sample_rows = conn.execute(
+                    """
+                    SELECT run_id
+                    FROM observations
+                    WHERE workspace_id = ? AND task_kind = ? AND task_signature = ?
+                      AND outcome_signal IN ('accepted', 'rejected', 'edited')
+                      AND run_id IS NOT NULL
+                    ORDER BY created_at DESC, observation_id DESC
+                    LIMIT ?
+                    """,
+                    (workspace_id, row["task_kind"], row["task_signature"], safe_sample_limit),
+                ).fetchall()
+                patterns.append(
+                    TaskSignaturePattern(
+                        workspace_id=workspace_id,
+                        task_kind=str(row["task_kind"]),
+                        task_signature=str(row["task_signature"]),
+                        accepted_count=accepted,
+                        rejected_count=rejected,
+                        edited_count=edited,
+                        occurrence_count=occurrence_count,
+                        outcome_score=(accepted + 0.5 * edited) / occurrence_count,
+                        sample_run_ids=tuple(str(sample["run_id"]) for sample in sample_rows),
+                    )
+                )
         return patterns
 
     def get_strategy_assignment(self, run_id: str) -> StrategyAssignment | None:

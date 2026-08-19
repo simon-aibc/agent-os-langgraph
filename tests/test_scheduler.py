@@ -169,6 +169,43 @@ async def test_dispatch_app_callback_success(app_callback_schedule):
 
 
 @pytest.mark.anyio
+async def test_skill_candidate_scan_uses_one_existing_app_callback_post():
+    schedule = {
+        "schedule_id": "skill-candidate-scan",
+        "name": "simonos-skill-candidate-scan",
+        "kind": "app_callback",
+        "trigger_kind": "cron",
+        "trigger_value": "0 8 * * *",
+        "timezone": "Asia/Ho_Chi_Minh",
+        "payload": {
+            "url": "http://127.0.0.1:4679/api/skill-candidates/scan",
+            "method": "POST",
+        },
+        "enabled": True,
+        "next_run_at": "2026-01-01T01:00:00+00:00",
+    }
+    response = MagicMock(status_code=200, is_success=True)
+    client = AsyncMock()
+    client.request.return_value = response
+    client.__aenter__.return_value = client
+
+    with (
+        patch("agent_os.scheduler.httpx.AsyncClient", return_value=client),
+        patch("agent_os.scheduler.record_schedule_result") as record,
+    ):
+        result = await dispatch_schedule(schedule)
+
+    assert result.status == "completed"
+    client.request.assert_awaited_once_with(
+        method="POST",
+        url="http://127.0.0.1:4679/api/skill-candidates/scan",
+        headers=None,
+        json=None,
+    )
+    record.assert_called_once_with("skill-candidate-scan", status="completed")
+
+
+@pytest.mark.anyio
 async def test_dispatch_app_callback_http_error(app_callback_schedule, caplog):
     mock_resp = MagicMock()
     mock_resp.status_code = 502

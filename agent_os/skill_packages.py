@@ -119,5 +119,4 @@ class SkillPackageLoader:
                 )
             )
 
-        for skill in loaded:
-            self.registry.register(skill)
+        self.registry.register_many(loaded)

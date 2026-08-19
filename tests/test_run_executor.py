@@ -320,6 +320,7 @@ async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, mon
     serialized = str(observation.to_dict())
     assert secret not in serialized
     assert observation.task_kind == "memory_write"
+    assert observation.task_signature is not None
     assert observation.approach == "native_tool:memory_write"
 
 
