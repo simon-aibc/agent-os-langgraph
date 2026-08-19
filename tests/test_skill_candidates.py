@@ -128,6 +128,37 @@ def test_miner_excludes_exact_registry_coverage(tmp_path: Path) -> None:
     assert mine_skill_candidates(store, registry, workspace_id="workspace-a") == ()
 
 
+def test_skill_candidates_api_returns_read_only_workspace_candidates(tmp_path: Path, monkeypatch) -> None:
+    from agent_os.server import api
+
+    store = _store(tmp_path)
+    signature = _signature("api-candidate")
+    _seed(store, signature=signature, accepted=3)
+    monkeypatch.setattr(
+        api,
+        "_runtime_skill_candidate_context",
+        lambda: (store, "workspace-a", SkillRegistry()),
+    )
+
+    payload = api.list_skill_candidates_endpoint()
+
+    assert payload["workspace_id"] == "workspace-a"
+    assert payload["candidates"] == [
+        {
+            "signature": signature,
+            "task_kind": "workflow",
+            "occurrence_count": 3,
+            "success_count": 3,
+            "outcome_score": 1.0,
+            "sample_run_ids": ["workspace-a-workflow-2", "workspace-a-workflow-1", "workspace-a-workflow-0"],
+            "suggested_skill_name": suggested_skill_name(
+                store.aggregate_task_signatures(workspace_id="workspace-a")[0]
+            ),
+            "rationale": "3 labelled workflow occurrences; 3 accepted; outcome score 1.00; no registered exact candidate skill.",
+        }
+    ]
+
+
 def test_miner_sorting_samples_and_candidate_model_are_stable(tmp_path: Path) -> None:
     store = _store(tmp_path)
     first = _signature("alpha")

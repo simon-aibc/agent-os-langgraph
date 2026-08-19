@@ -27,6 +27,8 @@ from agent_os.observations import (
     observation_workspace_id,
     open_observation_store,
 )
+from agent_os.skill_candidates import mine_skill_candidates
+from agent_os.skills import SkillRegistry
 from agent_os.public_concierge import (
     PublicChatRequest,
     PublicChatResponse,
@@ -269,6 +271,19 @@ def _runtime_observation_store() -> tuple[Any, str]:
     if store is None:
         raise RuntimeError("Observations store is unavailable")
     return store, observation_workspace_id(workspace)
+
+
+def _runtime_skill_candidate_context() -> tuple[Any, str, SkillRegistry]:
+    """Return only read-only inputs required by the candidate miner."""
+    from agent_os.server.runtime import composed_workspace
+
+    runtime = composed_workspace()
+    workspace = runtime.workspace if runtime is not None else None
+    store = open_observation_store(workspace)
+    if store is None:
+        raise RuntimeError("Observations store is unavailable")
+    registry = runtime.skill_registry if runtime is not None else SkillRegistry()
+    return store, observation_workspace_id(workspace), registry
 
 
 @app.get("/api/health")
@@ -692,6 +707,20 @@ def list_observations_endpoint(
         ]
     except Exception as exc:
         raise HTTPException(status_code=500, detail="Failed to read observations store") from exc
+
+
+@app.get("/api/skill-candidates")
+def list_skill_candidates_endpoint() -> dict[str, object]:
+    """Read deterministic, review-only skill candidates for this workspace."""
+    try:
+        store, workspace_id, registry = _runtime_skill_candidate_context()
+        candidates = mine_skill_candidates(store, registry, workspace_id=workspace_id)
+        return {
+            "workspace_id": workspace_id,
+            "candidates": [candidate.model_dump(mode="json") for candidate in candidates],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Failed to mine skill candidates") from exc
 
 
 @app.post("/api/observations/{observation_id}/outcome")
