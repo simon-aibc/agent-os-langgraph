@@ -173,7 +173,12 @@ def test_replay_preserves_evidence_backed_reason_and_sanitized_provenance(tmp_pa
     assert set(summary.keys()) == {"labelled_counts", "scores", "winner", "threshold_met", "margin"}
     assert summary["winner"] == "verification-first-v1"
     assert summary["threshold_met"] is True
-    assert summary["labelled_counts"] == {"verification-first-v1": 6, "default-v1": 7, "concise-plan-v1": 0}
+    assert summary["labelled_counts"] == {
+        "verification-first-v1": 6,
+        "default-v1": 7,
+        "concise-plan-v1": 0,
+        "clarify-first-v1": 0,
+    }
     assert summary["scores"]["verification-first-v1"] == 1.0
     assert summary["scores"]["default-v1"] == 0.0
 
@@ -283,3 +288,30 @@ def test_audit_snapshot_contains_no_raw_text(tmp_path: Path) -> None:
     # Check no raw text strings leaked
     for forbidden in ["secret", "private", "confidential", "credentials", "feedback", "instructions"]:
         assert forbidden not in summary_json.lower()
+
+
+def test_clarify_first_strategy_registered_and_selectable(tmp_path: Path) -> None:
+    workflow_strategies = strategies.strategies_for("workflow")
+    strategy_ids = [s.strategy_id for s in workflow_strategies]
+    assert "clarify-first-v1" in strategy_ids
+
+    store = SqliteObservationStore(str(tmp_path / "observations.db"))
+    explicit = select_strategy(
+        store,
+        workspace_id="workspace",
+        task_kind="workflow",
+        run_id="clarify-run",
+        explicit_strategy_id="clarify-first-v1",
+    )
+    assert explicit.hint.strategy_id == "clarify-first-v1"
+    assert explicit.hint.selection_reason == "explicit"
+    assert "binary" in explicit.hint.directive
+    assert "acceptance criteria" in explicit.hint.directive
+    assert "reversible" in explicit.hint.directive
+
+    assignment = store.get_strategy_assignment("clarify-run")
+    assert assignment is not None
+    assert assignment.strategy_id == "clarify-first-v1"
+    assert assignment.selection_reason == "explicit"
+    assert assignment.strategy_version == 1
+
