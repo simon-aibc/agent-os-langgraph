@@ -126,6 +126,36 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", dest="json_output", action="store_true", help="Output as JSON."
     )
 
+    update_parser = subparsers.add_parser(
+        "update", help="Check and apply AgentOS updates."
+    )
+    update_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Only check for available updates without applying.",
+    )
+    update_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Automatically accept update prompts.",
+    )
+    update_parser.add_argument(
+        "--pull",
+        action="store_true",
+        help="Run docker compose pull if in Docker runtime with --yes.",
+    )
+    update_parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Automatically kickstart daemon service after update.",
+    )
+    update_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force update even if version is current.",
+    )
+
     p_brief = subparsers.add_parser("brief", help="Generate Morning Brief")
     p_brief.add_argument("--date", help="Target date YYYY-MM-DD")
     p_brief.add_argument("--profile", help="Named configuration profile to use.")
@@ -294,6 +324,7 @@ def _normalize_argv(argv: list[str]) -> list[str]:
     commands = (
         "run",
         "doctor",
+        "update",
         "chat",
         "sessions",
         "serve",
@@ -1423,6 +1454,11 @@ async def async_main(
         exit_code, output = run_doctor(args.json_output)
         print(output)
         return exit_code
+
+    if args.command == "update":
+        from agent_os.cli.update import handle_update_command
+
+        return handle_update_command(args, console=console)
 
     formatter = EventFormatter(console=console)
 

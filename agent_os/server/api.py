@@ -69,6 +69,7 @@ from agent_os.skill_authoring import (
 from agent_os.skill_candidates import mine_skill_candidates
 from agent_os.skills import SkillRegistry
 from agent_os.strategies import strategies_for
+from agent_os.update_check import check_for_update, read_cached_update
 
 
 @asynccontextmanager
@@ -77,6 +78,13 @@ async def _lifespan(app: FastAPI):
     scheduler = SchedulerService()
     app.state.scheduler = scheduler
     scheduler.start()
+    try:
+        # Out-of-band update check (fail-closed, non-blocking)
+        asyncio.create_task(
+            asyncio.to_thread(check_for_update, SERVER_VERSION, force=False)
+        )
+    except Exception:
+        pass
     try:
         yield
     finally:
@@ -321,12 +329,22 @@ def _runtime_skill_authoring_service() -> SkillAuthoringService:
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
     workspace = runtime_summary()
+    update_info = read_cached_update(current=SERVER_VERSION)
     return {
         "status": "ok" if workspace.get("status") != "error" else "degraded",
         "version": SERVER_VERSION,
+        "current_version": update_info.current_version,
+        "latest_version": update_info.latest_version,
+        "update_available": update_info.update_available,
         "workspace": workspace,
         "active_runs": len(ACTIVE_RUN_TASKS),
     }
+
+
+@app.post("/api/update/check")
+def update_check_endpoint() -> dict[str, Any]:
+    info = check_for_update(current=SERVER_VERSION, force=True)
+    return info.to_dict()
 
 
 @app.get("/api/public/concierge/health")

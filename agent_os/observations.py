@@ -20,6 +20,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final, Literal
 
+from agent_os.migrations import run_migrations
+
 logger = logging.getLogger(__name__)
 
 OBSERVATION_DB_ENV: Final = "AGENT_OS_OBSERVATIONS_DB"
@@ -416,6 +418,7 @@ class SqliteObservationStore:
                 ON strategy_assignments (workspace_id, task_kind, strategy_id)
                 """
             )
+            run_migrations(conn, baseline_version=1)
             conn.commit()
 
     def create(

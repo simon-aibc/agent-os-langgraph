@@ -4,7 +4,12 @@ import re
 from agent_os.agents.cli_executor import build_cli_executor_invoker
 from agent_os.agents.executor import build_executor_agent
 from agent_os.cli_backends import CliBackendError
-from agent_os.llm import invoke_with_llm_retry
+from agent_os.llm import (
+    get_architect_llm,
+    get_executor_llm,
+    get_router_llm,
+    invoke_with_llm_retry,
+)
 from agent_os.messages import trim_agent_messages
 from agent_os.schemas import (
     ArchitectBrief,
@@ -12,8 +17,9 @@ from agent_os.schemas import (
     ExecutorReport,
     PlanArtifact,
 )
+from agent_os.semantic_judge import build_llm_judge
 from agent_os.state import SimonState
-from agent_os.validation import ValidationRule, run_validation, summarize
+from agent_os.validation import LlmJudge, ValidationRule, run_validation, summarize
 
 _EXPLICIT_CHECK = re.compile(
     r"^(file_exists|regex|contains|verify_cmd)\s*:\s*(.+)$", re.IGNORECASE
@@ -79,7 +85,23 @@ def _execution_evidence(
     return context
 
 
-def _attach_self_check(report: ExecutionResult, plan: PlanArtifact) -> ExecutionResult:
+_UNSET = object()
+
+
+def _get_default_judge_llm() -> object | None:
+    for getter in (get_executor_llm, get_architect_llm, get_router_llm):
+        try:
+            return getter()
+        except Exception:
+            continue
+    return None
+
+
+def _attach_self_check(
+    report: ExecutionResult,
+    plan: PlanArtifact,
+    llm_judge: LlmJudge | None | object = _UNSET,
+) -> ExecutionResult:
     """Attach M/N from report evidence without changing graph control flow."""
     if not plan.acceptance_criteria:
         return report
@@ -93,8 +115,20 @@ def _attach_self_check(report: ExecutionResult, plan: PlanArtifact) -> Execution
         return report
 
     context = _execution_evidence(plan, report)
+    if llm_judge is _UNSET:
+        judge = None
+        has_semantic = any(rule.kind == "llm" for rule in rules)
+        if has_semantic:
+            llm_instance = _get_default_judge_llm()
+            if llm_instance is not None:
+                judge = build_llm_judge(llm_instance)
+    else:
+        judge = llm_judge
+
     return report.model_copy(
-        update={"self_check": summarize(run_validation(rules, context))}
+        update={
+            "self_check": summarize(run_validation(rules, context, llm_judge=judge))
+        }
     )
 
 

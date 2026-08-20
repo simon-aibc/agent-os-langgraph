@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from agent_os.migrations import run_migrations
+
 PERMISSION_DB_ENV = "AGENT_OS_PERMISSIONS_DB"
 DEFAULT_PERMISSION_DB = "./permissions.db"
 
@@ -80,6 +82,7 @@ class SqlitePermissionStore:
                   updated_at       INTEGER NOT NULL
                 );
             """)
+            run_migrations(conn, baseline_version=1)
             conn.commit()
 
     def _validate_key(self, permission_key: str) -> None:
