@@ -25,6 +25,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
+from agent_os.migrations import run_migrations
 from agent_os.schedule_recurrence import (
     coalesce_next_run,
     next_run_at,
@@ -157,6 +158,7 @@ def _init_schedules_db() -> None:
                 CREATE INDEX IF NOT EXISTS schedules_due_idx
                     ON schedules(enabled, next_run_at)
             """)
+            run_migrations(conn, baseline_version=1)
             conn.commit()
         except BaseException:
             conn.rollback()

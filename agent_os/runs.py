@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
+from agent_os.migrations import run_migrations
 
 RUNS_DB_ENV = "AGENT_OS_RUNS_DB"
 
@@ -66,6 +67,7 @@ def _init_runs_db() -> None:
                 PRIMARY KEY (run_id, seq)
             )
         """)
+        run_migrations(conn, baseline_version=1)
         conn.commit()
 
 
