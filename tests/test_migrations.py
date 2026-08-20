@@ -7,6 +7,7 @@ from agent_os.migrations import (
     Migration,
     MigrationError,
     _is_safe_statement,
+    backup_database,
     run_migrations,
 )
 
@@ -151,3 +152,35 @@ def test_migration_in_memory_db():
     applied = run_migrations(conn, migrations)
     assert applied == ["0001_add_col"]
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_backup_database_wal_checkpoint(tmp_path: Path):
+    db_file = tmp_path / "wal_test.db"
+
+    # Setup WAL database
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE records (id INT, val TEXT)")
+        conn.execute("INSERT INTO records VALUES (1, 'alpha'), (2, 'beta')")
+        conn.commit()
+
+    # Insert more records without explicit checkpoint
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("INSERT INTO records VALUES (3, 'gamma')")
+        conn.commit()
+
+    # Backup the database
+    backup_file = backup_database(db_file, version=1)
+    assert backup_file is not None
+    assert backup_file.exists()
+
+    # Read from backup file independently
+    with sqlite3.connect(backup_file) as b_conn:
+        rows = b_conn.execute("SELECT id, val FROM records ORDER BY id").fetchall()
+        assert rows == [(1, "alpha"), (2, "beta"), (3, "gamma")]
+
+
+def test_backup_database_memory_and_nonexistent(tmp_path: Path):
+    assert backup_database(":memory:", 1) is None
+    assert backup_database("file::memory:?cache=shared", 1) is None
+    assert backup_database(tmp_path / "nonexistent.db", 1) is None

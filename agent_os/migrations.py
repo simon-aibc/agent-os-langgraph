@@ -99,6 +99,10 @@ def _apply_statement(conn: sqlite3.Connection, sql: str) -> None:
 def backup_database(db_path: str | Path, version: int) -> Path | None:
     """Create a backup of the DB file before applying migrations.
 
+    WAL-aware: Executes PRAGMA wal_checkpoint(TRUNCATE) before copying to flush
+    all uncheckpointed frames into the main DB file. If checkpointing fails,
+    falls back to copying the main file plus -wal and -shm files if present.
+
     Returns the backup Path or None if in-memory / nonexistent.
     """
     path_str = str(db_path)
@@ -110,8 +114,29 @@ def backup_database(db_path: str | Path, version: int) -> Path | None:
         return None
 
     backup_path = path.with_name(f"{path.name}.bak-{version}")
+
+    checkpointed = False
+    try:
+        with sqlite3.connect(str(path), timeout=5.0) as chk_conn:
+            chk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        checkpointed = True
+    except Exception as exc:
+        logger.warning(
+            "WAL checkpoint failed for %s (%s); will fallback to copying sidecar files.",
+            path,
+            exc,
+        )
+
     try:
         shutil.copy2(path, backup_path)
+        if not checkpointed:
+            wal_file = path.with_name(f"{path.name}-wal")
+            shm_file = path.with_name(f"{path.name}-shm")
+            if wal_file.exists():
+                shutil.copy2(wal_file, backup_path.with_name(f"{backup_path.name}-wal"))
+            if shm_file.exists():
+                shutil.copy2(shm_file, backup_path.with_name(f"{backup_path.name}-shm"))
+
         logger.info("Created pre-migration backup at %s", backup_path)
         return backup_path
     except OSError as err:
