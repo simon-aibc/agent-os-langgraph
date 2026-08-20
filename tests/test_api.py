@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,6 +23,14 @@ def test_health_version():
     assert "update_available" in payload
     assert payload["workspace"]["status"] == "not_configured"
     assert payload["active_runs"] == 0
+
+
+def test_health_never_fetches_network_inline(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_OS_UPDATE_CACHE", str(tmp_path / "nonexistent.json"))
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        resp = client.get("/api/health")
+        assert resp.status_code == 200
+        assert mock_urlopen.call_count == 0  # Zero network calls on health poll!
 
 
 def test_update_check_api_endpoint():

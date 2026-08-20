@@ -109,18 +109,47 @@ def _write_cache(cache_path: Path, info: UpdateInfo) -> None:
         logger.debug("Failed to write update cache to %s: %s", cache_path, exc)
 
 
+def read_cached_update(
+    current: str | None = None,
+    *,
+    cache_path: Path | str | None = None,
+) -> UpdateInfo:
+    """Read cached update info without making any network requests.
+
+    If cache is missing, unreadable, or expired, returns a safe UpdateInfo with
+    update_available=False and error="no_cache".
+    """
+    current_ver = current or package_version()
+    resolved_cache = _get_cache_path(cache_path)
+    cached = _read_cache(resolved_cache, current_ver)
+    if cached is not None:
+        return cached
+    now_iso = dt.datetime.now(dt.UTC).isoformat()
+    return UpdateInfo(
+        current_version=current_ver,
+        latest_version=current_ver,
+        update_available=False,
+        checked_at=now_iso,
+        error="no_cache",
+    )
+
+
 def check_for_update(
     current: str | None = None,
     *,
     cache_path: Path | str | None = None,
     force: bool = False,
     timeout: float = 3.0,
+    read_cache_only: bool = False,
 ) -> UpdateInfo:
     """Check for new release against GitHub Releases.
 
     - Cache-first (24h TTL).
     - Fail-closed: returns update_available=False on any failure without raising.
     """
+    if read_cache_only:
+        return read_cached_update(current, cache_path=cache_path)
+
     current_ver = current or package_version()
     resolved_cache = _get_cache_path(cache_path)
 

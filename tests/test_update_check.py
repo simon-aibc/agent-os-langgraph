@@ -94,3 +94,34 @@ def test_update_check_cache_hit_avoids_network(tmp_path: Path):
         assert info.update_available is True
         assert info.latest_version == "2.3.0"
         assert mock_urlopen.call_count == 0  # No network call!
+
+
+def test_read_cached_update_missing_cache_no_network(tmp_path: Path):
+    cache_file = tmp_path / "nonexistent_cache.json"
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        info = check_for_update(
+            current="2.2.0", cache_path=cache_file, read_cache_only=True
+        )
+        assert info.update_available is False
+        assert info.current_version == "2.2.0"
+        assert info.latest_version == "2.2.0"
+        assert info.error == "no_cache"
+        assert mock_urlopen.call_count == 0
+
+
+def test_read_cached_update_hit(tmp_path: Path):
+    cache_file = tmp_path / "cache.json"
+    cached_data = {
+        "current_version": "2.2.0",
+        "latest_version": "2.3.0",
+        "update_available": True,
+        "release_url": "https://example.com",
+    }
+    cache_file.write_text(json.dumps(cached_data), encoding="utf-8")
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        info = check_for_update(
+            current="2.2.0", cache_path=cache_file, read_cache_only=True
+        )
+        assert info.update_available is True
+        assert info.latest_version == "2.3.0"
+        assert mock_urlopen.call_count == 0
