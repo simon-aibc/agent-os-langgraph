@@ -8,6 +8,7 @@ from starlette.websockets import WebSocketDisconnect
 from agent_os.checkpoints import CHECKPOINT_DB_ENV
 from agent_os.runs import append_event, create_run, get_run, list_events, set_status
 from agent_os.server.api import EXECUTION_TOKEN_ENV, app, build_graph_data
+from agent_os.server.runtime import package_version
 
 client = TestClient(app)
 
@@ -17,7 +18,7 @@ def test_health_version():
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "2.2.1"
+    assert payload["version"] == package_version()
     assert "current_version" in payload
     assert "latest_version" in payload
     assert "update_available" in payload
