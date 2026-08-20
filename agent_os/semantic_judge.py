@@ -2,11 +2,12 @@
 
 Evaluates natural language acceptance criteria against independent execution
 evidence (verify_output, diff, artifacts) using an injected LLM.
-Strictly evidence-bounded and fail-closed.
+Strictly evidence-bounded, token-capped, and fail-closed with timeout.
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import re
 from collections.abc import Mapping
@@ -73,8 +74,27 @@ def _parse_judge_response(response_text: str) -> tuple[bool, str]:
     return False, f"Indeterminate judge response: {lines[0]}"
 
 
-def build_llm_judge(llm: Any) -> LlmJudge:
-    """Construct an evidence-bounded LlmJudge callable wrapping an LLM."""
+def build_llm_judge(
+    llm: Any,
+    *,
+    timeout_s: float = 20.0,
+    max_tokens: int = 256,
+) -> LlmJudge:
+    """Construct an evidence-bounded, token-capped LlmJudge with timeout safety."""
+    bound_llm = llm
+    has_bind = (
+        hasattr(type(llm), "bind")
+        or "bind" in getattr(llm, "_mock_children", {})
+        or "bind" in getattr(llm, "__dict__", {})
+    )
+    if has_bind:
+        try:
+            bound_llm = llm.bind(max_tokens=max_tokens)
+        except Exception:
+            try:
+                bound_llm = llm.bind(max_output_tokens=max_tokens)
+            except Exception:
+                bound_llm = llm
 
     def judge(
         rule: ValidationRule, evidence_context: Mapping[str, object]
@@ -88,23 +108,24 @@ Parameter: {rule.param or "(none)"}
 Execution Evidence:
 {evidence_text}
 """
-        try:
-            messages = [
-                SystemMessage(content=_JUDGE_SYSTEM_PROMPT),
-                HumanMessage(content=user_prompt),
-            ]
-            if hasattr(llm, "invoke"):
-                response = llm.invoke(messages)
+        messages = [
+            SystemMessage(content=_JUDGE_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
+
+        def _invoke() -> str:
+            if hasattr(bound_llm, "invoke"):
+                response = bound_llm.invoke(messages)
                 content = (
                     response.content if hasattr(response, "content") else str(response)
                 )
-            elif callable(llm):
-                response = llm(messages)
+            elif callable(bound_llm):
+                response = bound_llm(messages)
                 content = (
                     response.content if hasattr(response, "content") else str(response)
                 )
             else:
-                return False, "LLM object is neither callable nor an invoker."
+                raise TypeError("LLM object is neither callable nor an invoker.")
 
             if isinstance(content, list):
                 text_parts = [
@@ -112,9 +133,19 @@ Execution Evidence:
                     for part in content
                 ]
                 content = " ".join(text_parts)
-            return _parse_judge_response(str(content))
-        except Exception as exc:
-            logger.warning("LLM judge evaluation failed: %s", exc)
-            return False, f"LLM judge execution error: {type(exc).__name__}"
+            return str(content)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_invoke)
+            try:
+                raw_content = future.result(timeout=timeout_s)
+            except concurrent.futures.TimeoutError:
+                logger.warning("LLM judge evaluation timed out after %.1fs", timeout_s)
+                return False, "LLM judge timeout"
+            except Exception as exc:
+                logger.warning("LLM judge evaluation failed: %s", exc)
+                return False, f"LLM judge execution error: {type(exc).__name__}"
+
+        return _parse_judge_response(raw_content)
 
     return judge

@@ -1,3 +1,4 @@
+import time
 from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage
@@ -76,6 +77,37 @@ def test_build_llm_judge_fail_closed_on_exception():
     passed, evidence = judge(rule, {})
     assert passed is False
     assert "LLM judge execution error" in evidence
+
+
+def test_build_llm_judge_timeout():
+    mock_llm = MagicMock()
+
+    def _slow_invoke(messages):
+        time.sleep(0.3)
+        return AIMessage(content="PASS\nLate answer.")
+
+    mock_llm.invoke.side_effect = _slow_invoke
+
+    judge = build_llm_judge(mock_llm, timeout_s=0.05)
+    rule = ValidationRule(id="c1", description="Timeout test", kind="llm")
+    passed, evidence = judge(rule, {})
+    assert passed is False
+    assert evidence == "LLM judge timeout"
+
+
+def test_build_llm_judge_token_cap_bind():
+    mock_llm = MagicMock()
+    mock_bound = MagicMock()
+    mock_bound.invoke.return_value = AIMessage(content="PASS\nBound success.")
+    mock_llm.bind.return_value = mock_bound
+
+    judge = build_llm_judge(mock_llm, max_tokens=128)
+    mock_llm.bind.assert_called_once_with(max_tokens=128)
+
+    rule = ValidationRule(id="c1", description="Token cap test", kind="llm")
+    passed, evidence = judge(rule, {})
+    assert passed is True
+    assert mock_bound.invoke.call_count == 1
 
 
 def test_attach_self_check_mixed_deterministic_and_semantic():
