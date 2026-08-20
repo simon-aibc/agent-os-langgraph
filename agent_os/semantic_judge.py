@@ -135,16 +135,21 @@ Execution Evidence:
                 content = " ".join(text_parts)
             return str(content)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_invoke)
-            try:
-                raw_content = future.result(timeout=timeout_s)
-            except concurrent.futures.TimeoutError:
-                logger.warning("LLM judge evaluation timed out after %.1fs", timeout_s)
-                return False, "LLM judge timeout"
-            except Exception as exc:
-                logger.warning("LLM judge evaluation failed: %s", exc)
-                return False, f"LLM judge execution error: {type(exc).__name__}"
+        # Manual executor (not `with`): a `with` block calls shutdown(wait=True)
+        # on exit, which would block on a hung _invoke thread even after the
+        # timeout fired — defeating the timeout. shutdown(wait=False) abandons it.
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(_invoke)
+        try:
+            raw_content = future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            logger.warning("LLM judge evaluation timed out after %.1fs", timeout_s)
+            return False, "LLM judge timeout"
+        except Exception as exc:
+            logger.warning("LLM judge evaluation failed: %s", exc)
+            return False, f"LLM judge execution error: {type(exc).__name__}"
+        finally:
+            executor.shutdown(wait=False)
 
         return _parse_judge_response(raw_content)
 

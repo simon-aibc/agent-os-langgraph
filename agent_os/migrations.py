@@ -10,6 +10,7 @@ Enforces:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
 import shutil
@@ -117,7 +118,9 @@ def backup_database(db_path: str | Path, version: int) -> Path | None:
 
     checkpointed = False
     try:
-        with sqlite3.connect(str(path), timeout=5.0) as chk_conn:
+        # closing() guarantees the connection is closed (a bare sqlite3 `with`
+        # only manages the transaction, leaving the connection open until GC).
+        with contextlib.closing(sqlite3.connect(str(path), timeout=5.0)) as chk_conn:
             chk_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         checkpointed = True
     except Exception as exc:
