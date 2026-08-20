@@ -232,7 +232,9 @@ def _model_label() -> str:
 
 def _timeout_seconds() -> int:
     try:
-        value = int(os.getenv(PUBLIC_CONCIERGE_TIMEOUT_ENV, str(DEFAULT_TIMEOUT_SECONDS)))
+        value = int(
+            os.getenv(PUBLIC_CONCIERGE_TIMEOUT_ENV, str(DEFAULT_TIMEOUT_SECONDS))
+        )
     except ValueError:
         return DEFAULT_TIMEOUT_SECONDS
     return min(180, max(5, value))

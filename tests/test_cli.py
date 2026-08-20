@@ -82,9 +82,7 @@ def test_parser_formats_tokens_tools_and_supervisor_commands():
         {
             "event": "on_chat_model_stream",
             "data": {
-                "chunk": AIMessageChunk(
-                    content=[{"type": "text", "text": " block"}]
-                )
+                "chunk": AIMessageChunk(content=[{"type": "text", "text": " block"}])
             },
         },
         {
@@ -207,11 +205,15 @@ def test_installed_console_script_help_run():
 
     assert "--resume" in result.stdout
 
+
 def test_doctor_mode_dispatch(monkeypatch, capsys):
     # Mock at the source module
     import agent_os.cli.doctor
     from agent_os.cli.app import main
-    monkeypatch.setattr(agent_os.cli.doctor, "run_doctor", lambda json_output: (0, "DOCTOR OK"))
+
+    monkeypatch.setattr(
+        agent_os.cli.doctor, "run_doctor", lambda json_output: (0, "DOCTOR OK")
+    )
 
     result = main(["doctor"])
     assert result == 0

@@ -15,31 +15,35 @@ def test_policy_logs_append_auto():
     assert evaluate_write_policy("/AI/Logs/x.md", "append") == "auto"
     assert evaluate_write_policy("agentos/logs/x.md", "append") == "auto"
 
+
 def test_policy_decisions_requires_gate():
     assert evaluate_write_policy("AI/Decisions/x.md", "create") == "gate"
     assert evaluate_write_policy("AI/Decisions/x.md", "append") == "gate"
     assert evaluate_write_policy("AI/Decisions/x.md", "overwrite") == "gate"
 
+
 def test_policy_overwrite_requires_gate():
     assert evaluate_write_policy("AI/Logs/x.md", "overwrite") == "gate"
     assert evaluate_write_policy("AI/Logs/x.md", "create") == "gate"
 
+
 def test_memory_write_proposal_in_allowlist():
     assert MemoryWriteProposal in CHECKPOINT_MODEL_TYPES
+
 
 def test_gated_write_auto_commits(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     connector = MarkdownVaultConnector(str(vault))
-    
+
     proposal = MemoryWriteProposal(
         connector="markdown_vault",
         ref="AI/Logs/x.md",
         mode="append",
         content_preview="preview",
-        side_effect="side effect"
+        side_effect="side effect",
     )
-    
+
     res = gated_write(connector, proposal, "real content")
     assert res.committed is True
     assert (vault / "AI/Logs/x.md").read_text(encoding="utf-8") == "real content"
@@ -49,18 +53,18 @@ def test_gated_write_approved(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     connector = MarkdownVaultConnector(str(vault))
-    
+
     proposal = MemoryWriteProposal(
         connector="markdown_vault",
         ref="AI/Decisions/x.md",
         mode="create",
         content_preview="preview",
-        side_effect="side effect"
+        side_effect="side effect",
     )
-    
+
     with patch("agent_os.policy.interrupt", return_value="approved"):
         res = gated_write(connector, proposal, "real content")
-        
+
     assert res.committed is True
     assert (vault / "AI/Decisions/x.md").read_text(encoding="utf-8") == "real content"
 
@@ -69,18 +73,18 @@ def test_gated_write_rejected(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     connector = MarkdownVaultConnector(str(vault))
-    
+
     proposal = MemoryWriteProposal(
         connector="markdown_vault",
         ref="AI/Decisions/x.md",
         mode="create",
         content_preview="preview",
-        side_effect="side effect"
+        side_effect="side effect",
     )
-    
+
     with patch("agent_os.policy.interrupt", return_value="rejected: no"):
         res = gated_write(connector, proposal, "real content")
-        
+
     assert res.committed is False
     assert res.bytes_written is None
     assert not (vault / "AI/Decisions/x.md").exists()

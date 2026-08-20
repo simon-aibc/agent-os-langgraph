@@ -49,7 +49,9 @@ def test_executor_node_invalid_plan():
         "hot_context": None,
     }
 
-    with pytest.raises(ValueError, match="Executor requires a PlanArtifact or ArchitectBrief plan."):
+    with pytest.raises(
+        ValueError, match="Executor requires a PlanArtifact or ArchitectBrief plan."
+    ):
         executor_node(state)
 
 
@@ -196,7 +198,9 @@ def test_executor_node_react_attaches_deterministic_self_check(mock_build_agent)
         acceptance_criteria=["contains: all checks passed", "Tệp `report.txt` tồn tại"],
     )
 
-    completed = executor_node({"messages": [], "task": "do", "plan": plan})["executor_output"]
+    completed = executor_node({"messages": [], "task": "do", "plan": plan})[
+        "executor_output"
+    ]
 
     assert completed.self_check["total"] == completed.self_check["met"] == 2
     assert [item["method"] for item in completed.self_check["results"]] == [
@@ -229,7 +233,9 @@ def test_attach_self_check_reports_unmet_criteria_with_audit_evidence() -> None:
         verify_cmd="pytest -q",
         acceptance_criteria=["file missing.txt exists", "contains: completed"],
     )
-    report = ExecutorReport(status="completed", verify_output="not completed", artifacts=[])
+    report = ExecutorReport(
+        status="completed", verify_output="not completed", artifacts=[]
+    )
 
     completed = _attach_self_check(report, plan)
 
@@ -249,7 +255,9 @@ def test_verify_cmd_requires_explicit_reported_exit_code() -> None:
     )
 
     passed = _attach_self_check(
-        ExecutorReport(status="completed", verify_output="pytest: exit_code=0; 12 passed"),
+        ExecutorReport(
+            status="completed", verify_output="pytest: exit_code=0; 12 passed"
+        ),
         plan,
     )
     unproven = _attach_self_check(
@@ -259,7 +267,10 @@ def test_verify_cmd_requires_explicit_reported_exit_code() -> None:
 
     assert passed.self_check["met"] == 1
     assert unproven.self_check["met"] == 0
-    assert "No supplied verification result" in unproven.self_check["results"][0]["evidence"]
+    assert (
+        "No supplied verification result"
+        in unproven.self_check["results"][0]["evidence"]
+    )
 
 
 def test_executor_node_cli_success_attaches_self_check(monkeypatch):
@@ -291,7 +302,9 @@ def test_executor_node_cli_fallback_attaches_self_check(monkeypatch):
         verify_cmd="v1",
         acceptance_criteria=["contains: fallback verification passed"],
     )
-    fallback_report = ExecutorReport(status="completed", verify_output="fallback verification passed")
+    fallback_report = ExecutorReport(
+        status="completed", verify_output="fallback verification passed"
+    )
 
     def build_invoker(backend):
         if backend == "codex":
@@ -299,7 +312,9 @@ def test_executor_node_cli_fallback_attaches_self_check(monkeypatch):
         assert backend == "claude-code"
         return MagicMock(return_value=fallback_report)
 
-    with patch("agent_os.nodes.executor.build_cli_executor_invoker", side_effect=build_invoker):
+    with patch(
+        "agent_os.nodes.executor.build_cli_executor_invoker", side_effect=build_invoker
+    ):
         completed = executor_node({"messages": [], "task": "do", "plan": plan})[
             "executor_output"
         ]

@@ -79,7 +79,11 @@ def _human_draft(root: Path, *, broken: bool = False) -> Path:
     )
     (package / "handlers.py").write_text(
         "def email_normalizer(task: str = '', **kwargs):\n"
-        + ("    this is invalid python!\n" if broken else "    return {'ok': True, 'task': task}\n")
+        + (
+            "    this is invalid python!\n"
+            if broken
+            else "    return {'ok': True, 'task': task}\n"
+        )
     )
     return package
 
@@ -89,7 +93,9 @@ def _service(root: Path) -> tuple[SkillAuthoringService, Path]:
     return SkillAuthoringService(load_workspace(config)), config
 
 
-def test_prepare_brief_is_immutable_and_has_no_authoring_side_effect(tmp_path: Path) -> None:
+def test_prepare_brief_is_immutable_and_has_no_authoring_side_effect(
+    tmp_path: Path,
+) -> None:
     service, config = _service(tmp_path)
 
     request = service.prepare_brief(_candidate(), now=100)
@@ -116,7 +122,10 @@ def test_failed_draft_preserves_workspace_config_and_registry(tmp_path: Path) ->
     assert result.validation["met"] < result.validation["total"]
     assert config.read_text() == original
     assert not (tmp_path / "skill-packages").exists()
-    assert compose_workspace(load_workspace(config)).skill_registry.get("email_normalizer") is None
+    assert (
+        compose_workspace(load_workspace(config)).skill_registry.get("email_normalizer")
+        is None
+    )
 
 
 def test_validated_draft_requires_final_confirmation_and_then_fresh_compose_loads(
@@ -131,7 +140,11 @@ def test_validated_draft_requires_final_confirmation_and_then_fresh_compose_load
     draft = _human_draft(tmp_path)
     validated = service.submit_draft(request.request_id, str(draft), now=101)
     assert validated.status == "validated"
-    assert validated.validation == {"total": 2, "met": 2, "results": validated.validation["results"]}
+    assert validated.validation == {
+        "total": 2,
+        "met": 2,
+        "results": validated.validation["results"],
+    }
     with pytest.raises(SkillAuthoringError, match="confirm=true"):
         service.confirm_registration(request.request_id, confirm=False, now=102)
     assert "skill-packages" not in config.read_text()
@@ -141,8 +154,13 @@ def test_validated_draft_requires_final_confirmation_and_then_fresh_compose_load
     assert registered.status == "registered"
     assert registered.registration_confirmed_at == 103
     assert registered.registration_result["registered_skill_name"] == "email_normalizer"
-    assert (tmp_path / "skill-packages" / "email_normalizer" / "manifest.toml").is_file()
-    assert compose_workspace(load_workspace(config)).skill_registry.get("email_normalizer") is not None
+    assert (
+        tmp_path / "skill-packages" / "email_normalizer" / "manifest.toml"
+    ).is_file()
+    assert (
+        compose_workspace(load_workspace(config)).skill_registry.get("email_normalizer")
+        is not None
+    )
     runtime.composed_workspace.cache_clear()
 
 
@@ -151,7 +169,9 @@ def test_changed_draft_cannot_cross_the_second_confirmation(tmp_path: Path) -> N
     request = service.prepare_brief(_candidate(), now=100)
     draft = _human_draft(tmp_path)
     service.submit_draft(request.request_id, str(draft), now=101)
-    (draft / "handlers.py").write_text("def email_normalizer(**kwargs):\n    return {'changed': True}\n")
+    (draft / "handlers.py").write_text(
+        "def email_normalizer(**kwargs):\n    return {'changed': True}\n"
+    )
 
     with pytest.raises(SkillAuthoringError, match="changed after validation"):
         service.confirm_registration(request.request_id, confirm=True, now=102)
@@ -170,10 +190,14 @@ def test_cancelled_request_is_inert(tmp_path: Path) -> None:
     assert cancelled.status == "cancelled"
     assert "skill-packages" not in config.read_text()
     with pytest.raises(SkillAuthoringError, match="not ready"):
-        service.submit_draft(request.request_id, str(tmp_path / "skill-drafts"), now=101)
+        service.submit_draft(
+            request.request_id, str(tmp_path / "skill-drafts"), now=101
+        )
 
 
-def test_package_loader_batch_collision_does_not_partially_register(tmp_path: Path) -> None:
+def test_package_loader_batch_collision_does_not_partially_register(
+    tmp_path: Path,
+) -> None:
     package = tmp_path / "package"
     package.mkdir()
     (package / "manifest.toml").write_text(
@@ -191,8 +215,7 @@ entrypoint = "handlers:taken"
 """
     )
     (package / "handlers.py").write_text(
-        "def new_skill(**kwargs): return {}\n"
-        "def taken(**kwargs): return {}\n"
+        "def new_skill(**kwargs): return {}\ndef taken(**kwargs): return {}\n"
     )
     registry = SkillRegistry()
     registry.register(RegisteredSkill(name="taken", aliases=(), handler=lambda: None))
@@ -203,7 +226,9 @@ entrypoint = "handlers:taken"
     assert registry.names() == ["taken"]
 
 
-def test_authoring_api_only_exposes_explicit_gate_actions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_authoring_api_only_exposes_explicit_gate_actions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from agent_os.server import api
 
     service, _config = _service(tmp_path)
@@ -214,6 +239,9 @@ def test_authoring_api_only_exposes_explicit_gate_actions(tmp_path: Path, monkey
     request_id = created["request_id"]
 
     assert created["status"] == "brief_ready"
-    assert api.list_skill_authoring_requests_endpoint()["requests"][0]["request_id"] == request_id
+    assert (
+        api.list_skill_authoring_requests_endpoint()["requests"][0]["request_id"]
+        == request_id
+    )
     cancelled = api.cancel_skill_authoring_request_endpoint(request_id)
     assert cancelled["status"] == "cancelled"

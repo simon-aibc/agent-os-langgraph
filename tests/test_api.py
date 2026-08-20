@@ -10,6 +10,7 @@ from agent_os.server.api import EXECUTION_TOKEN_ENV, app, build_graph_data
 
 client = TestClient(app)
 
+
 def test_health_version():
     resp = client.get("/api/health")
     assert resp.status_code == 200
@@ -18,6 +19,7 @@ def test_health_version():
     assert payload["version"] == "2.2.1"
     assert payload["workspace"]["status"] == "not_configured"
     assert payload["active_runs"] == 0
+
 
 def test_health_reports_configured_workspace(tmp_path, monkeypatch):
     workspace_path = tmp_path / "workspace.toml"
@@ -62,6 +64,7 @@ def test_health_reports_configured_workspace(tmp_path, monkeypatch):
     finally:
         runtime.composed_workspace.cache_clear()
 
+
 def test_cors_allows_console_origin():
     origin = "http://127.0.0.1:4100"
     resp = client.get("/api/health", headers={"Origin": origin})
@@ -102,14 +105,16 @@ def test_run_api_rejects_invalid_strategy_override():
     assert response.status_code == 422
     assert response.json()["detail"] == "Strategy is not allowed for this task kind"
 
+
 def test_api_sessions_list(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv("CHECKPOINT_DB_ENV", db_path)
-    
+
     # Insert a session
     from agent_os.sessions import upsert_session
+
     upsert_session("thr1", "Test session")
-    
+
     resp = client.get("/api/sessions")
     assert resp.status_code == 200
     data = resp.json()
@@ -118,19 +123,23 @@ def test_api_sessions_list(tmp_path, monkeypatch):
     assert data[0]["title"] == "Test session"
     assert "created_at" in data[0]
 
+
 def test_api_brief(monkeypatch):
     from agent_os.brief_runtime import BriefExecutionResult
 
     def mock_execute_brief(*args, **kwargs):
-        return BriefExecutionResult(date="2026-01-01", content="Mock brief content", ref=None)
-    
+        return BriefExecutionResult(
+            date="2026-01-01", content="Mock brief content", ref=None
+        )
+
     monkeypatch.setattr("agent_os.brief_runtime.execute_brief", mock_execute_brief)
-    
+
     resp = client.post("/api/brief")
     assert resp.status_code == 200
     data = resp.json()
     assert "date" in data
     assert data["content"] == "Mock brief content"
+
 
 def test_api_graph_shape():
     resp = client.get("/api/graph")
@@ -140,6 +149,7 @@ def test_api_graph_shape():
     assert "edges" in data
     assert isinstance(data["nodes"], list)
     assert isinstance(data["edges"], list)
+
 
 class FakeMemoryConnector:
     @property
@@ -213,9 +223,7 @@ def test_build_graph_data_respects_node_cap():
     data = build_graph_data(FakeMemoryConnector(), 2)
 
     assert [node["id"] for node in data["nodes"]] == ["team/alpha", "beta"]
-    assert data["edges"] == [
-        {"source": "team/alpha", "target": "beta", "type": "link"}
-    ]
+    assert data["edges"] == [{"source": "team/alpha", "target": "beta", "type": "link"}]
 
 
 def test_api_graph_empty_state_fallback(monkeypatch):
@@ -228,6 +236,7 @@ def test_api_graph_empty_state_fallback(monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json() == {"nodes": [], "edges": []}
+
 
 def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -247,6 +256,7 @@ def test_run_events_sse_replays_from_offset_and_ends(tmp_path, monkeypatch):
     assert [event["seq"] for event in replayed] == [2, 3]
     assert [event["kind"] for event in replayed] == ["token", "result"]
     assert frames[-1] == "event: end\ndata: {}"
+
 
 def test_run_api_lifecycle_create_interrupt_approve_complete(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -336,6 +346,7 @@ def test_run_api_rejects_workspace_outside_sandbox(tmp_path, monkeypatch):
     assert response.status_code == 422
     assert "outside the sandbox" in response.json()["detail"]
 
+
 def test_run_api_cancel_path(tmp_path, monkeypatch):
     from agent_os.policy import LocalPolicy, derive_permission_key
     from agent_os.schemas import ActionProposal
@@ -364,7 +375,10 @@ def test_run_api_cancel_path(tmp_path, monkeypatch):
     events = list_events(run_id)
     assert events[-1]["kind"] == "status"
     assert events[-1]["payload"] == {"status": "cancelled"}
-    assert LocalPolicy(session_key=run_id).evaluate(action).decision == "require_approval"
+    assert (
+        LocalPolicy(session_key=run_id).evaluate(action).decision == "require_approval"
+    )
+
 
 def test_run_api_404s(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -392,9 +406,11 @@ def test_completed_run_api_surfaces_result_self_check(tmp_path, monkeypatch):
 
     assert detail.status_code == listing.status_code == 200
     assert detail.json()["self_check"] == self_check
-    assert next(item for item in listing.json() if item["run_id"] == run_id)[
-        "self_check"
-    ] == self_check
+    assert (
+        next(item for item in listing.json() if item["run_id"] == run_id)["self_check"]
+        == self_check
+    )
+
 
 def test_run_api_approve_conflict_when_not_interrupted(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -405,6 +421,7 @@ def test_run_api_approve_conflict_when_not_interrupted(tmp_path, monkeypatch):
 
     assert resp.status_code == 409
 
+
 def test_run_api_cancel_conflict_when_terminal(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
@@ -414,6 +431,7 @@ def test_run_api_cancel_conflict_when_terminal(tmp_path, monkeypatch):
     resp = client.post(f"/api/runs/{run_id}/cancel")
 
     assert resp.status_code == 409
+
 
 def test_run_api_list_filters(tmp_path, monkeypatch):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -440,41 +458,49 @@ def test_run_api_list_filters(tmp_path, monkeypatch):
     assert limit_resp.status_code == 200
     assert len(limit_resp.json()) == 2
 
+
 @pytest.mark.anyio
 async def test_ws_chat_streams(monkeypatch, tmp_path):
     db_path = str(tmp_path / "checkpoints.sqlite")
     monkeypatch.setenv("CHECKPOINT_DB_ENV", db_path)
     monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
-    
+
     # Mock graph building and running
     class MockGraph:
         async def astream_events(self, state_update, config, version):
             from langchain_core.messages import AIMessageChunk
-            yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="Hel")}}
-            yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="lo")}}
+
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": AIMessageChunk(content="Hel")},
+            }
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": AIMessageChunk(content="lo")},
+            }
 
         async def aget_state(self, config):
             from types import SimpleNamespace
 
             return SimpleNamespace(tasks=())
-            
+
     def mock_build_graph(checkpointer=None):
         return MockGraph()
 
     monkeypatch.setattr("agent_os.graph.build_graph", mock_build_graph)
-    
+
     with client.websocket_connect("/api/chat/thr_ws") as websocket:
         websocket.send_text("Hi there")
-        
+
         # Should receive stream tokens then done
         msg1 = websocket.receive_json()
         assert msg1["type"] == "token"
         assert msg1["content"] == "Hel"
-        
+
         msg2 = websocket.receive_json()
         assert msg2["type"] == "token"
         assert msg2["content"] == "lo"
-        
+
         msg3 = websocket.receive_json()
         assert msg3["type"] == "done"
 
@@ -528,7 +554,9 @@ def test_ws_chat_requires_execution_token_when_configured(monkeypatch, tmp_path)
 
 
 @pytest.mark.anyio
-async def test_ws_chat_binds_standalone_policy_to_nested_memory_write(monkeypatch, tmp_path):
+async def test_ws_chat_binds_standalone_policy_to_nested_memory_write(
+    monkeypatch, tmp_path
+):
     from agent_os.connectors import MarkdownVaultConnector
     from agent_os.memory_gate import gated_write
     from agent_os.permission_store import PermissionRule, SqlitePermissionStore
@@ -576,8 +604,12 @@ async def test_ws_chat_binds_standalone_policy_to_nested_memory_write(monkeypatc
 
             return SimpleNamespace(tasks=())
 
-    monkeypatch.setattr("agent_os.server.api.build_runtime_graph", lambda *, checkpointer: PolicyGraph())
-    monkeypatch.setattr("agent_os.server.api.initial_state", lambda data: {"task": data})
+    monkeypatch.setattr(
+        "agent_os.server.api.build_runtime_graph", lambda *, checkpointer: PolicyGraph()
+    )
+    monkeypatch.setattr(
+        "agent_os.server.api.initial_state", lambda data: {"task": data}
+    )
 
     with client.websocket_connect("/api/chat/policy-thread") as websocket:
         websocket.send_text("write")
@@ -620,7 +652,9 @@ async def test_ws_chat_reports_unsuccessful_native_tool_result(monkeypatch, tmp_
         "agent_os.server.api.build_runtime_graph",
         lambda *, checkpointer: RejectedPolicyGraph(),
     )
-    monkeypatch.setattr("agent_os.server.api.initial_state", lambda data: {"task": data})
+    monkeypatch.setattr(
+        "agent_os.server.api.initial_state", lambda data: {"task": data}
+    )
 
     with client.websocket_connect("/api/chat/ws-rejected-write") as websocket:
         websocket.send_text("write memory")
@@ -632,7 +666,9 @@ async def test_ws_chat_reports_unsuccessful_native_tool_result(monkeypatch, tmp_
 
 
 @pytest.mark.anyio
-async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(monkeypatch, tmp_path):
+async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(
+    monkeypatch, tmp_path
+):
     """WebSocket clients can reconnect, teach a rule, then reuse it."""
     from langgraph.graph import END, START, StateGraph
     from pydantic import BaseModel
@@ -669,7 +705,9 @@ async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(monkeypatch, t
         return builder.compile(checkpointer=checkpointer)
 
     monkeypatch.setattr("agent_os.server.api.build_runtime_graph", build_policy_graph)
-    monkeypatch.setattr("agent_os.server.api.initial_state", lambda data: {"task": data})
+    monkeypatch.setattr(
+        "agent_os.server.api.initial_state", lambda data: {"task": data}
+    )
 
     with client.websocket_connect("/api/chat/ws-learning-first") as websocket:
         websocket.send_text("write memory")
@@ -691,7 +729,10 @@ async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(monkeypatch, t
         websocket.send_text("write memory again")
         assert websocket.receive_json() == {"type": "done"}
 
-    assert (tmp_path / "vault" / proposal.ref).read_text(encoding="utf-8") == "entry\nentry"
+    assert (tmp_path / "vault" / proposal.ref).read_text(
+        encoding="utf-8"
+    ) == "entry\nentry"
+
 
 def test_serve_missing_extra(monkeypatch, capsys):
     import asyncio
@@ -700,12 +741,13 @@ def test_serve_missing_extra(monkeypatch, capsys):
     import sys
 
     from agent_os.cli.app import async_main
+
     monkeypatch.setitem(sys.modules, "fastapi", None)
     monkeypatch.setitem(sys.modules, "uvicorn", None)
-    
+
     exit_code = asyncio.run(async_main(["serve"]))
     assert exit_code == 1
-    
+
     captured = capsys.readouterr()
     assert "FastAPI dependencies not installed" in captured.out
     assert "pip install agent-os-langgraph[serve]" in captured.out
@@ -722,8 +764,10 @@ async def test_serve_refuses_remote_bind_without_execution_token(monkeypatch, ca
     assert exit_code == 2
     assert "AGENT_OS_EXECUTION_TOKEN" in capsys.readouterr().out
 
+
 def test_bind_localhost_default():
     from agent_os.cli.app import build_parser
+
     parser = build_parser()
     args = parser.parse_args(["serve"])
     assert args.host == "127.0.0.1"

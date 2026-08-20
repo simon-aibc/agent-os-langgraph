@@ -53,7 +53,10 @@ def test_app_callback_with_headers_and_body():
     assert inp.payload == {
         "url": "https://example.com/events",
         "method": "POST",
-        "headers": {"Authorization": "Bearer token", "Content-Type": "application/json"},
+        "headers": {
+            "Authorization": "Bearer token",
+            "Content-Type": "application/json",
+        },
         "body": {"action": "sync", "count": 42},
     }
 
@@ -68,7 +71,9 @@ def test_app_callback_requires_url():
 
 
 def test_app_callback_invalid_url_scheme():
-    with pytest.raises(ValidationError, match="url must start with 'http://' or 'https://'"):
+    with pytest.raises(
+        ValidationError, match="url must start with 'http://' or 'https://'"
+    ):
         ScheduleInput(
             name="bad",
             kind="app_callback",
@@ -76,7 +81,9 @@ def test_app_callback_invalid_url_scheme():
             url="ftp://example.com/hook",
         )
 
-    with pytest.raises(ValidationError, match="url must start with 'http://' or 'https://'"):
+    with pytest.raises(
+        ValidationError, match="url must start with 'http://' or 'https://'"
+    ):
         ScheduleInput(
             name="bad",
             kind="app_callback",
@@ -105,7 +112,9 @@ def test_app_callback_invalid_method():
 
 
 def test_app_callback_forbids_task():
-    with pytest.raises(ValidationError, match="kind=app_callback does not accept 'task'"):
+    with pytest.raises(
+        ValidationError, match="kind=app_callback does not accept 'task'"
+    ):
         ScheduleInput(
             name="bad",
             kind="app_callback",
@@ -116,7 +125,9 @@ def test_app_callback_forbids_task():
 
 
 def test_app_callback_forbids_workspace():
-    with pytest.raises(ValidationError, match="kind=app_callback does not accept 'workspace'"):
+    with pytest.raises(
+        ValidationError, match="kind=app_callback does not accept 'workspace'"
+    ):
         ScheduleInput(
             name="bad",
             kind="app_callback",

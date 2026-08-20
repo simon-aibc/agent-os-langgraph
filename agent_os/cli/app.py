@@ -25,7 +25,9 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-os",
         description="Run the Agent OS LangGraph workflow.",
     )
-    parser.add_argument("--workspace", help="Path to workspace.toml or a workspace directory.")
+    parser.add_argument(
+        "--workspace", help="Path to workspace.toml or a workspace directory."
+    )
     subparsers = parser.add_subparsers(dest="command")
 
     run_parser = subparsers.add_parser(
@@ -33,7 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run a workflow.",
         description="Run the Agent OS LangGraph workflow.",
     )
-    run_parser.add_argument("task", nargs="?", help="Task description for a new workflow.")
+    run_parser.add_argument(
+        "task", nargs="?", help="Task description for a new workflow."
+    )
     run_parser.add_argument("--thread-id", help="Thread ID to create or resume.")
     run_parser.add_argument(
         "--resume",
@@ -59,10 +63,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace a persisted backend binding when resuming.",
     )
 
-    p_chat = subparsers.add_parser("chat", help="Start an interactive conversational loop")
-    p_chat.add_argument("--thread-id", help="Thread ID to persist checkpoint state. Generated if absent.")
-    p_chat.add_argument("--resume", action="store_true", help="Resume from the last checkpoint.")
-    p_chat.add_argument("-v", "--verbose", action="store_true", help="Show node progress.")
+    p_chat = subparsers.add_parser(
+        "chat", help="Start an interactive conversational loop"
+    )
+    p_chat.add_argument(
+        "--thread-id",
+        help="Thread ID to persist checkpoint state. Generated if absent.",
+    )
+    p_chat.add_argument(
+        "--resume", action="store_true", help="Resume from the last checkpoint."
+    )
+    p_chat.add_argument(
+        "-v", "--verbose", action="store_true", help="Show node progress."
+    )
     p_chat.add_argument("--sandbox", help="Override AGENT_OS_SANDBOX for this run.")
     p_chat.add_argument("--profile", help="Named configuration profile to use.")
     p_chat.add_argument(
@@ -70,18 +83,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help="Path to workspace.toml or a workspace directory.",
     )
-    p_chat.add_argument("--force-rebind", action="store_true", help="Replace a persisted backend binding when resuming.")
+    p_chat.add_argument(
+        "--force-rebind",
+        action="store_true",
+        help="Replace a persisted backend binding when resuming.",
+    )
 
     p_sessions = subparsers.add_parser("sessions", help="Manage chat sessions")
     s_sub = p_sessions.add_subparsers(dest="session_command")
     s_sub.add_parser("list", help="List all sessions")
-    
+
     s_inspect = s_sub.add_parser("inspect", help="Inspect a session")
     s_inspect.add_argument("thread_id", help="Thread ID")
-    
+
     s_delete = s_sub.add_parser("delete", help="Delete a session")
     s_delete.add_argument("thread_id", help="Thread ID")
-    
+
     s_resume = s_sub.add_parser("resume", help="Resume a session")
     s_resume.add_argument("thread_id", help="Thread ID")
 
@@ -89,8 +106,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser = subparsers.add_parser(
         "serve", help="Start the FastAPI server for the agent-os dashboard."
     )
-    serve_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
-    serve_parser.add_argument("--port", type=int, default=4680, help="Port to bind to (default: 4680)")
+    serve_parser.add_argument(
+        "--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)"
+    )
+    serve_parser.add_argument(
+        "--port", type=int, default=4680, help="Port to bind to (default: 4680)"
+    )
     serve_parser.add_argument("--profile", help="Name of the profile to use")
     serve_parser.add_argument(
         "--workspace",
@@ -98,9 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workspace.toml or a workspace directory.",
     )
 
-    doctor_parser = subparsers.add_parser("doctor", help="Check configuration and health.")
-    doctor_parser.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON.")
-    
+    doctor_parser = subparsers.add_parser(
+        "doctor", help="Check configuration and health."
+    )
+    doctor_parser.add_argument(
+        "--json", dest="json_output", action="store_true", help="Output as JSON."
+    )
+
     p_brief = subparsers.add_parser("brief", help="Generate Morning Brief")
     p_brief.add_argument("--date", help="Target date YYYY-MM-DD")
     p_brief.add_argument("--profile", help="Named configuration profile to use.")
@@ -116,50 +141,87 @@ def build_parser() -> argparse.ArgumentParser:
     sched_sub = p_schedule.add_subparsers(dest="schedule_command")
 
     p_sched_add = sched_sub.add_parser("add", help="Create a new schedule")
-    p_sched_add.add_argument("--name", required=True, help="Human-readable schedule name")
     p_sched_add.add_argument(
-        "--kind", required=True, choices=["run", "brief", "app_callback"],
+        "--name", required=True, help="Human-readable schedule name"
+    )
+    p_sched_add.add_argument(
+        "--kind",
+        required=True,
+        choices=["run", "brief", "app_callback"],
         help="Schedule kind",
     )
     p_sched_add.add_argument("--cron", help="Five-field POSIX cron expression")
     p_sched_add.add_argument("--every", help="Interval (e.g. 30s, 5m, 2h, 1d)")
     p_sched_add.add_argument("--task", help="Task description (required for kind=run)")
-    p_sched_add.add_argument("--timezone", default="UTC", help="IANA timezone (default: UTC)")
-    p_sched_add.add_argument("--workspace", help="Workspace path (optional for kind=run)")
-    p_sched_add.add_argument("--url", help="Callback URL (required for kind=app_callback)")
+    p_sched_add.add_argument(
+        "--timezone", default="UTC", help="IANA timezone (default: UTC)"
+    )
+    p_sched_add.add_argument(
+        "--workspace", help="Workspace path (optional for kind=run)"
+    )
+    p_sched_add.add_argument(
+        "--url", help="Callback URL (required for kind=app_callback)"
+    )
     p_sched_add.add_argument(
         "--method",
-        choices=["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"],
+        choices=[
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "get",
+            "post",
+            "put",
+            "patch",
+            "delete",
+        ],
         help="HTTP method (default: POST)",
     )
     p_sched_add.add_argument("--headers", help="HTTP headers as JSON object string")
     p_sched_add.add_argument("--body", help="HTTP request body as JSON string")
 
     p_sched_list = sched_sub.add_parser("list", help="List schedules")
-    p_sched_list.add_argument("--kind", choices=["run", "brief", "app_callback"], help="Filter by kind")
-    p_sched_list.add_argument("--enabled", choices=["true", "false"], help="Filter by enabled")
-    p_sched_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+    p_sched_list.add_argument(
+        "--kind", choices=["run", "brief", "app_callback"], help="Filter by kind"
+    )
+    p_sched_list.add_argument(
+        "--enabled", choices=["true", "false"], help="Filter by enabled"
+    )
+    p_sched_list.add_argument(
+        "--json", dest="json_output", action="store_true", help="Output as JSON"
+    )
 
     p_sched_remove = sched_sub.add_parser("remove", help="Remove a schedule")
     p_sched_remove.add_argument("schedule_id", help="Schedule ID to remove")
 
-    p_sched_runonce = sched_sub.add_parser("run-once", help="Manually dispatch a schedule")
+    p_sched_runonce = sched_sub.add_parser(
+        "run-once", help="Manually dispatch a schedule"
+    )
     p_sched_runonce.add_argument("schedule_id", help="Schedule ID to dispatch")
 
     # agent-os permissions list|revoke
-    p_permissions = subparsers.add_parser("permissions", help="Manage learned permission rules")
+    p_permissions = subparsers.add_parser(
+        "permissions", help="Manage learned permission rules"
+    )
     perm_sub = p_permissions.add_subparsers(dest="permissions_command")
 
     p_perm_list = perm_sub.add_parser("list", help="List learned permission rules")
-    p_perm_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+    p_perm_list.add_argument(
+        "--json", dest="json_output", action="store_true", help="Output as JSON"
+    )
     p_perm_list.add_argument(
         "--workspace",
         default=argparse.SUPPRESS,
         help="Path to workspace.toml or a workspace directory.",
     )
 
-    p_perm_revoke = perm_sub.add_parser("revoke", help="Revoke a learned permission rule")
-    p_perm_revoke.add_argument("permission_key", help="Permission key to revoke (e.g., memory_write:write:*)")
+    p_perm_revoke = perm_sub.add_parser(
+        "revoke", help="Revoke a learned permission rule"
+    )
+    p_perm_revoke.add_argument(
+        "permission_key", help="Permission key to revoke (e.g., memory_write:write:*)"
+    )
     p_perm_revoke.add_argument(
         "--workspace",
         default=argparse.SUPPRESS,
@@ -171,8 +233,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Review structured outcome evidence (does not change agent policy).",
     )
     observation_sub = p_observations.add_subparsers(dest="observations_command")
-    p_observation_list = observation_sub.add_parser("list", help="List workspace observations")
-    p_observation_list.add_argument("--json", dest="json_output", action="store_true", help="Output as JSON")
+    p_observation_list = observation_sub.add_parser(
+        "list", help="List workspace observations"
+    )
+    p_observation_list.add_argument(
+        "--json", dest="json_output", action="store_true", help="Output as JSON"
+    )
     p_observation_list.add_argument(
         "--workspace",
         default=argparse.SUPPRESS,
@@ -190,7 +256,9 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["accepted", "rejected", "edited"],
         help="Explicit operator outcome",
     )
-    p_observation_record.add_argument("--evidence", help="Short operator-supplied evidence")
+    p_observation_record.add_argument(
+        "--evidence", help="Short operator-supplied evidence"
+    )
     p_observation_record.add_argument(
         "--workspace",
         default=argparse.SUPPRESS,
@@ -224,7 +292,15 @@ def _generate_thread_id() -> str:
 
 def _normalize_argv(argv: list[str]) -> list[str]:
     commands = (
-        "run", "doctor", "chat", "sessions", "serve", "brief", "schedule", "permissions", "observations"
+        "run",
+        "doctor",
+        "chat",
+        "sessions",
+        "serve",
+        "brief",
+        "schedule",
+        "permissions",
+        "observations",
     )
     if not argv:
         return ["run"]
@@ -279,8 +355,7 @@ def _pending_interrupt(snapshot: Any) -> object | None:
 
 def _checkpoint_exists(snapshot: Any) -> bool:
     return bool(
-        getattr(snapshot, "created_at", None)
-        or getattr(snapshot, "values", None)
+        getattr(snapshot, "created_at", None) or getattr(snapshot, "values", None)
     )
 
 
@@ -346,8 +421,7 @@ async def _prepare_resume_binding(
             return snapshot, None
         if not force_rebind:
             rendered_changes = "; ".join(
-                f"{field}: {old!r} -> {new!r}"
-                for field, (old, new) in changes.items()
+                f"{field}: {old!r} -> {new!r}" for field, (old, new) in changes.items()
             )
             formatter.print_error(
                 "Backend binding conflict. Persisted binding: "
@@ -411,7 +485,9 @@ def _read_feedback(
 
     formatter.print_human_prompt(str(prompt))
     is_policy_prompt = str(prompt).startswith(POLICY_APPROVAL_PROMPT_PREFIX)
-    normalizer = normalize_policy_feedback if is_policy_prompt else normalize_human_feedback
+    normalizer = (
+        normalize_policy_feedback if is_policy_prompt else normalize_human_feedback
+    )
     guidance = (
         "Enter 'approved', 'session', 'always_approve', 'always_deny', or "
         "'rejected: <reason>'."
@@ -490,9 +566,7 @@ async def _run_graph(
     if resume:
         snapshot = await graph.aget_state(config)
         if not _checkpoint_exists(snapshot):
-            formatter.print_error(
-                f"Checkpoint not found for thread '{thread_id}'."
-            )
+            formatter.print_error(f"Checkpoint not found for thread '{thread_id}'.")
             return 2
         if not getattr(snapshot, "next", ()):
             formatter.print_error(
@@ -525,7 +599,9 @@ async def _run_graph(
                 return 2
             graph_input: object = Command(resume=feedback)
         else:
-            formatter.print_info(f"Resuming mid-run at node {_next_node_name(snapshot)}")
+            formatter.print_info(
+                f"Resuming mid-run at node {_next_node_name(snapshot)}"
+            )
             graph_input = None
     else:
         if task is None:
@@ -593,6 +669,7 @@ async def _run_graph(
             return 2
         graph_input = Command(resume=feedback)
 
+
 async def _chat_loop(
     graph: Any,
     *,
@@ -629,7 +706,7 @@ async def _chat_loop(
         if binding_exit is not None:
             return binding_exit
         assert snapshot is not None
-        
+
         interrupt_prompt = _pending_interrupt(snapshot)
         if interrupt_prompt is not None:
             try:
@@ -670,9 +747,9 @@ async def _chat_loop(
             return 130
         except EOFError:
             break
-            
+
         snapshot = await graph.aget_state(config)
-        
+
         if not _checkpoint_exists(snapshot):
             # First turn: initialize state with the first message as task
             graph_input = _initial_state(
@@ -682,7 +759,7 @@ async def _chat_loop(
             )
         else:
             graph_input = {"messages": [HumanMessage(content=user_input)]}
-            
+
         while True:
             try:
                 await _stream_pass(
@@ -722,7 +799,9 @@ async def _chat_loop(
 
             interrupt_prompt = _pending_interrupt(snapshot)
             if interrupt_prompt is None:
-                formatter.print_error("Workflow paused at an unsupported node; checkpoint preserved.")
+                formatter.print_error(
+                    "Workflow paused at an unsupported node; checkpoint preserved."
+                )
                 _print_resume_hint(formatter, thread_id)
                 return 1
 
@@ -739,13 +818,18 @@ async def _chat_loop(
             graph_input = Command(resume=feedback)
 
         from agent_os.sessions import upsert_session
+
         title = None
-        if not _checkpoint_exists(snapshot) and isinstance(graph_input, dict) and "messages" in graph_input:
+        if (
+            not _checkpoint_exists(snapshot)
+            and isinstance(graph_input, dict)
+            and "messages" in graph_input
+        ):
             msg = graph_input["messages"][0]
             content = msg[1] if isinstance(msg, tuple) else msg.content
             title = content[:50] + ("..." if len(content) > 50 else "")
         upsert_session(thread_id, title)
-            
+
     # On exit, write session log if summary exists
     try:
         final_snapshot = await graph.aget_state(config)
@@ -756,26 +840,33 @@ async def _chat_loop(
             from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
             from agent_os.session_log import write_session_summary
             from agent_os.sessions import _get_db
-            
+
             workspace_connector = getattr(workspace_runtime, "memory_connector", None)
-            if workspace_connector is not None and hasattr(workspace_connector, "write_note"):
+            if workspace_connector is not None and hasattr(
+                workspace_connector, "write_note"
+            ):
                 connector = workspace_connector
             else:
                 connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
                 if connector_name == "gbrain":
                     connector = GbrainConnector()
                 else:
-                    vault_path = os.getenv("AGENT_OS_VAULT_PATH", backend_binding.sandbox_root)
+                    vault_path = os.getenv(
+                        "AGENT_OS_VAULT_PATH", backend_binding.sandbox_root
+                    )
                     connector = MarkdownVaultConnector(vault_path)
-                
+
             with _get_db() as db:
-                c = db.execute("SELECT turn_count, created_at, title FROM sessions WHERE thread_id = ?", (thread_id,))
+                c = db.execute(
+                    "SELECT turn_count, created_at, title FROM sessions WHERE thread_id = ?",
+                    (thread_id,),
+                )
                 row = c.fetchone()
-                
+
             session_meta = {
                 "turn_count": row[0] if row else 0,
                 "created_at": row[1] if row else "",
-                "title": row[2] if row else "Untitled Session"
+                "title": row[2] if row else "Untitled Session",
             }
             from agent_os.policy import LocalPolicy
 
@@ -807,7 +898,9 @@ async def _chat_loop(
     return 0
 
 
-async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFormatter) -> int:
+async def _handle_schedule_command(
+    args: argparse.Namespace, formatter: EventFormatter
+) -> int:
     """Handle all ``agent-os schedule`` subcommands."""
     import json as _json
 
@@ -898,7 +991,11 @@ async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFor
             return 0
 
         for s in schedules:
-            trigger = f"cron={s['trigger_value']}" if s["trigger_kind"] == "cron" else f"every={s['trigger_value']}"
+            trigger = (
+                f"cron={s['trigger_value']}"
+                if s["trigger_kind"] == "cron"
+                else f"every={s['trigger_value']}"
+            )
             enabled_str = "enabled" if s["enabled"] else "disabled"
             last = s.get("last_status") or "—"
             last_err = f" ({s['last_error']})" if s.get("last_error") else ""
@@ -931,7 +1028,9 @@ async def _handle_schedule_command(args: argparse.Namespace, formatter: EventFor
         if result.run_id:
             formatter.print_info(f"Run {result.run_id}: {result.status}")
         elif result.kind == "app_callback":
-            formatter.print_info(f"Callback {result.status} (status code: {result.ref})")
+            formatter.print_info(
+                f"Callback {result.status} (status code: {result.ref})"
+            )
         elif result.ref:
             formatter.print_info(f"Written: {result.ref}")
         return 0
@@ -949,7 +1048,9 @@ def _open_permissions_store_for_command(workspace_path: str | None) -> Any:
     return SqlitePermissionStore(resolve_permission_db_path(workspace))
 
 
-def _handle_permissions_command(args: argparse.Namespace, formatter: EventFormatter) -> int:
+def _handle_permissions_command(
+    args: argparse.Namespace, formatter: EventFormatter
+) -> int:
     import json as _json
     from dataclasses import asdict
 
@@ -1003,7 +1104,9 @@ def _handle_permissions_command(args: argparse.Namespace, formatter: EventFormat
             formatter.print_error(f"Failed to revoke permission rule: {e}")
             return 2
 
-    formatter.print_error("Unknown permissions subcommand. See: agent-os permissions --help")
+    formatter.print_error(
+        "Unknown permissions subcommand. See: agent-os permissions --help"
+    )
     return 2
 
 
@@ -1018,7 +1121,9 @@ def _open_observations_store_for_command(workspace_path: str | None) -> tuple[An
     return store, observation_workspace_id(workspace)
 
 
-def _handle_observations_command(args: argparse.Namespace, formatter: EventFormatter) -> int:
+def _handle_observations_command(
+    args: argparse.Namespace, formatter: EventFormatter
+) -> int:
     import json as _json
 
     from agent_os.observations import ObservationValidationError
@@ -1097,7 +1202,9 @@ def _handle_observations_command(args: argparse.Namespace, formatter: EventForma
             formatter.print_error(f"Failed to get strategy assignment: {error}")
             return 2
 
-    formatter.print_error("Unknown observations subcommand. See: agent-os observations --help")
+    formatter.print_error(
+        "Unknown observations subcommand. See: agent-os observations --help"
+    )
     return 2
 
 
@@ -1129,12 +1236,14 @@ async def async_main(
 
         from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
         from agent_os.sessions import delete_session, get_session, list_sessions
-        
+
         formatter = EventFormatter(console=console)
         if args.session_command == "list":
             sessions = list_sessions()
             for s in sessions:
-                formatter.print_info(f"ID: {s['thread_id']} | Turns: {s['turn_count']} | Last: {s['last_turn_at'][:16]} | {s['title']}")
+                formatter.print_info(
+                    f"ID: {s['thread_id']} | Turns: {s['turn_count']} | Last: {s['last_turn_at'][:16]} | {s['title']}"
+                )
             return 0
         elif args.session_command == "resume":
             # Delegate to chat
@@ -1160,7 +1269,9 @@ async def async_main(
             if not session:
                 formatter.print_error(f"Session {args.thread_id} not found.")
                 return 1
-            formatter.print_human_prompt(f"Are you sure you want to delete session '{args.thread_id}'? This will permanently delete the checkpoint. (y/N)")
+            formatter.print_human_prompt(
+                f"Are you sure you want to delete session '{args.thread_id}'? This will permanently delete the checkpoint. (y/N)"
+            )
             ans = input_fn("> ")
             if ans.lower() in ("y", "yes"):
                 database_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
@@ -1223,7 +1334,9 @@ async def async_main(
             res = execute_brief(
                 date=getattr(args, "date", None),
                 connector_name=getattr(args, "connector", None),
-                connector=(workspace_runtime.memory_connector if workspace_runtime else None),
+                connector=(
+                    workspace_runtime.memory_connector if workspace_runtime else None
+                ),
                 write=True,
                 engine=policy,
             )
@@ -1267,12 +1380,14 @@ async def async_main(
             from agent_os.server.api import EXECUTION_TOKEN_ENV
             from agent_os.server.api import app as fastapi_app
         except ImportError:
-            print("FastAPI dependencies not installed. Please run: pip install agent-os-langgraph[serve]")
+            print(
+                "FastAPI dependencies not installed. Please run: pip install agent-os-langgraph[serve]"
+            )
             return 1
         except Exception as error:
             print(f"Workspace error: {error}")
             return 2
-            
+
         # We also need to set the profile if provided so the server uses it for backend_binding
         if args.profile and not args.workspace:
             os.environ["AGENT_OS_PROFILE"] = args.profile
@@ -1286,7 +1401,7 @@ async def async_main(
                 "AGENT_OS_EXECUTION_TOKEN."
             )
             return 2
-            
+
         try:
             # We are already inside a running asyncio loop (async_main), so
             # uvicorn.run() — which starts its own loop — would raise "Cannot run
@@ -1304,6 +1419,7 @@ async def async_main(
 
     if args.command == "doctor":
         from agent_os.cli.doctor import run_doctor
+
         exit_code, output = run_doctor(args.json_output)
         print(output)
         return exit_code
@@ -1359,10 +1475,7 @@ async def async_main(
             profile_name, _ = select_profile_name(cli_name, env_name, file_default)
             if profile_name is not None:
                 resolved_prof = resolve_profile(
-                    profile_file,
-                    profile_name,
-                    registry,
-                    get_sandbox_root().resolve()
+                    profile_file, profile_name, registry, get_sandbox_root().resolve()
                 )
     except Exception as e:
         prefix = "Workspace error" if args.workspace else "Profile error"

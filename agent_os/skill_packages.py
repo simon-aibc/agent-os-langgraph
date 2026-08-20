@@ -19,7 +19,7 @@ class SkillPackageLoader:
             path = Path(root_dir)
             if not path.is_dir():
                 continue
-                
+
             for entry in sorted(path.iterdir()):
                 if entry.is_dir():
                     self.load_package(entry)
@@ -42,11 +42,15 @@ class SkillPackageLoader:
         for field in ("name", "version"):
             value = skill_metadata.get(field)
             if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"[skill].{field} must be non-empty in {manifest_path}")
+                raise ValueError(
+                    f"[skill].{field} must be non-empty in {manifest_path}"
+                )
 
         handlers = skill_metadata.get("handlers")
         if not isinstance(handlers, list) or not handlers:
-            raise ValueError(f"[skill] must define at least one handler in {manifest_path}")
+            raise ValueError(
+                f"[skill] must define at least one handler in {manifest_path}"
+            )
 
         loaded: list[RegisteredSkill] = []
         for handler_conf in handlers:
@@ -76,7 +80,9 @@ class SkillPackageLoader:
                     f"Module {module_path} not found for {entrypoint} in {manifest_path}"
                 )
 
-            digest = hashlib.sha256(str(package_dir.resolve()).encode()).hexdigest()[:16]
+            digest = hashlib.sha256(str(package_dir.resolve()).encode()).hexdigest()[
+                :16
+            ]
             import_name = f"_agent_os_skill_{digest}_{'_'.join(module_parts)}"
             spec = spec_from_file_location(import_name, module_path)
             if not spec or not spec.loader:
@@ -99,13 +105,17 @@ class SkillPackageLoader:
 
             handler: SkillHandler = getattr(module, func_name)
             if not isinstance(handler, BaseTool) and not callable(handler):
-                raise ValueError(f"Handler {entrypoint} is not callable in {manifest_path}")
+                raise ValueError(
+                    f"Handler {entrypoint} is not callable in {manifest_path}"
+                )
 
             matches = handler_conf.get("match")
             if (
                 not isinstance(matches, list)
                 or not matches
-                or not all(isinstance(match, str) and match.strip() for match in matches)
+                or not all(
+                    isinstance(match, str) and match.strip() for match in matches
+                )
             ):
                 raise ValueError(
                     f"Handler {entrypoint} needs non-empty match values in {manifest_path}"

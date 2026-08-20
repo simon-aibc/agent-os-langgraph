@@ -53,10 +53,15 @@ def route_from_state(state: SimonState) -> Route:
 
     # a. successful ExecutorReport or generic ExecutionResult -> end
     if isinstance(executor_output, ExecutionResult):
-        if getattr(executor_output, "status", None) == "completed" or getattr(executor_output, "success", None) is True:
+        if (
+            getattr(executor_output, "status", None) == "completed"
+            or getattr(executor_output, "success", None) is True
+        ):
             return "end"
     # Legacy check for ExecutorReport before it becomes a subclass
-    elif isinstance(executor_output, ExecutorReport) and executor_output.success is True:
+    elif (
+        isinstance(executor_output, ExecutorReport) and executor_output.success is True
+    ):
         return "end"
 
     # b. human_feedback == "approved" -> executor

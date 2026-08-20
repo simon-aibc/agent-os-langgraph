@@ -23,7 +23,9 @@ from agent_os.schemas import ActionProposal, MemoryWriteProposal
 
 
 @pytest.mark.anyio
-async def test_cli_stream_binds_workspace_policy_to_nested_memory_write(tmp_path) -> None:
+async def test_cli_stream_binds_workspace_policy_to_nested_memory_write(
+    tmp_path,
+) -> None:
     """A real CLI graph stream reaches gated_write with the composed policy."""
     connector = MarkdownVaultConnector(str(tmp_path / "vault"))
     proposal = MemoryWriteProposal(
@@ -96,7 +98,9 @@ async def test_server_run_binds_workspace_policy_to_nested_memory_write(
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     workspace_path = workspace_root / "workspace.toml"
-    workspace_path.write_text('[workspace]\nname = "server-runtime"\n', encoding="utf-8")
+    workspace_path.write_text(
+        '[workspace]\nname = "server-runtime"\n', encoding="utf-8"
+    )
     sandbox_root = tmp_path / "sandbox"
     sandbox_root.mkdir()
     checkpoint_db = tmp_path / "checkpoints.db"
@@ -209,7 +213,9 @@ async def test_cli_without_workspace_persists_and_reapplies_memory_rule(
     )
     first_config = build_runtime_config("standalone-learning-first")
 
-    await _stream_pass(first_graph, {"task": "write"}, first_config, formatter, verbose=False)
+    await _stream_pass(
+        first_graph, {"task": "write"}, first_config, formatter, verbose=False
+    )
     assert first_results == []
 
     await _stream_pass(

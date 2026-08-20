@@ -108,7 +108,11 @@ def initial_state(
 
 def task_kind_for_input(task: str) -> str:
     """Classify only a known native command; never persist the task itself."""
-    return "memory_write" if task.lstrip().lower().startswith("memory_write") else "workflow"
+    return (
+        "memory_write"
+        if task.lstrip().lower().startswith("memory_write")
+        else "workflow"
+    )
 
 
 def build_runtime_graph(*, checkpointer: Any) -> Any:
@@ -118,9 +122,7 @@ def build_runtime_graph(*, checkpointer: Any) -> Any:
     if runtime is None:
         return build_graph(checkpointer=checkpointer)
     return build_graph(
-        tool_dispatcher_node_impl=build_tool_dispatcher_node(
-            runtime.skill_registry
-        ),
+        tool_dispatcher_node_impl=build_tool_dispatcher_node(runtime.skill_registry),
         checkpointer=checkpointer,
     )
 

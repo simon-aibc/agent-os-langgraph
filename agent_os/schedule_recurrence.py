@@ -71,9 +71,7 @@ def validate_cron(expression: str, timezone: str) -> None:
     try:
         croniter(expression)
     except (ValueError, KeyError) as exc:
-        raise ValueError(
-            f"Invalid cron expression {expression!r}: {exc}"
-        ) from exc
+        raise ValueError(f"Invalid cron expression {expression!r}: {exc}") from exc
 
 
 # ── Next-fire-time calculation ──────────────────────────────────────

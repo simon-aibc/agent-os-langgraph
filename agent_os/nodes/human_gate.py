@@ -28,7 +28,9 @@ def normalize_human_feedback(value: object) -> str:
 def human_gate_node(state: SimonState) -> dict[str, str]:
     plan = state.get("plan")
     if not isinstance(plan, (ArchitectBrief, PlanArtifact)):
-        raise ValueError("human_gate_node requires a PlanArtifact or ArchitectBrief in state['plan']")
+        raise ValueError(
+            "human_gate_node requires a PlanArtifact or ArchitectBrief in state['plan']"
+        )
 
     prompt = (
         "Review the proposed implementation plan.\n\n"

@@ -27,14 +27,18 @@ def _labelled(
             outcome_evidence="terminal_status=completed",
             source="server.run",
         )
-        store.record_outcome(observation.observation_id, signal=signal, evidence="operator label")
+        store.record_outcome(
+            observation.observation_id, signal=signal, evidence="operator label"
+        )
 
 
 def test_aggregation_excludes_unknown_and_evidence_backed_selection_is_isolated(
     tmp_path: Path,
 ) -> None:
     store = SqliteObservationStore(str(tmp_path / "observations.db"))
-    _labelled(store, workspace="alpha", strategy="default-v1", signal="accepted", count=5)
+    _labelled(
+        store, workspace="alpha", strategy="default-v1", signal="accepted", count=5
+    )
     _labelled(
         store,
         workspace="alpha",
@@ -53,10 +57,14 @@ def test_aggregation_excludes_unknown_and_evidence_backed_selection_is_isolated(
         source="server.run",
     )
 
-    selected = select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="next")
+    selected = select_strategy(
+        store, workspace_id="alpha", task_kind="workflow", run_id="next"
+    )
     assert selected.hint.strategy_id == "default-v1"
     assert selected.hint.selection_reason == "evidence_backed"
-    default_pattern = next(item for item in selected.patterns if item.strategy_id == "default-v1")
+    default_pattern = next(
+        item for item in selected.patterns if item.strategy_id == "default-v1"
+    )
     assert default_pattern.labelled_count == 5
     assert default_pattern.unknown_count == 1
     assert default_pattern.outcome_score == 1.0
@@ -68,7 +76,9 @@ def test_aggregation_excludes_unknown_and_evidence_backed_selection_is_isolated(
     assert store.get(unknown.observation_id).outcome_signal == "unknown"
 
 
-def test_exploration_balances_atomically_and_repeat_run_is_stable(tmp_path: Path) -> None:
+def test_exploration_balances_atomically_and_repeat_run_is_stable(
+    tmp_path: Path,
+) -> None:
     database = str(tmp_path / "observations.db")
     SqliteObservationStore(database)
 
@@ -87,11 +97,15 @@ def test_exploration_balances_atomically_and_repeat_run_is_stable(tmp_path: Path
     assert max(counts.values()) - min(counts.values()) <= 1
 
     store = SqliteObservationStore(database)
-    first = select_strategy(store, workspace_id="workspace", task_kind="workflow", run_id="run-0")
+    first = select_strategy(
+        store, workspace_id="workspace", task_kind="workflow", run_id="run-0"
+    )
     assert first.hint.strategy_id == selected[0]
 
 
-def test_exploration_persists_selected_strategy_version(tmp_path: Path, monkeypatch) -> None:
+def test_exploration_persists_selected_strategy_version(
+    tmp_path: Path, monkeypatch
+) -> None:
     definition = StrategyDefinition(
         strategy_id="versioned-exploration-v2",
         version=2,
@@ -110,7 +124,9 @@ def test_exploration_persists_selected_strategy_version(tmp_path: Path, monkeypa
 
     assignment = store.get_strategy_assignment("versioned-exploration-run")
     assert assignment is not None
-    assert assignment.strategy_id == selection.hint.strategy_id == definition.strategy_id
+    assert (
+        assignment.strategy_id == selection.hint.strategy_id == definition.strategy_id
+    )
     assert assignment.strategy_version == selection.hint.version == 2
 
 
@@ -141,22 +157,46 @@ def test_explicit_override_and_safe_fallbacks(tmp_path: Path) -> None:
             run_id="bad",
             explicit_strategy_id="untrusted-v1",
         )
-    assert select_strategy(None, workspace_id="workspace", task_kind="workflow", run_id="none").hint.strategy_id == "default-v1"
-    assert select_strategy(store, workspace_id="workspace", task_kind="memory_write", run_id="tool").hint.selection_reason == "default"
+    assert (
+        select_strategy(
+            None, workspace_id="workspace", task_kind="workflow", run_id="none"
+        ).hint.strategy_id
+        == "default-v1"
+    )
+    assert (
+        select_strategy(
+            store, workspace_id="workspace", task_kind="memory_write", run_id="tool"
+        ).hint.selection_reason
+        == "default"
+    )
 
 
-def test_replay_preserves_evidence_backed_reason_and_sanitized_provenance(tmp_path: Path) -> None:
+def test_replay_preserves_evidence_backed_reason_and_sanitized_provenance(
+    tmp_path: Path,
+) -> None:
     store = SqliteObservationStore(str(tmp_path / "observations.db"))
-    _labelled(store, workspace="alpha", strategy="verification-first-v1", signal="accepted", count=6)
-    _labelled(store, workspace="alpha", strategy="default-v1", signal="rejected", count=7)
+    _labelled(
+        store,
+        workspace="alpha",
+        strategy="verification-first-v1",
+        signal="accepted",
+        count=6,
+    )
+    _labelled(
+        store, workspace="alpha", strategy="default-v1", signal="rejected", count=7
+    )
 
     # Initial selection: evidence_backed
-    first = select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="run-evidence")
+    first = select_strategy(
+        store, workspace_id="alpha", task_kind="workflow", run_id="run-evidence"
+    )
     assert first.hint.strategy_id == "verification-first-v1"
     assert first.hint.selection_reason == "evidence_backed"
 
     # Replay: must preserve evidence_backed (NOT default)
-    replay = select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="run-evidence")
+    replay = select_strategy(
+        store, workspace_id="alpha", task_kind="workflow", run_id="run-evidence"
+    )
     assert replay.hint.strategy_id == "verification-first-v1"
     assert replay.hint.selection_reason == "evidence_backed"
 
@@ -170,7 +210,13 @@ def test_replay_preserves_evidence_backed_reason_and_sanitized_provenance(tmp_pa
 
     summary = assignment.evidence_summary
     assert summary is not None
-    assert set(summary.keys()) == {"labelled_counts", "scores", "winner", "threshold_met", "margin"}
+    assert set(summary.keys()) == {
+        "labelled_counts",
+        "scores",
+        "winner",
+        "threshold_met",
+        "margin",
+    }
     assert summary["winner"] == "verification-first-v1"
     assert summary["threshold_met"] is True
     assert summary["labelled_counts"] == {
@@ -248,7 +294,11 @@ def test_audit_snapshot_contains_no_raw_text(tmp_path: Path) -> None:
         outcome_evidence="secret task instructions and private tokens",
         source="server.run",
     )
-    store.record_outcome(obs.observation_id, signal="rejected", evidence="private feedback on security credentials")
+    store.record_outcome(
+        obs.observation_id,
+        signal="rejected",
+        evidence="private feedback on security credentials",
+    )
 
     for idx in range(5):
         obs2 = store.create(
@@ -261,7 +311,9 @@ def test_audit_snapshot_contains_no_raw_text(tmp_path: Path) -> None:
             outcome_evidence="super private task content",
             source="server.run",
         )
-        store.record_outcome(obs2.observation_id, signal="accepted", evidence="great result")
+        store.record_outcome(
+            obs2.observation_id, signal="accepted", evidence="great result"
+        )
 
     for idx in range(4):
         obs3 = store.create(
@@ -274,9 +326,13 @@ def test_audit_snapshot_contains_no_raw_text(tmp_path: Path) -> None:
             outcome_evidence="other confidential data",
             source="server.run",
         )
-        store.record_outcome(obs3.observation_id, signal="rejected", evidence="bad result")
+        store.record_outcome(
+            obs3.observation_id, signal="rejected", evidence="bad result"
+        )
 
-    select_strategy(store, workspace_id="alpha", task_kind="workflow", run_id="audit-run")
+    select_strategy(
+        store, workspace_id="alpha", task_kind="workflow", run_id="audit-run"
+    )
     assignment = store.get_strategy_assignment("audit-run")
     assert assignment is not None
     assert assignment.selection_reason == "evidence_backed"
@@ -284,9 +340,17 @@ def test_audit_snapshot_contains_no_raw_text(tmp_path: Path) -> None:
     assert summary is not None
 
     import json
+
     summary_json = json.dumps(summary)
     # Check no raw text strings leaked
-    for forbidden in ["secret", "private", "confidential", "credentials", "feedback", "instructions"]:
+    for forbidden in [
+        "secret",
+        "private",
+        "confidential",
+        "credentials",
+        "feedback",
+        "instructions",
+    ]:
         assert forbidden not in summary_json.lower()
 
 
@@ -314,4 +378,3 @@ def test_clarify_first_strategy_registered_and_selectable(tmp_path: Path) -> Non
     assert assignment.strategy_id == "clarify-first-v1"
     assert assignment.selection_reason == "explicit"
     assert assignment.strategy_version == 1
-

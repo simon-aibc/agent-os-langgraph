@@ -79,6 +79,7 @@ def test_build_mcp_server_configs_filesystem_valid_sandbox(mock_home):
             str(sandbox.resolve()),
         ]
 
+
 def test_build_mcp_server_configs_filesystem_invalid_sandbox(
     mock_home,
     tmp_path,
@@ -99,7 +100,9 @@ def test_build_mcp_server_configs_filesystem_invalid_sandbox(
         },
         clear=True,
     ):
-        with pytest.raises(ValueError, match="cannot be the user home directory itself"):
+        with pytest.raises(
+            ValueError, match="cannot be the user home directory itself"
+        ):
             build_mcp_server_configs()
 
     for invalid_path in ["/", "/etc", "/var", "/System"]:
@@ -108,7 +111,9 @@ def test_build_mcp_server_configs_filesystem_invalid_sandbox(
             {"MCP_FILESYSTEM_ENABLED": "true", "AGENT_OS_SANDBOX": invalid_path},
             clear=True,
         ):
-            with pytest.raises(ValueError, match="must be inside the user home directory"):
+            with pytest.raises(
+                ValueError, match="must be inside the user home directory"
+            ):
                 build_mcp_server_configs()
 
     outside_dir = tmp_path / "outside_home"

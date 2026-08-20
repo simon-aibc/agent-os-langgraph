@@ -15,12 +15,16 @@ from agent_os.schemas import (
 from agent_os.state import SimonState
 from agent_os.validation import ValidationRule, run_validation, summarize
 
-_EXPLICIT_CHECK = re.compile(r"^(file_exists|regex|contains|verify_cmd)\s*:\s*(.+)$", re.IGNORECASE)
+_EXPLICIT_CHECK = re.compile(
+    r"^(file_exists|regex|contains|verify_cmd)\s*:\s*(.+)$", re.IGNORECASE
+)
 _FILE_EXISTS = re.compile(
     r"(?:file|tệp)\s+[`\"']?([\w./-]+)[`\"']?\s+(?:exists|is present|tồn tại)(?:[.!?]|\s|$)",
     re.IGNORECASE,
 )
-_VERIFY_EXIT_CODE = re.compile(r"\b(?:exit[_ ]?code|returncode)\s*[:=]\s*(-?\d+)\b", re.IGNORECASE)
+_VERIFY_EXIT_CODE = re.compile(
+    r"\b(?:exit[_ ]?code|returncode)\s*[:=]\s*(-?\d+)\b", re.IGNORECASE
+)
 
 
 def _validation_rule_for_criterion(index: int, criterion: str) -> ValidationRule:
@@ -54,7 +58,9 @@ def _validation_rule_for_criterion(index: int, criterion: str) -> ValidationRule
     )
 
 
-def _execution_evidence(plan: PlanArtifact, report: ExecutionResult) -> dict[str, object]:
+def _execution_evidence(
+    plan: PlanArtifact, report: ExecutionResult
+) -> dict[str, object]:
     verify_output = getattr(report, "verify_output", "")
     context: dict[str, object] = {
         "verify_output": verify_output,
@@ -87,7 +93,9 @@ def _attach_self_check(report: ExecutionResult, plan: PlanArtifact) -> Execution
         return report
 
     context = _execution_evidence(plan, report)
-    return report.model_copy(update={"self_check": summarize(run_validation(rules, context))})
+    return report.model_copy(
+        update={"self_check": summarize(run_validation(rules, context))}
+    )
 
 
 def _is_quota_or_rate_limit_error(exc: Exception) -> bool:
@@ -163,6 +171,8 @@ def executor_node(state: SimonState) -> dict[str, ExecutorReport]:
     if "structured_response" not in result or not isinstance(
         result["structured_response"], (ExecutorReport, ExecutionResult)
     ):
-        raise ValueError("Executor agent failed to return a valid ExecutionResult or ExecutorReport.")
+        raise ValueError(
+            "Executor agent failed to return a valid ExecutionResult or ExecutorReport."
+        )
 
     return {"executor_output": _attach_self_check(result["structured_response"], plan)}

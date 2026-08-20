@@ -44,9 +44,11 @@ def _permission_key(proposal: ActionProposal) -> str:
     assert key is not None
     return key
 
+
 # ==============================================================================
 # 1. Backward Compatibility & Default Taxonomy
 # ==============================================================================
+
 
 def test_1_store_none_backward_compat():
     """store=None -> evaluate() returns identical results with default taxonomy across side_effects."""
@@ -77,6 +79,7 @@ def test_1_store_none_backward_compat():
 # 2. Rule Evaluation & Hit Counting
 # ==============================================================================
 
+
 def test_2_always_approve_hit():
     """always_approve hit -> allow, approve_count increases by 1."""
     store = InMemoryPermissionStore()
@@ -84,7 +87,9 @@ def test_2_always_approve_hit():
     proposal = _memory_action()
     perm_key = _permission_key(proposal)
 
-    rule = PermissionRule(permission_key=perm_key, effect="always_approve", tier_at_creation="low")
+    rule = PermissionRule(
+        permission_key=perm_key, effect="always_approve", tier_at_creation="low"
+    )
     store.upsert(rule)
 
     decision = policy.evaluate(proposal)
@@ -105,7 +110,9 @@ def test_3_always_deny_hit():
     proposal = _memory_action()
     perm_key = _permission_key(proposal)
 
-    rule = PermissionRule(permission_key=perm_key, effect="always_deny", tier_at_creation="low")
+    rule = PermissionRule(
+        permission_key=perm_key, effect="always_deny", tier_at_creation="low"
+    )
     store.upsert(rule)
 
     decision = policy.evaluate(proposal)
@@ -127,11 +134,15 @@ def test_4_always_deny_wins_over_always_approve():
     perm_key = _permission_key(proposal)
 
     # First upsert always_approve
-    rule_app = PermissionRule(permission_key=perm_key, effect="always_approve", tier_at_creation="low")
+    rule_app = PermissionRule(
+        permission_key=perm_key, effect="always_approve", tier_at_creation="low"
+    )
     store.upsert(rule_app)
 
     # Second upsert always_deny
-    rule_deny = PermissionRule(permission_key=perm_key, effect="always_deny", tier_at_creation="low")
+    rule_deny = PermissionRule(
+        permission_key=perm_key, effect="always_deny", tier_at_creation="low"
+    )
     store.upsert(rule_deny)
 
     decision = policy.evaluate(proposal)
@@ -142,6 +153,7 @@ def test_4_always_deny_wins_over_always_approve():
 # ==============================================================================
 # 3. Session Approval Lifecycle & Isolation
 # ==============================================================================
+
 
 def test_5_session_approval_lifecycle():
     """session approve -> allow; after clear_session -> fallback to require_approval."""
@@ -191,6 +203,7 @@ def test_session_isolation_with_session():
 # 4. Mode Semantics (manual, smart, off)
 # ==============================================================================
 
+
 def test_6_mode_off():
     """mode='off' -> unsafe local-only escape hatch: allows all actions including payment."""
     policy = LocalPolicy(mode="off")
@@ -207,23 +220,37 @@ def test_mode_smart_is_manual_alias():
     policy_smart = LocalPolicy(store=store, mode="smart")
     policy_manual = LocalPolicy(store=store, mode="manual")
 
-    p_write = ActionProposal(tool="file.write", side_effect="write", arguments={"ref": "file.txt"})
+    p_write = ActionProposal(
+        tool="file.write", side_effect="write", arguments={"ref": "file.txt"}
+    )
     p_pay = ActionProposal(tool="stripe.charge", side_effect="payment")
 
-    assert policy_smart.evaluate(p_write).decision == policy_manual.evaluate(p_write).decision == "require_approval"
-    assert policy_smart.evaluate(p_pay).decision == policy_manual.evaluate(p_pay).decision == "deny"
+    assert (
+        policy_smart.evaluate(p_write).decision
+        == policy_manual.evaluate(p_write).decision
+        == "require_approval"
+    )
+    assert (
+        policy_smart.evaluate(p_pay).decision
+        == policy_manual.evaluate(p_pay).decision
+        == "deny"
+    )
 
 
 def test_mode_invalid_fallback():
     """Invalid mode logs warning and falls back to 'manual'."""
     policy = LocalPolicy(mode="nonexistent_mode")
     assert policy.mode == "manual"
-    assert policy.evaluate(ActionProposal(tool="f", side_effect="write")).decision == "require_approval"
+    assert (
+        policy.evaluate(ActionProposal(tool="f", side_effect="write")).decision
+        == "require_approval"
+    )
 
 
 # ==============================================================================
 # 5. High-Risk Guard & Key Derivation
 # ==============================================================================
+
 
 def test_7_tier_high_guard(monkeypatch):
     """tier-high guard: apply_policy with side_effect='payment', feedback='always_approve' -> NO rule created in store."""
@@ -233,10 +260,18 @@ def test_7_tier_high_guard(monkeypatch):
     # Mock interrupt to return "always_approve"
     monkeypatch.setattr("agent_os.policy.interrupt", lambda msg: "always_approve")
 
-    execute_fn = MagicMock(return_value=ExecutionResult(status="completed", outputs={}, artifacts=[], errors=[]))
+    execute_fn = MagicMock(
+        return_value=ExecutionResult(
+            status="completed", outputs={}, artifacts=[], errors=[]
+        )
+    )
 
     p_high_req = ActionProposal(tool="custom.high_tool", side_effect="payment")
-    monkeypatch.setattr(engine, "evaluate", lambda prop, **kw: MagicMock(decision="require_approval", reason="testing"))
+    monkeypatch.setattr(
+        engine,
+        "evaluate",
+        lambda prop, **kw: MagicMock(decision="require_approval", reason="testing"),
+    )
 
     res = apply_policy(engine, p_high_req, execute_fn=execute_fn)
     assert res.status == "completed"
@@ -257,7 +292,9 @@ def test_8_sqlite_persistence(tmp_path):
 
     # Open store2 on same DB file (simulating process restart)
     store2 = SqlitePermissionStore(db_file)
-    fetched = store2.get("memory_write:write:markdown_vault:create:AI/Decisions/config.md")
+    fetched = store2.get(
+        "memory_write:write:markdown_vault:create:AI/Decisions/config.md"
+    )
     assert fetched is not None
     assert fetched.effect == "always_approve"
     assert fetched.tier_at_creation == "low"
@@ -271,25 +308,49 @@ def test_9_derive_permission_key_is_exact_memory_scope():
 
     # Mode and connector are independently scoped, so create never grants overwrite
     # and one connector never grants a second provider.
-    assert _permission_key(_memory_action("AI/Decisions/foo/bar.md", mode="overwrite")) != key1
-    assert _permission_key(
-        _memory_action("AI/Decisions/foo/bar.md", connector="gbrain")
-    ) != key1
+    assert (
+        _permission_key(_memory_action("AI/Decisions/foo/bar.md", mode="overwrite"))
+        != key1
+    )
+    assert (
+        _permission_key(_memory_action("AI/Decisions/foo/bar.md", connector="gbrain"))
+        != key1
+    )
 
     # Generic tools lack a canonical destination schema in this release.
-    assert derive_permission_key(ActionProposal(tool="http.request", side_effect="network")) is None
-    assert derive_permission_key(
-        ActionProposal(tool="file.write", side_effect="write", arguments={"ref": "foo.txt"})
-    ) is None
+    assert (
+        derive_permission_key(
+            ActionProposal(tool="http.request", side_effect="network")
+        )
+        is None
+    )
+    assert (
+        derive_permission_key(
+            ActionProposal(
+                tool="file.write", side_effect="write", arguments={"ref": "foo.txt"}
+            )
+        )
+        is None
+    )
     assert derive_permission_key(_memory_action("AI/Decisions/a:b.md")) is None
     assert derive_permission_key(_memory_action("AI/Decisions/a b.md")) is None
-    assert derive_permission_key(
-        _memory_action("AI/Decisions/foo.md", connector="markdown-vault")
-    ) is None
-    assert derive_permission_key(_memory_action("AI/Decisions/foo.md", mode="Create")) is None
+    assert (
+        derive_permission_key(
+            _memory_action("AI/Decisions/foo.md", connector="markdown-vault")
+        )
+        is None
+    )
+    assert (
+        derive_permission_key(_memory_action("AI/Decisions/foo.md", mode="Create"))
+        is None
+    )
 
     store = InMemoryPermissionStore()
-    store.upsert(PermissionRule(permission_key=key1, effect="always_approve", tier_at_creation="low"))
+    store.upsert(
+        PermissionRule(
+            permission_key=key1, effect="always_approve", tier_at_creation="low"
+        )
+    )
     assert store.get(key1) is not None
 
 
@@ -299,7 +360,11 @@ def test_store_delete_boolean():
     k = "tool:write:file.txt"
     assert store.delete(k) is False
 
-    store.upsert(PermissionRule(permission_key=k, effect="always_approve", tier_at_creation="low"))
+    store.upsert(
+        PermissionRule(
+            permission_key=k, effect="always_approve", tier_at_creation="low"
+        )
+    )
     assert store.delete(k) is True
     assert store.delete(k) is False
 
@@ -340,6 +405,7 @@ def test_11_workspace_permission_store_fallback(monkeypatch):
 # ==============================================================================
 # 6. Gated Write Explicit Conversion Contract Tests
 # ==============================================================================
+
 
 def test_gated_write_contract_success(tmp_path):
     """gated_write returns MemoryWriteResult with committed=True when auto-approved or approved."""
@@ -427,6 +493,7 @@ def test_memory_write_mode_is_strictly_validated(tmp_path):
 # 7. Real LangGraph Interrupt/Resume StateGraph E2E Tests
 # ==============================================================================
 
+
 class WorkflowState(BaseModel):
     task: str
     result: str | None = None
@@ -440,7 +507,9 @@ def _build_test_action_graph(engine: LocalPolicy, proposal: ActionProposal):
 
     def execute_node(state: WorkflowState) -> dict[str, Any]:
         def _exec(p: ActionProposal) -> ExecutionResult:
-            return ExecutionResult(status="completed", outputs={"data": "executed_payload"})
+            return ExecutionResult(
+                status="completed", outputs={"data": "executed_payload"}
+            )
 
         res = apply_policy(engine, proposal, execute_fn=_exec)
         if res.status == "completed":
@@ -457,7 +526,9 @@ def _build_test_action_graph(engine: LocalPolicy, proposal: ActionProposal):
 def test_e2e_a_approve_once_succeeds_and_next_action_asks_again():
     """(a) approve once -> succeeds; next matching action interrupts again."""
     engine = LocalPolicy()
-    proposal = ActionProposal(tool="file.write", side_effect="write", arguments={"ref": "doc.txt"})
+    proposal = ActionProposal(
+        tool="file.write", side_effect="write", arguments={"ref": "doc.txt"}
+    )
     graph = _build_test_action_graph(engine, proposal)
 
     config_1 = {"configurable": {"thread_id": "thread-1"}}
@@ -620,7 +691,9 @@ def test_e2e_e_gated_memory_write_shared_policy_interrupt_resume(tmp_path):
     builder2 = StateGraph(WorkflowState)
 
     def write_node2(state: WorkflowState) -> dict[str, Any]:
-        res = gated_write(connector2, proposal, "Launch plan content v2", engine=engine2)
+        res = gated_write(
+            connector2, proposal, "Launch plan content v2", engine=engine2
+        )
         return {"status": "completed" if res.committed else "failed"}
 
     builder2.add_node("write_node2", write_node2)
@@ -645,7 +718,9 @@ def test_e2e_e_gated_memory_write_shared_policy_interrupt_resume(tmp_path):
     builder3 = StateGraph(WorkflowState)
 
     def write_node3(state: WorkflowState) -> dict[str, Any]:
-        res = gated_write(connector, overwrite, "Launch plan content v3", engine=engine2)
+        res = gated_write(
+            connector, overwrite, "Launch plan content v3", engine=engine2
+        )
         return {"status": "completed" if res.committed else "failed"}
 
     builder3.add_node("write_node3", write_node3)
@@ -668,7 +743,11 @@ def test_e2e_f_revoke_restores_prompt(tmp_path):
     perm_key = _permission_key(proposal)
 
     # Seed rule
-    store.upsert(PermissionRule(permission_key=perm_key, effect="always_approve", tier_at_creation="low"))
+    store.upsert(
+        PermissionRule(
+            permission_key=perm_key, effect="always_approve", tier_at_creation="low"
+        )
+    )
 
     graph = _build_test_action_graph(engine, proposal)
     config = {"configurable": {"thread_id": "thread-auto"}}
@@ -697,8 +776,14 @@ def test_e2e_g_high_tier_never_persisted():
     def high_tier_node(state: WorkflowState) -> dict[str, Any]:
         # Temporarily force require_approval to test the interrupt resume path
         custom_engine = LocalPolicy(store=store)
-        custom_engine.evaluate = lambda p, **kw: MagicMock(decision="require_approval", reason="high risk")
-        res = apply_policy(custom_engine, proposal, execute_fn=lambda p: ExecutionResult(status="completed"))
+        custom_engine.evaluate = lambda p, **kw: MagicMock(
+            decision="require_approval", reason="high risk"
+        )
+        res = apply_policy(
+            custom_engine,
+            proposal,
+            execute_fn=lambda p: ExecutionResult(status="completed"),
+        )
         return {"status": res.status}
 
     builder.add_node("high_node", high_tier_node)
@@ -826,6 +911,7 @@ def test_live_store_write_failure_does_not_execute_or_persist(monkeypatch):
 # 8. CLI Commands: agent-os permissions list & revoke
 # ==============================================================================
 
+
 @pytest.mark.anyio
 async def test_cli_permissions_list_and_revoke(tmp_path, monkeypatch):
     """Test CLI agent-os permissions list [--json] and agent-os permissions revoke."""
@@ -843,7 +929,13 @@ async def test_cli_permissions_list_and_revoke(tmp_path, monkeypatch):
 
     # 2. Seed a rule
     store = SqlitePermissionStore(db_file)
-    store.upsert(PermissionRule(permission_key="file_write:write:foo.txt", effect="always_approve", tier_at_creation="low"))
+    store.upsert(
+        PermissionRule(
+            permission_key="file_write:write:foo.txt",
+            effect="always_approve",
+            tier_at_creation="low",
+        )
+    )
 
     # 3. List formatted
     code = await async_main(["permissions", "list"], console=console)
@@ -854,11 +946,15 @@ async def test_cli_permissions_list_and_revoke(tmp_path, monkeypatch):
     assert code == 0
 
     # 5. Revoke nonexistent
-    code = await async_main(["permissions", "revoke", "nonexistent:write:*"], console=console)
+    code = await async_main(
+        ["permissions", "revoke", "nonexistent:write:*"], console=console
+    )
     assert code == 1
 
     # 6. Revoke existing
-    code = await async_main(["permissions", "revoke", "file_write:write:foo.txt"], console=console)
+    code = await async_main(
+        ["permissions", "revoke", "file_write:write:foo.txt"], console=console
+    )
     assert code == 0
     assert store.get("file_write:write:foo.txt") is None
 
@@ -866,6 +962,7 @@ async def test_cli_permissions_list_and_revoke(tmp_path, monkeypatch):
 # ==============================================================================
 # 9. Server API: GET /api/permissions & DELETE /api/permissions/{key}
 # ==============================================================================
+
 
 def test_api_permissions_endpoints(tmp_path, monkeypatch):
     """Test /api/permissions and /api/permissions/{key} endpoints."""
@@ -878,7 +975,13 @@ def test_api_permissions_endpoints(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_OS_PERMISSIONS_ADMIN_TOKEN", "test-permissions-token")
 
     store = SqlitePermissionStore(db_file)
-    store.upsert(PermissionRule(permission_key="tool:write:path.txt", effect="always_approve", tier_at_creation="low"))
+    store.upsert(
+        PermissionRule(
+            permission_key="tool:write:path.txt",
+            effect="always_approve",
+            tier_at_creation="low",
+        )
+    )
 
     client = TestClient(app)
     headers = {"x-admin-token": "test-permissions-token"}

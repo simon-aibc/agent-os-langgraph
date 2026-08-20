@@ -14,11 +14,11 @@ def generate_brief(
     *,
     date: str,
     summarizer: Callable[[str], str],
-    spine_sources: list[str] | None = None
+    spine_sources: list[str] | None = None,
 ) -> str:
     """
     Generate a morning brief by reading yesterday's logs, context spine, and active sessions.
-    
+
     Args:
         memory_connector: Memory connector to read vault.
         sessions: List of sessions dicts from the sessions table.
@@ -32,9 +32,9 @@ def generate_brief(
     except ValueError:
         # Fallback if just YYYY-MM-DD
         dt = datetime.datetime.strptime(date, "%Y-%m-%d")
-        
+
     yesterday = (dt - datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-    
+
     # 2. Read logs from yesterday
     logs_content = ""
     try:
@@ -54,7 +54,7 @@ def generate_brief(
 
     # 3. Read context spine
     spine_content = load_hot_context(memory_connector, sources=spine_sources)
-    
+
     # 4. Format sessions
     sessions_content = ""
     if sessions:
@@ -105,28 +105,28 @@ def write_brief(
     Write the generated brief to the vault via gated_write (which auto-approves AI/Briefs/).
     """
     ref = f"AI/Briefs/{date}.md"
-    
+
     now = datetime.datetime.now(datetime.UTC)
     frontmatter = {
         "agent": "agent-os",
         "created": now.isoformat(),
-        "via": "morning-brief"
+        "via": "morning-brief",
     }
-    
+
     # We use append mode if we want to add to it, but typically a brief is created per day.
     # We will use "append" so it can be auto-approved, or "create" if it is auto-approved.
-    # The policy for AI/Logs/ allows both append and create. 
+    # The policy for AI/Logs/ allows both append and create.
     # Let's use "create" mode for briefs as there's 1 per day.
     # Wait, the spec says AI/Briefs/ append/create -> "auto".
-    
+
     proposal = MemoryWriteProposal(
         connector=str(getattr(connector, "name", "memory")),
         ref=ref,
         mode="create",
         content_preview=brief_md[:100] + "...",
-        side_effect=f"Create morning brief for {date}"
+        side_effect=f"Create morning brief for {date}",
     )
-    
+
     # Write using gated_write which checks evaluate_write_policy
     # (wait, gated_write signature: gated_write(connector, proposal, content, frontmatter))
     return gated_write(connector, proposal, brief_md, frontmatter, engine=engine)

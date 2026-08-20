@@ -62,7 +62,9 @@ def _actual_output(context: Mapping[str, object]) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def _verify_command(rule: ValidationRule, context: Mapping[str, object]) -> tuple[bool, str]:
+def _verify_command(
+    rule: ValidationRule, context: Mapping[str, object]
+) -> tuple[bool, str]:
     if not rule.param:
         return False, "verify_cmd requires the command key in param."
 
@@ -88,7 +90,9 @@ def _verify_command(rule: ValidationRule, context: Mapping[str, object]) -> tupl
     return exit_code == 0, evidence
 
 
-def _file_exists(rule: ValidationRule, context: Mapping[str, object]) -> tuple[bool, str]:
+def _file_exists(
+    rule: ValidationRule, context: Mapping[str, object]
+) -> tuple[bool, str]:
     if not rule.param:
         return False, "file_exists requires the expected path in param."
 
@@ -107,14 +111,20 @@ def _regex(rule: ValidationRule, context: Mapping[str, object]) -> tuple[bool, s
         matched = re.search(rule.param, _actual_output(context)) is not None
     except re.error as error:
         return False, f"Invalid regex {rule.param!r}: {error}."
-    return matched, f"Regex {rule.param!r} {'matched' if matched else 'did not match'} supplied output."
+    return (
+        matched,
+        f"Regex {rule.param!r} {'matched' if matched else 'did not match'} supplied output.",
+    )
 
 
 def _contains(rule: ValidationRule, context: Mapping[str, object]) -> tuple[bool, str]:
     if not rule.param:
         return False, "contains requires the expected text in param."
     matched = rule.param in _actual_output(context)
-    return matched, f"Text {rule.param!r} {'was found in' if matched else 'was absent from'} supplied output."
+    return (
+        matched,
+        f"Text {rule.param!r} {'was found in' if matched else 'was absent from'} supplied output.",
+    )
 
 
 _DETERMINISTIC_CHECKERS: Mapping[

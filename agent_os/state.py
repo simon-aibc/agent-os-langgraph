@@ -43,6 +43,7 @@ class SimonState(TypedDict):
     """
     State for the SimonOS agent graph.
     """
+
     messages: Annotated[list[AnyMessage], add_messages]
     task: str
     plan: PlanField

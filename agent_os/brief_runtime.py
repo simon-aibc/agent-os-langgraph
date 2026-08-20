@@ -85,10 +85,7 @@ def execute_brief(
     summarizer = build_brief_summarizer()
 
     brief_md = generate_brief(
-        resolved_connector,
-        sessions,
-        date=date,
-        summarizer=summarizer
+        resolved_connector, sessions, date=date, summarizer=summarizer
     )
 
     ref = None
@@ -98,7 +95,9 @@ def execute_brief(
         if not hasattr(resolved_connector, "write_note"):
             error = "Configured memory connector does not support writing briefs."
         else:
-            write_result = write_brief(resolved_connector, brief_md, date, engine=engine)
+            write_result = write_brief(
+                resolved_connector, brief_md, date, engine=engine
+            )
             if write_result.committed:
                 ref = write_result.ref
             else:

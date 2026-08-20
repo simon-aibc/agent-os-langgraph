@@ -32,10 +32,14 @@ def evaluate_write_policy(
         arguments={"ref": ref, "mode": mode},
         side_effect="write",
     )
-    policy_engine = engine or current_policy_engine() or LocalPolicy(
-        store=store,
-        mode=policy_mode,
-        session_key=session_key,
+    policy_engine = (
+        engine
+        or current_policy_engine()
+        or LocalPolicy(
+            store=store,
+            mode=policy_mode,
+            session_key=session_key,
+        )
     )
     decision = policy_engine.evaluate(proposal)
     return "auto" if decision.decision == "allow" else "gate"
@@ -81,10 +85,14 @@ def gated_write(
         side_effect="write",
     )
 
-    policy_engine = engine or current_policy_engine() or LocalPolicy(
-        store=store,
-        mode=policy_mode,
-        session_key=session_key,
+    policy_engine = (
+        engine
+        or current_policy_engine()
+        or LocalPolicy(
+            store=store,
+            mode=policy_mode,
+            session_key=session_key,
+        )
     )
     write_result: MemoryWriteResult | None = None
 

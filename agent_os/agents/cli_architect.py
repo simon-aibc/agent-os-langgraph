@@ -131,5 +131,7 @@ def build_cli_architect_invoker(
     try:
         adapter = get_default_backend_registry().resolve("architect", backend)
     except ValueError as exc:
-        raise ValueError(f"Unsupported CLI architect backend: {backend}. {exc}") from exc
+        raise ValueError(
+            f"Unsupported CLI architect backend: {backend}. {exc}"
+        ) from exc
     return adapter.build_invoker("architect")

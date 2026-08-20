@@ -18,21 +18,28 @@ import sys
 import tempfile
 import tomllib
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Mapping
+from typing import Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_os.skill_packages import SkillPackageLoader
 from agent_os.skills import SkillRegistry
 from agent_os.validation import ValidationRule, run_validation, summarize
-from agent_os.workspace import Workspace, WorkspaceLoadError, compose_workspace, load_workspace
+from agent_os.workspace import (
+    Workspace,
+    compose_workspace,
+    load_workspace,
+)
 
 AUTHORING_DB_NAME: Final = "skill_authoring.db"
 DRAFTS_DIRECTORY: Final = "skill-drafts"
 APPROVED_DIRECTORY: Final = "skill-packages"
-_STATUSES: Final = frozenset({"brief_ready", "validation_failed", "validated", "cancelled", "registered"})
+_STATUSES: Final = frozenset(
+    {"brief_ready", "validation_failed", "validated", "cancelled", "registered"}
+)
 
 
 class SkillAuthoringError(ValueError):
@@ -127,7 +134,10 @@ class SkillAuthoringStore:
 
     def get(self, request_id: str) -> AuthoringRequest | None:
         with contextlib.closing(self._connect()) as connection:
-            row = connection.execute("SELECT * FROM skill_authoring_requests WHERE request_id = ?", (request_id,)).fetchone()
+            row = connection.execute(
+                "SELECT * FROM skill_authoring_requests WHERE request_id = ?",
+                (request_id,),
+            ).fetchone()
         return _row_to_request(row) if row else None
 
     def list(self, workspace_id: str) -> tuple[AuthoringRequest, ...]:
@@ -160,11 +170,21 @@ class SkillAuthoringStore:
                     ),
                 )
             except sqlite3.IntegrityError as exc:
-                raise SkillAuthoringError("An immutable authoring brief already exists for this candidate") from exc
+                raise SkillAuthoringError(
+                    "An immutable authoring brief already exists for this candidate"
+                ) from exc
             connection.commit()
         return request
 
-    def update_validation(self, request_id: str, *, status: str, draft_path: str, audit: ValidationAudit, error: str | None) -> AuthoringRequest:
+    def update_validation(
+        self,
+        request_id: str,
+        *,
+        status: str,
+        draft_path: str,
+        audit: ValidationAudit,
+        error: str | None,
+    ) -> AuthoringRequest:
         _require_status(status)
         with contextlib.closing(self._connect()) as connection:
             connection.execute(
@@ -173,7 +193,14 @@ class SkillAuthoringStore:
                 SET status = ?, draft_path = ?, draft_digest = ?, validation_json = ?, error = ?
                 WHERE request_id = ?
                 """,
-                (status, draft_path, audit.digest, json.dumps(audit.summary, sort_keys=True), error, request_id),
+                (
+                    status,
+                    draft_path,
+                    audit.digest,
+                    json.dumps(audit.summary, sort_keys=True),
+                    error,
+                    request_id,
+                ),
             )
             connection.commit()
         result = self.get(request_id)
@@ -181,7 +208,14 @@ class SkillAuthoringStore:
             raise SkillAuthoringError("Authoring request not found")
         return result
 
-    def mark_registered(self, request_id: str, *, confirmed_at: int, registered_at: int, result: Mapping[str, object]) -> AuthoringRequest:
+    def mark_registered(
+        self,
+        request_id: str,
+        *,
+        confirmed_at: int,
+        registered_at: int,
+        result: Mapping[str, object],
+    ) -> AuthoringRequest:
         with contextlib.closing(self._connect()) as connection:
             connection.execute(
                 """
@@ -190,7 +224,12 @@ class SkillAuthoringStore:
                     registration_result_json = ?, error = NULL
                 WHERE request_id = ?
                 """,
-                (confirmed_at, registered_at, json.dumps(dict(result), sort_keys=True), request_id),
+                (
+                    confirmed_at,
+                    registered_at,
+                    json.dumps(dict(result), sort_keys=True),
+                    request_id,
+                ),
             )
             connection.commit()
         result_request = self.get(request_id)
@@ -205,7 +244,9 @@ class SkillAuthoringService:
         self.workspace_id = authoring_workspace_id(workspace)
         self.store = SkillAuthoringStore(authoring_db_path(workspace))
 
-    def prepare_brief(self, candidate: CandidateAuthoringInput, *, now: int) -> AuthoringRequest:
+    def prepare_brief(
+        self, candidate: CandidateAuthoringInput, *, now: int
+    ) -> AuthoringRequest:
         request_id = str(uuid.uuid4())
         brief = _build_brief(request_id, candidate, self.workspace)
         return self.store.create(
@@ -219,28 +260,44 @@ class SkillAuthoringService:
             )
         )
 
-    def submit_draft(self, request_id: str, draft_path: str, *, now: int) -> AuthoringRequest:
-        request = self._require_request(request_id, allowed={"brief_ready", "validation_failed", "validated"})
+    def submit_draft(
+        self, request_id: str, draft_path: str, *, now: int
+    ) -> AuthoringRequest:
+        request = self._require_request(
+            request_id, allowed={"brief_ready", "validation_failed", "validated"}
+        )
         package_dir = resolve_staging_package(self.workspace, draft_path)
-        audit = validate_staged_package(package_dir, request.candidate.suggested_skill_name, self.workspace)
+        audit = validate_staged_package(
+            package_dir, request.candidate.suggested_skill_name, self.workspace
+        )
         return self.store.update_validation(
             request_id,
             status="validated" if audit.passed else "validation_failed",
             draft_path=str(package_dir),
             audit=audit,
-            error=None if audit.passed else "Validation did not meet every deterministic rule",
+            error=None
+            if audit.passed
+            else "Validation did not meet every deterministic rule",
         )
 
-    def confirm_registration(self, request_id: str, *, confirm: bool, now: int) -> AuthoringRequest:
+    def confirm_registration(
+        self, request_id: str, *, confirm: bool, now: int
+    ) -> AuthoringRequest:
         if confirm is not True:
-            raise SkillAuthoringError("Final registration requires explicit confirm=true")
+            raise SkillAuthoringError(
+                "Final registration requires explicit confirm=true"
+            )
         request = self._require_request(request_id, allowed={"validated"})
         if not request.draft_path or not request.draft_digest:
             raise SkillAuthoringError("Validated draft evidence is missing")
         package_dir = resolve_staging_package(self.workspace, request.draft_path)
         if package_digest(package_dir) != request.draft_digest:
-            raise SkillAuthoringError("Draft changed after validation; submit it for validation again")
-        audit = validate_staged_package(package_dir, request.candidate.suggested_skill_name, self.workspace)
+            raise SkillAuthoringError(
+                "Draft changed after validation; submit it for validation again"
+            )
+        audit = validate_staged_package(
+            package_dir, request.candidate.suggested_skill_name, self.workspace
+        )
         if not audit.passed or audit.digest != request.draft_digest:
             self.store.update_validation(
                 request_id,
@@ -249,16 +306,24 @@ class SkillAuthoringService:
                 audit=audit,
                 error="Revalidation failed before registration",
             )
-            raise SkillAuthoringError("Revalidation failed; registry and workspace configuration were left unchanged")
+            raise SkillAuthoringError(
+                "Revalidation failed; registry and workspace configuration were left unchanged"
+            )
 
-        result = promote_and_register(self.workspace, package_dir, request.candidate.suggested_skill_name)
-        return self.store.mark_registered(request_id, confirmed_at=now, registered_at=now, result=result)
+        result = promote_and_register(
+            self.workspace, package_dir, request.candidate.suggested_skill_name
+        )
+        return self.store.mark_registered(
+            request_id, confirmed_at=now, registered_at=now, result=result
+        )
 
     def list_requests(self) -> tuple[AuthoringRequest, ...]:
         return self.store.list(self.workspace_id)
 
     def cancel(self, request_id: str) -> AuthoringRequest:
-        request = self._require_request(request_id, allowed={"brief_ready", "validation_failed", "validated"})
+        request = self._require_request(
+            request_id, allowed={"brief_ready", "validation_failed", "validated"}
+        )
         with contextlib.closing(self.store._connect()) as connection:
             connection.execute(
                 "UPDATE skill_authoring_requests SET status = 'cancelled', error = NULL WHERE request_id = ?",
@@ -270,16 +335,22 @@ class SkillAuthoringService:
             raise SkillAuthoringError("Authoring request not found")
         return cancelled
 
-    def _require_request(self, request_id: str, *, allowed: set[str]) -> AuthoringRequest:
+    def _require_request(
+        self, request_id: str, *, allowed: set[str]
+    ) -> AuthoringRequest:
         request = self.store.get(request_id)
         if request is None or request.workspace_id != self.workspace_id:
             raise SkillAuthoringError("Authoring request not found")
         if request.status not in allowed:
-            raise SkillAuthoringError(f"Authoring request is not ready for this action: {request.status}")
+            raise SkillAuthoringError(
+                f"Authoring request is not ready for this action: {request.status}"
+            )
         return request
 
 
-def _build_brief(request_id: str, candidate: CandidateAuthoringInput, workspace: Workspace) -> dict[str, object]:
+def _build_brief(
+    request_id: str, candidate: CandidateAuthoringInput, workspace: Workspace
+) -> dict[str, object]:
     return {
         "version": "skill-authoring-v1",
         "request_id": request_id,
@@ -301,20 +372,28 @@ def _build_brief(request_id: str, candidate: CandidateAuthoringInput, workspace:
 def resolve_staging_package(workspace: Workspace, value: str) -> Path:
     raw = Path(str(value)).expanduser()
     if not raw.is_absolute():
-        raise SkillAuthoringError("Draft path must be an absolute canonical staging path")
+        raise SkillAuthoringError(
+            "Draft path must be an absolute canonical staging path"
+        )
     try:
         package_dir = raw.resolve(strict=True)
     except OSError as exc:
         raise SkillAuthoringError("Draft package path does not exist") from exc
     staging_root = (workspace.base_path / DRAFTS_DIRECTORY).resolve()
     if not _is_relative_to(package_dir, staging_root) or package_dir == staging_root:
-        raise SkillAuthoringError("Draft package must be inside the canonical skill-drafts directory")
+        raise SkillAuthoringError(
+            "Draft package must be inside the canonical skill-drafts directory"
+        )
     if not package_dir.is_dir() or not (package_dir / "manifest.toml").is_file():
         raise SkillAuthoringError("Draft package requires a manifest.toml directory")
     for configured in workspace.skills:
         configured_path = Path(configured).expanduser().resolve()
-        if _is_relative_to(package_dir, configured_path) or _is_relative_to(configured_path, package_dir):
-            raise SkillAuthoringError("Draft package must remain outside configured skill directories")
+        if _is_relative_to(package_dir, configured_path) or _is_relative_to(
+            configured_path, package_dir
+        ):
+            raise SkillAuthoringError(
+                "Draft package must remain outside configured skill directories"
+            )
     return package_dir
 
 
@@ -338,18 +417,28 @@ def package_digest(package_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def validate_staged_package(package_dir: Path, expected_name: str, workspace: Workspace) -> ValidationAudit:
+def validate_staged_package(
+    package_dir: Path, expected_name: str, workspace: Workspace
+) -> ValidationAudit:
     digest = package_digest(package_dir)
     command = f"skill-package-preflight:{package_dir}"
     completed = subprocess.run(
-        [sys.executable, "-m", "agent_os.skill_authoring_preflight", str(package_dir), expected_name],
+        [
+            sys.executable,
+            "-m",
+            "agent_os.skill_authoring_preflight",
+            str(package_dir),
+            expected_name,
+        ],
         cwd=workspace.base_path,
         capture_output=True,
         text=True,
         timeout=15,
         check=False,
     )
-    output = "\n".join(part for part in (completed.stdout, completed.stderr) if part).strip()
+    output = "\n".join(
+        part for part in (completed.stdout, completed.stderr) if part
+    ).strip()
     rules = (
         ValidationRule(
             id="manifest-present",
@@ -371,7 +460,9 @@ def validate_staged_package(package_dir: Path, expected_name: str, workspace: Wo
             rules,
             {
                 "artifacts": [str(package_dir / "manifest.toml")],
-                "verify_commands": {command: {"exit_code": completed.returncode, "output": output}},
+                "verify_commands": {
+                    command: {"exit_code": completed.returncode, "output": output}
+                },
             },
         )
     )
@@ -383,7 +474,9 @@ def validate_staged_package(package_dir: Path, expected_name: str, workspace: Wo
     )
 
 
-def promote_and_register(workspace: Workspace, package_dir: Path, expected_name: str) -> dict[str, object]:
+def promote_and_register(
+    workspace: Workspace, package_dir: Path, expected_name: str
+) -> dict[str, object]:
     """Copy an already-validated package and atomically add its exact path to the workspace."""
     destination_root = (workspace.base_path / APPROVED_DIRECTORY).resolve()
     destination_root.mkdir(parents=True, exist_ok=True)
@@ -423,11 +516,20 @@ def _assert_fresh_loader(package_dir: Path, expected_name: str) -> None:
     registry = SkillRegistry()
     SkillPackageLoader(registry).load_package(package_dir)
     if registry.get(expected_name) is None:
-        raise SkillAuthoringError("Draft did not register the expected skill name in an isolated registry")
+        raise SkillAuthoringError(
+            "Draft did not register the expected skill name in an isolated registry"
+        )
 
 
 def _write_temp_config(source: Path, content: str) -> Path:
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=source.parent, prefix=".workspace.", suffix=".toml", delete=False) as handle:
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=source.parent,
+        prefix=".workspace.",
+        suffix=".toml",
+        delete=False,
+    ) as handle:
         handle.write(content)
         handle.flush()
         os.fsync(handle.fileno())
@@ -452,25 +554,37 @@ def _reload_workspace_or_rollback(source_config: Path, original: str) -> None:
         rollback = _write_temp_config(source_config, original)
         os.replace(rollback, source_config)
         runtime.composed_workspace.cache_clear()
-        raise SkillAuthoringError("Workspace reload failed; configuration was rolled back") from exc
+        raise SkillAuthoringError(
+            "Workspace reload failed; configuration was rolled back"
+        ) from exc
 
 
 def add_skill_path_to_workspace_toml(original: str, path: str) -> str:
     """Replace exactly the top-level skills list while preserving all other TOML text."""
     parsed = tomllib.loads(original)
     skills = parsed.get("skills")
-    if not isinstance(skills, list) or not all(isinstance(item, str) for item in skills):
-        raise SkillAuthoringError("workspace.toml has no writable top-level skills list")
+    if not isinstance(skills, list) or not all(
+        isinstance(item, str) for item in skills
+    ):
+        raise SkillAuthoringError(
+            "workspace.toml has no writable top-level skills list"
+        )
     if path in skills:
         raise SkillAuthoringError("Skill path is already configured")
     start = _top_level_skills_list_start(original)
     end = _matching_list_end(original, start)
-    rendered = "skills = [\n" + "".join(f"  {json.dumps(item)},\n" for item in [*skills, path]) + "]"
+    rendered = (
+        "skills = [\n"
+        + "".join(f"  {json.dumps(item)},\n" for item in [*skills, path])
+        + "]"
+    )
     updated = original[:start] + rendered + original[end:]
     try:
         tomllib.loads(updated)
     except tomllib.TOMLDecodeError as exc:
-        raise SkillAuthoringError("Could not write a valid workspace skills list") from exc
+        raise SkillAuthoringError(
+            "Could not write a valid workspace skills list"
+        ) from exc
     return updated
 
 
@@ -478,7 +592,9 @@ def _top_level_skills_list_start(content: str) -> int:
     marker = "skills"
     for line_start, line in _lines_with_offsets(content):
         stripped = line.lstrip()
-        if stripped.startswith(marker) and stripped[len(marker):].lstrip().startswith("="):
+        if stripped.startswith(marker) and stripped[len(marker) :].lstrip().startswith(
+            "="
+        ):
             return line_start
     raise SkillAuthoringError("workspace.toml has no writable top-level skills list")
 
@@ -541,9 +657,13 @@ def _row_to_request(row: sqlite3.Row) -> AuthoringRequest:
         prepared_at=int(row["prepared_at"]),
         draft_path=row["draft_path"],
         draft_digest=row["draft_digest"],
-        validation=json.loads(row["validation_json"]) if row["validation_json"] else None,
+        validation=json.loads(row["validation_json"])
+        if row["validation_json"]
+        else None,
         registration_confirmed_at=row["registration_confirmed_at"],
         registered_at=row["registered_at"],
-        registration_result=json.loads(row["registration_result_json"]) if row["registration_result_json"] else None,
+        registration_result=json.loads(row["registration_result_json"])
+        if row["registration_result_json"]
+        else None,
         error=row["error"],
     )

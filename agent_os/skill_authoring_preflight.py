@@ -11,7 +11,10 @@ from agent_os.skill_authoring import _assert_fresh_loader
 def main(argv: list[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
     if len(arguments) != 2:
-        print("usage: skill_authoring_preflight PACKAGE_DIR EXPECTED_SKILL_NAME", file=sys.stderr)
+        print(
+            "usage: skill_authoring_preflight PACKAGE_DIR EXPECTED_SKILL_NAME",
+            file=sys.stderr,
+        )
         return 2
     try:
         _assert_fresh_loader(Path(arguments[0]).resolve(), arguments[1])

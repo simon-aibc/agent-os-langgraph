@@ -42,7 +42,9 @@ def _record(
         outcome_signal="unknown",
         source="server.run",
     )
-    store.record_outcome(observation.observation_id, signal=signal, evidence="operator label")
+    store.record_outcome(
+        observation.observation_id, signal=signal, evidence="operator label"
+    )
 
 
 def _seed(
@@ -56,7 +58,11 @@ def _seed(
     task_kind: str = "workflow",
 ) -> None:
     index = 0
-    for signal, count in (("accepted", accepted), ("rejected", rejected), ("edited", edited)):
+    for signal, count in (
+        ("accepted", accepted),
+        ("rejected", rejected),
+        ("edited", edited),
+    ):
         for _ in range(count):
             _record(
                 store,
@@ -69,7 +75,9 @@ def _seed(
             index += 1
 
 
-def test_mine_skill_candidates_returns_empty_for_empty_or_legacy_store(tmp_path: Path) -> None:
+def test_mine_skill_candidates_returns_empty_for_empty_or_legacy_store(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
     _record(store, signature=None, signal="accepted", index=1)
     store.create(
@@ -83,17 +91,29 @@ def test_mine_skill_candidates_returns_empty_for_empty_or_legacy_store(tmp_path:
         source="server.run",
     )
 
-    assert mine_skill_candidates(store, SkillRegistry(), workspace_id="workspace-a") == ()
-    assert mine_skill_candidates(None, SkillRegistry(), workspace_id="workspace-a") == ()
+    assert (
+        mine_skill_candidates(store, SkillRegistry(), workspace_id="workspace-a") == ()
+    )
+    assert (
+        mine_skill_candidates(None, SkillRegistry(), workspace_id="workspace-a") == ()
+    )
 
 
-def test_miner_requires_both_occurrence_and_outcome_score_thresholds(tmp_path: Path) -> None:
+def test_miner_requires_both_occurrence_and_outcome_score_thresholds(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
-    _seed(store, signature=_signature("too-few"), accepted=MIN_SKILL_CANDIDATE_OCCURRENCES - 1)
+    _seed(
+        store,
+        signature=_signature("too-few"),
+        accepted=MIN_SKILL_CANDIDATE_OCCURRENCES - 1,
+    )
     _seed(store, signature=_signature("low-score"), accepted=2, rejected=1)
     _seed(store, signature=_signature("eligible"), accepted=3)
 
-    candidates = mine_skill_candidates(store, SkillRegistry(), workspace_id="workspace-a")
+    candidates = mine_skill_candidates(
+        store, SkillRegistry(), workspace_id="workspace-a"
+    )
 
     assert len(candidates) == 1
     assert candidates[0].signature == _signature("eligible")
@@ -101,14 +121,18 @@ def test_miner_requires_both_occurrence_and_outcome_score_thresholds(tmp_path: P
     assert candidates[0].outcome_score == 1.0
 
 
-def test_miner_is_workspace_signature_isolated_and_does_not_write(tmp_path: Path) -> None:
+def test_miner_is_workspace_signature_isolated_and_does_not_write(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path)
     signature = _signature("isolated")
     _seed(store, signature=signature, accepted=3, workspace="workspace-a")
     _seed(store, signature=signature, accepted=5, workspace="workspace-b")
     before = [item.to_dict() for item in store.list(workspace_id="workspace-a")]
 
-    candidates = mine_skill_candidates(store, SkillRegistry(), workspace_id="workspace-a")
+    candidates = mine_skill_candidates(
+        store, SkillRegistry(), workspace_id="workspace-a"
+    )
 
     assert len(candidates) == 1
     assert candidates[0].occurrence_count == 3
@@ -122,13 +146,17 @@ def test_miner_excludes_exact_registry_coverage(tmp_path: Path) -> None:
     pattern = store.aggregate_task_signatures(workspace_id="workspace-a")[0]
     registry = SkillRegistry()
     registry.register(
-        RegisteredSkill(name=suggested_skill_name(pattern), aliases=(), handler=lambda: None)
+        RegisteredSkill(
+            name=suggested_skill_name(pattern), aliases=(), handler=lambda: None
+        )
     )
 
     assert mine_skill_candidates(store, registry, workspace_id="workspace-a") == ()
 
 
-def test_skill_candidates_api_returns_read_only_workspace_candidates(tmp_path: Path, monkeypatch) -> None:
+def test_skill_candidates_api_returns_read_only_workspace_candidates(
+    tmp_path: Path, monkeypatch
+) -> None:
     from agent_os.server import api
 
     store = _store(tmp_path)
@@ -150,7 +178,11 @@ def test_skill_candidates_api_returns_read_only_workspace_candidates(tmp_path: P
             "occurrence_count": 3,
             "success_count": 3,
             "outcome_score": 1.0,
-            "sample_run_ids": ["workspace-a-workflow-2", "workspace-a-workflow-1", "workspace-a-workflow-0"],
+            "sample_run_ids": [
+                "workspace-a-workflow-2",
+                "workspace-a-workflow-1",
+                "workspace-a-workflow-0",
+            ],
             "suggested_skill_name": suggested_skill_name(
                 store.aggregate_task_signatures(workspace_id="workspace-a")[0]
             ),
@@ -166,7 +198,9 @@ def test_miner_sorting_samples_and_candidate_model_are_stable(tmp_path: Path) ->
     _seed(store, signature=second, accepted=3)
     _seed(store, signature=first, accepted=3)
 
-    candidates = mine_skill_candidates(store, SkillRegistry(), workspace_id="workspace-a")
+    candidates = mine_skill_candidates(
+        store, SkillRegistry(), workspace_id="workspace-a"
+    )
 
     assert tuple(item.suggested_skill_name for item in candidates) == tuple(
         sorted(item.suggested_skill_name for item in candidates)

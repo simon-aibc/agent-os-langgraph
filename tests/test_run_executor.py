@@ -81,7 +81,9 @@ def _observations_for_store(store_path, workspace) -> list[object]:
 
 
 @pytest.mark.anyio
-async def test_execute_run_translates_node_token_and_result_events(runs_db, monkeypatch):
+async def test_execute_run_translates_node_token_and_result_events(
+    runs_db, monkeypatch
+):
     graph = FakeGraph(
         [
             {"event": "on_chain_start", "name": "planner"},
@@ -160,7 +162,9 @@ async def test_execute_run_includes_workspace_skill_output_in_result_event(
 
 
 @pytest.mark.anyio
-async def test_execute_run_surfaces_executor_self_check_in_result_event(runs_db, monkeypatch):
+async def test_execute_run_surfaces_executor_self_check_in_result_event(
+    runs_db, monkeypatch
+):
     graph = FakeGraph(
         [],
         _completed_snapshot(
@@ -295,7 +299,9 @@ async def test_execute_run_records_error_path(runs_db, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, monkeypatch):
+async def test_terminal_observation_never_leaks_task_or_tool_output(
+    runs_db, monkeypatch
+):
     secret = "TOP-SECRET-task-and-output"
     graph = FakeGraph(
         [],
@@ -325,7 +331,9 @@ async def test_terminal_observation_never_leaks_task_or_tool_output(runs_db, mon
 
 
 @pytest.mark.anyio
-async def test_observation_failure_does_not_change_terminal_run_status(runs_db, monkeypatch):
+async def test_observation_failure_does_not_change_terminal_run_status(
+    runs_db, monkeypatch
+):
     graph = FakeGraph([], _completed_snapshot())
     _patch_graph(monkeypatch, graph)
     from agent_os import server
@@ -346,7 +354,9 @@ async def test_observation_failure_does_not_change_terminal_run_status(runs_db, 
         "runtime_policy_for_session",
         lambda session_key: LocalPolicy(session_key=session_key),
     )
-    monkeypatch.setattr(run_executor, "build_runtime_graph", lambda *, checkpointer: graph)
+    monkeypatch.setattr(
+        run_executor, "build_runtime_graph", lambda *, checkpointer: graph
+    )
     monkeypatch.setattr(
         run_executor,
         "initial_state",
@@ -414,7 +424,9 @@ async def test_terminal_observation_uses_composed_runtime_workspace(
         "runtime_policy_for_session",
         lambda session_key: LocalPolicy(session_key=session_key),
     )
-    monkeypatch.setattr(run_executor, "build_runtime_graph", lambda *, checkpointer: graph)
+    monkeypatch.setattr(
+        run_executor, "build_runtime_graph", lambda *, checkpointer: graph
+    )
     monkeypatch.setattr(
         run_executor,
         "initial_state",

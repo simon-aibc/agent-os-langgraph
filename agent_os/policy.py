@@ -74,7 +74,12 @@ def derive_permission_key(proposal: ActionProposal) -> str | None:
     connector = _permission_connector(proposal.connector)
     mode = arguments.get("mode")
     ref = _permission_ref(arguments.get("ref"))
-    if connector is None or not isinstance(mode, str) or mode not in MEMORY_WRITE_MODES or ref is None:
+    if (
+        connector is None
+        or not isinstance(mode, str)
+        or mode not in MEMORY_WRITE_MODES
+        or ref is None
+    ):
         return None
     return f"memory_write:write:{connector}:{mode}:{ref}"
 
@@ -86,8 +91,7 @@ class PolicyEngine(Protocol):
         *,
         workspace: Any = None,
         context: Any = None,
-    ) -> PolicyDecision:
-        ...
+    ) -> PolicyDecision: ...
 
 
 @contextmanager
@@ -218,7 +222,9 @@ class LocalPolicy:
             try:
                 rule = self.store.get(perm_key)
             except Exception as e:
-                logger.warning(f"Error fetching rule from store for key '{perm_key}': {e}")
+                logger.warning(
+                    f"Error fetching rule from store for key '{perm_key}': {e}"
+                )
                 rule = None
 
         # Step 1: rule.effect == "always_deny" -> deny
@@ -227,7 +233,9 @@ class LocalPolicy:
                 try:
                     self.store.increment_deny(perm_key)
                 except Exception as e:
-                    logger.warning(f"Error incrementing deny count for key '{perm_key}': {e}")
+                    logger.warning(
+                        f"Error incrementing deny count for key '{perm_key}': {e}"
+                    )
             return PolicyDecision(
                 decision="deny",
                 policy_id="learned",
@@ -246,12 +254,18 @@ class LocalPolicy:
                     )
 
         # Step 3: rule.effect == "always_approve" -> allow
-        if perm_key is not None and rule is not None and rule.effect == "always_approve":
+        if (
+            perm_key is not None
+            and rule is not None
+            and rule.effect == "always_approve"
+        ):
             if self.store is not None:
                 try:
                     self.store.increment_approve(perm_key)
                 except Exception as e:
-                    logger.warning(f"Error incrementing approve count for key '{perm_key}': {e}")
+                    logger.warning(
+                        f"Error incrementing approve count for key '{perm_key}': {e}"
+                    )
             return PolicyDecision(
                 decision="allow",
                 policy_id="learned",
@@ -259,18 +273,26 @@ class LocalPolicy:
             )
 
         # Step 4: Builtin logs/briefs logic
-        if proposal.side_effect == "write" and proposal.arguments and "ref" in proposal.arguments:
+        if (
+            proposal.side_effect == "write"
+            and proposal.arguments
+            and "ref" in proposal.arguments
+        ):
             ref = str(proposal.arguments["ref"])
             mode = str(proposal.arguments.get("mode", ""))
             normalized_ref = ref.lstrip("/")
-            is_log = normalized_ref.startswith("AI/Logs/") or normalized_ref.startswith("agentos/logs/")
+            is_log = normalized_ref.startswith("AI/Logs/") or normalized_ref.startswith(
+                "agentos/logs/"
+            )
             if is_log and mode == "append":
                 return PolicyDecision(
                     decision="allow",
                     policy_id="builtin-logs",
                     reason="Logs can be appended automatically",
                 )
-            is_brief = normalized_ref.startswith("AI/Briefs/") or normalized_ref.startswith("agentos/briefs/")
+            is_brief = normalized_ref.startswith(
+                "AI/Briefs/"
+            ) or normalized_ref.startswith("agentos/briefs/")
             if is_brief and mode in ("append", "create"):
                 return PolicyDecision(
                     decision="allow",
@@ -343,7 +365,9 @@ def apply_policy(
             return ExecutionResult(
                 status="cancelled",
                 outputs={},
-                errors=["High-risk action rejected; remembered approvals are not allowed"],
+                errors=[
+                    "High-risk action rejected; remembered approvals are not allowed"
+                ],
                 artifacts=[],
             )
 
@@ -414,5 +438,8 @@ def apply_policy(
 
     # Deny
     return ExecutionResult(
-        status="failed", outputs={}, errors=[decision.reason or "Action denied by policy"], artifacts=[]
+        status="failed",
+        outputs={},
+        errors=[decision.reason or "Action denied by policy"],
+        artifacts=[],
     )

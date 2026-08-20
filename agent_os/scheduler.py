@@ -63,9 +63,7 @@ async def dispatch_schedule(
             status = (run_obj or {}).get("status", "error")
             error = (run_obj or {}).get("error")
 
-            record_schedule_result(
-                schedule_id, status=status, error=error
-            )
+            record_schedule_result(schedule_id, status=status, error=error)
 
             return ScheduleDispatchResult(
                 schedule_id=schedule_id,
@@ -79,9 +77,7 @@ async def dispatch_schedule(
             result = await asyncio.to_thread(execute_brief, write=True)
             if not result.saved:
                 error_msg = result.error or "Brief write was not committed"
-                record_schedule_result(
-                    schedule_id, status="error", error=error_msg
-                )
+                record_schedule_result(schedule_id, status="error", error=error_msg)
                 return ScheduleDispatchResult(
                     schedule_id=schedule_id,
                     kind=kind,
@@ -106,9 +102,7 @@ async def dispatch_schedule(
 
             if not url:
                 error_msg = "kind=app_callback requires 'url' in payload"
-                record_schedule_result(
-                    schedule_id, status="error", error=error_msg
-                )
+                record_schedule_result(schedule_id, status="error", error=error_msg)
                 return ScheduleDispatchResult(
                     schedule_id=schedule_id,
                     kind=kind,
@@ -135,9 +129,7 @@ async def dispatch_schedule(
                     type(exc).__name__,
                 )
                 error_msg = f"HTTP request failed: {type(exc).__name__}"
-                record_schedule_result(
-                    schedule_id, status="error", error=error_msg
-                )
+                record_schedule_result(schedule_id, status="error", error=error_msg)
                 return ScheduleDispatchResult(
                     schedule_id=schedule_id,
                     kind=kind,
@@ -159,9 +151,7 @@ async def dispatch_schedule(
                 status = "error"
                 error_msg = f"HTTP {response.status_code}"
                 ref = str(response.status_code)
-                record_schedule_result(
-                    schedule_id, status=status, error=error_msg
-                )
+                record_schedule_result(schedule_id, status=status, error=error_msg)
                 return ScheduleDispatchResult(
                     schedule_id=schedule_id,
                     kind=kind,
@@ -171,9 +161,7 @@ async def dispatch_schedule(
                 )
 
         error_msg = f"Unknown schedule kind: {kind}"
-        record_schedule_result(
-            schedule_id, status="error", error=error_msg
-        )
+        record_schedule_result(schedule_id, status="error", error=error_msg)
         return ScheduleDispatchResult(
             schedule_id=schedule_id,
             kind=kind,
@@ -184,9 +172,7 @@ async def dispatch_schedule(
     except Exception as exc:
         logger.exception("Failed to dispatch schedule %s", schedule_id)
         error_str = str(exc)
-        record_schedule_result(
-            schedule_id, status="error", error=error_str
-        )
+        record_schedule_result(schedule_id, status="error", error=error_str)
         return ScheduleDispatchResult(
             schedule_id=schedule_id,
             kind=kind,
@@ -195,9 +181,7 @@ async def dispatch_schedule(
         )
     except asyncio.CancelledError:
         error_str = "Scheduler shutdown"
-        record_schedule_result(
-            schedule_id, status="error", error=error_str
-        )
+        record_schedule_result(schedule_id, status="error", error=error_str)
         raise
 
 

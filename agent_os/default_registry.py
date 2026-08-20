@@ -109,7 +109,9 @@ def parse_tier1_request(
 
 def _single_text_argument_name(skill: RegisteredSkill) -> str | None:
     if isinstance(skill.handler, BaseTool):
-        properties = skill.handler.get_input_schema().model_json_schema().get("properties", {})
+        properties = (
+            skill.handler.get_input_schema().model_json_schema().get("properties", {})
+        )
         return next(iter(properties)) if len(properties) == 1 else None
 
     parameters = [

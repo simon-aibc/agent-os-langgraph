@@ -31,7 +31,10 @@ def test_normalize_human_feedback_rejected():
     assert normalize_human_feedback("no") == "rejected: no reason provided"
 
     # Check reason retention (case insensitive for prefix, retains case for reason)
-    assert normalize_human_feedback("rejected: I don't like it") == "rejected: I don't like it"
+    assert (
+        normalize_human_feedback("rejected: I don't like it")
+        == "rejected: I don't like it"
+    )
     assert normalize_human_feedback("REJECTED:  Bad plan ") == "rejected: Bad plan"
     assert normalize_human_feedback("rejected:") == "rejected: no reason provided"
     assert normalize_human_feedback("REJECTED:   ") == "rejected: no reason provided"
@@ -76,7 +79,10 @@ def test_human_gate_node_includes_acceptance_criteria(mock_interrupt):
         files=["file1.py"],
         changes=["modify"],
         verify_cmd="pytest",
-        acceptance_criteria=["Criterion 1: binary check", "Criterion 2: reversibility classification"],
+        acceptance_criteria=[
+            "Criterion 1: binary check",
+            "Criterion 2: reversibility classification",
+        ],
     )
     result = human_gate_node(make_state(plan))
 

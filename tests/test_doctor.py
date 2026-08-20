@@ -38,7 +38,9 @@ def setup_doctor_env(monkeypatch, tmp_path):
     monkeypatch.setattr("agent_os.cli.doctor.build_default_registry", fake_registry)
 
     # Mock shutil.which
-    monkeypatch.setattr("shutil.which", lambda bin: f"/fake/{bin}" if bin == "mock-bin" else None)
+    monkeypatch.setattr(
+        "shutil.which", lambda bin: f"/fake/{bin}" if bin == "mock-bin" else None
+    )
 
 
 def test_doctor_healthy(tmp_path):
@@ -56,7 +58,7 @@ def test_doctor_healthy(tmp_path):
         "profile_source",
         "checkpoints_db",
         "backend_binding",
-        "warnings"
+        "warnings",
     ]
     assert data["registered_adapters"][0]["stub"] is False
     assert data["backend_binding"] == {
@@ -189,8 +191,7 @@ def test_doctor_reports_antigravity_candidate_without_binary_probe(monkeypatch):
     exit_code, raw_json = run_doctor(json_output=True)
     data = json.loads(raw_json)
     candidate = next(
-        item for item in data["registered_adapters"]
-        if item["name"] == "antigravity"
+        item for item in data["registered_adapters"] if item["name"] == "antigravity"
     )
 
     assert exit_code == 0
@@ -240,7 +241,7 @@ def test_doctor_reports_effective_profile_config(monkeypatch, tmp_path):
     config_root.mkdir(parents=True)
     (config_root / "profiles.toml").write_text(
         'default = "profile"\n\n'
-        '[profile.profile]\n'
+        "[profile.profile]\n"
         'router = "ollama/profile"\n'
         'sandbox = "./profile-sandbox"\n',
     )
@@ -269,6 +270,7 @@ def test_doctor_does_not_invoke_llm(monkeypatch):
     # If it tries to invoke LLM, MagicMock will raise TypeError or similar,
     # but we can explicitly assert our mocks aren't called
     import agent_os.graph
+
     mock_build = MagicMock()
     monkeypatch.setattr(agent_os.graph, "build_graph", mock_build)
 

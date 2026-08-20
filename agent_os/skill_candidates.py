@@ -44,7 +44,9 @@ def suggested_skill_name(pattern: TaskSignaturePattern) -> str:
 
 
 def _is_covered(registry: SkillRegistry, name: str) -> bool:
-    return registry.get(name) is not None or registry.deterministic_match(name) is not None
+    return (
+        registry.get(name) is not None or registry.deterministic_match(name) is not None
+    )
 
 
 def _candidate(pattern: TaskSignaturePattern) -> SkillCandidate:

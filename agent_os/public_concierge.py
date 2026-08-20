@@ -330,7 +330,12 @@ def _is_vietnamese(message: str) -> bool:
     lowered = message.lower()
     if VI_PATTERN.search(lowered):
         return True
-    words = set(re.findall(r"[a-zA-Zăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]+", lowered))
+    words = set(
+        re.findall(
+            r"[a-zA-Zăâđêôơưáàảãạấầẩẫậắằẳẵặéèẻẽẹếềểễệíìỉĩịóòỏõọốồổỗộớờởỡợúùủũụứừửữựýỳỷỹỵ]+",
+            lowered,
+        )
+    )
     return bool(words & VI_HINTS)
 
 
@@ -345,7 +350,9 @@ def _lead_summary(request: PublicChatRequest) -> str | None:
             visitor.need,
         ]
         if any(value and value.strip() for value in details):
-            label = visitor.company or visitor.name or visitor.email or "Website visitor"
+            label = (
+                visitor.company or visitor.name or visitor.email or "Website visitor"
+            )
             need = visitor.need or request.message
             return f"{label}: {need}".strip()
 
@@ -379,8 +386,13 @@ def _format_job_fit(profile: PublicConciergeProfile, *, is_vi: bool) -> list[str
             ),
         ]
         if profile.proof_points:
-            answer_parts.append("Một vài tín hiệu public:\n" + _format_bullets(profile.proof_points, limit=4))
-        answer_parts.append("Nếu bạn đang tuyển, mình nên biết thêm industry, stage, target market và KPI chính để map fit rõ hơn.")
+            answer_parts.append(
+                "Một vài tín hiệu public:\n"
+                + _format_bullets(profile.proof_points, limit=4)
+            )
+        answer_parts.append(
+            "Nếu bạn đang tuyển, mình nên biết thêm industry, stage, target market và KPI chính để map fit rõ hơn."
+        )
     else:
         answer_parts = [
             "From Simon's public profile, the strongest fit is for roles that sit between growth, GTM, product marketing, and commercial execution.",
@@ -394,8 +406,12 @@ def _format_job_fit(profile: PublicConciergeProfile, *, is_vi: bool) -> list[str
             ),
         ]
         if profile.proof_points:
-            answer_parts.append("Public signals:\n" + _format_bullets(profile.proof_points, limit=4))
-        answer_parts.append("If you're hiring, share the industry, stage, market, and success metric, and I can map the fit more clearly.")
+            answer_parts.append(
+                "Public signals:\n" + _format_bullets(profile.proof_points, limit=4)
+            )
+        answer_parts.append(
+            "If you're hiring, share the industry, stage, market, and success metric, and I can map the fit more clearly."
+        )
     return answer_parts
 
 
@@ -406,14 +422,20 @@ def _format_about_simon(profile: PublicConciergeProfile, *, is_vi: bool) -> list
             "Nói ngắn gọn: Simon làm ở vùng growth / GTM / product marketing / commercial growth, và đang thử nghiệm AgentOS-style workflows để biến AI thành operating system thực dụng.",
         ]
         if profile.services:
-            answer_parts.append("Các mảng public có thể hỏi thêm:\n" + _format_bullets(profile.services, limit=5))
+            answer_parts.append(
+                "Các mảng public có thể hỏi thêm:\n"
+                + _format_bullets(profile.services, limit=5)
+            )
     else:
         answer_parts = [
             profile.summary,
             "In short: Simon works around growth, GTM, product marketing, and commercial growth, with practical AgentOS-style workflows for AI-enabled operating systems.",
         ]
         if profile.services:
-            answer_parts.append("Public areas you can ask about:\n" + _format_bullets(profile.services, limit=5))
+            answer_parts.append(
+                "Public areas you can ask about:\n"
+                + _format_bullets(profile.services, limit=5)
+            )
     return answer_parts
 
 
@@ -518,8 +540,12 @@ class PublicConcierge:
                     "Hey, I'm Simos - Simon's associate. I can help you quickly see whether Simon is relevant for growth, GTM, launches, or AI-enabled workflows.",
                 ]
             if self.profile.services:
-                label = "Một vài mảng Simon có thể hỗ trợ:" if is_vi else "Useful areas:"
-                answer_parts.append(label + "\n" + _format_bullets(self.profile.services))
+                label = (
+                    "Một vài mảng Simon có thể hỗ trợ:" if is_vi else "Useful areas:"
+                )
+                answer_parts.append(
+                    label + "\n" + _format_bullets(self.profile.services)
+                )
             citations = ["profile.summary", "profile.services"]
         elif _contains_any(
             message,
@@ -543,7 +569,9 @@ class PublicConcierge:
                 answer_parts.append(_format_bullets(self.profile.projects, limit=4))
             if self.profile.proof_points:
                 label = "Tín hiệu public:" if is_vi else "Public signals:"
-                answer_parts.append(label + "\n" + _format_bullets(self.profile.proof_points, limit=4))
+                answer_parts.append(
+                    label + "\n" + _format_bullets(self.profile.proof_points, limit=4)
+                )
             citations = ["profile.summary", "profile.projects", "profile.proof_points"]
         elif _contains_any(
             message,

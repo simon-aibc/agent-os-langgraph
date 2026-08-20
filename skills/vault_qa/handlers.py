@@ -23,18 +23,18 @@ def vault_qa(task: str, **kwargs) -> str:
     query = task
     prefix = "hỏi vault:"
     if task.lower().startswith(prefix):
-        query = task[len(prefix):].strip()
-        
+        query = task[len(prefix) :].strip()
+
     connector = _get_memory_connector()
-    
+
     try:
         results = connector.search(query, limit=3)
     except Exception as e:
         return f"Lỗi khi tra cứu vault: {e}"
-        
+
     if not results:
         return f"Không tìm thấy thông tin nào trong vault cho query: '{query}'"
-        
+
     out = [f"Kết quả tra cứu cho '{query}':\n"]
     for i, res in enumerate(results, 1):
         ref = res.get("ref", "unknown")
@@ -45,7 +45,7 @@ def vault_qa(task: str, **kwargs) -> str:
                 snippet = note.get("content", "")[:200]
             except Exception:
                 pass
-                
+
         out.append(f"{i}. [{ref}]\nTrích đoạn: {snippet}...\n")
-        
+
     return "\n".join(out)

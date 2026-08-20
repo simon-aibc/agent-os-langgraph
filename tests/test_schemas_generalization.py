@@ -74,6 +74,8 @@ def test_acceptance_criteria_defaults_and_serialization():
     assert '"Criterion 1: file exists"' in dumped
 
     # 4. Backward compatibility: deserialize json missing acceptance_criteria
-    legacy_json = '{"summary":"legacy","files":["x.py"],"changes":["y"],"verify_cmd":"z"}'
+    legacy_json = (
+        '{"summary":"legacy","files":["x.py"],"changes":["y"],"verify_cmd":"z"}'
+    )
     deserialized = CodingPlan.model_validate_json(legacy_json)
     assert deserialized.acceptance_criteria == []

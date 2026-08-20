@@ -33,14 +33,27 @@ MAX_ADVISORIES: Final = 3
 MAX_ADVISORY_CHARS: Final = 900
 TASK_SIGNATURE_PREFIX: Final = "sha256:v1:"
 TASK_SIGNATURE_HEX_LENGTH: Final = 64
-_TASK_SIGNATURE_RE = re.compile(
-    rf"^sha256:v1:[0-9a-f]{{{TASK_SIGNATURE_HEX_LENGTH}}}$"
-)
+_TASK_SIGNATURE_RE = re.compile(rf"^sha256:v1:[0-9a-f]{{{TASK_SIGNATURE_HEX_LENGTH}}}$")
 _PRIVATE_CONTEXT_MARKER: Final = "private application context:"
 _SIGNATURE_STOPWORDS: Final = frozenset(
     {
-        "a", "an", "and", "for", "in", "of", "on", "or", "the", "to", "with",
-        "please", "private", "application", "context", "requested", "workspace",
+        "a",
+        "an",
+        "and",
+        "for",
+        "in",
+        "of",
+        "on",
+        "or",
+        "the",
+        "to",
+        "with",
+        "please",
+        "private",
+        "application",
+        "context",
+        "requested",
+        "workspace",
     }
 )
 
@@ -150,13 +163,17 @@ def resolve_observation_db_path(workspace: object | None = None) -> str:
     return DEFAULT_OBSERVATION_DB
 
 
-def open_observation_store(workspace: object | None = None) -> SqliteObservationStore | None:
+def open_observation_store(
+    workspace: object | None = None,
+) -> SqliteObservationStore | None:
     """Open a workspace-local store without making runtime execution depend on it."""
     db_path = resolve_observation_db_path(workspace)
     try:
         return SqliteObservationStore(db_path)
     except Exception as exc:  # pragma: no cover - platform/database dependent
-        logger.warning("Failed to initialize observations store at '%s': %s", db_path, exc)
+        logger.warning(
+            "Failed to initialize observations store at '%s': %s", db_path, exc
+        )
         return None
 
 
@@ -164,7 +181,9 @@ def _now() -> str:
     return dt.datetime.now(dt.UTC).isoformat()
 
 
-def _bounded_text(value: object, *, field: str, limit: int, required: bool = False) -> str | None:
+def _bounded_text(
+    value: object, *, field: str, limit: int, required: bool = False
+) -> str | None:
     if value is None:
         if required:
             raise ObservationValidationError(f"{field} is required")
@@ -187,10 +206,17 @@ def _validate_artifact_refs(value: object) -> list[str]:
     if not isinstance(value, list):
         raise ObservationValidationError("artifact_refs must be a list of strings")
     if len(value) > MAX_ARTIFACT_REFS:
-        raise ObservationValidationError(f"artifact_refs exceeds {MAX_ARTIFACT_REFS} entries")
+        raise ObservationValidationError(
+            f"artifact_refs exceeds {MAX_ARTIFACT_REFS} entries"
+        )
     refs = []
     for item in value:
-        ref = _bounded_text(item, field="artifact_refs entry", limit=MAX_ARTIFACT_REF_CHARS, required=True)
+        ref = _bounded_text(
+            item,
+            field="artifact_refs entry",
+            limit=MAX_ARTIFACT_REF_CHARS,
+            required=True,
+        )
         assert ref is not None
         refs.append(ref)
     return refs
@@ -245,17 +271,24 @@ def _validate_evidence_summary(summary: dict) -> None:
         not isinstance(key, str) or type(value) is not int
         for key, value in labelled_counts.items()
     ):
-        raise ObservationValidationError("evidence_summary.labelled_counts must be dict[str, int]")
+        raise ObservationValidationError(
+            "evidence_summary.labelled_counts must be dict[str, int]"
+        )
 
     scores = summary["scores"]
     if not isinstance(scores, dict) or any(
-        not isinstance(key, str) or type(value) is not float for key, value in scores.items()
+        not isinstance(key, str) or type(value) is not float
+        for key, value in scores.items()
     ):
-        raise ObservationValidationError("evidence_summary.scores must be dict[str, float]")
+        raise ObservationValidationError(
+            "evidence_summary.scores must be dict[str, float]"
+        )
     if not isinstance(summary["winner"], str):
         raise ObservationValidationError("evidence_summary.winner must be a string")
     if type(summary["threshold_met"]) is not bool:
-        raise ObservationValidationError("evidence_summary.threshold_met must be a boolean")
+        raise ObservationValidationError(
+            "evidence_summary.threshold_met must be a boolean"
+        )
     if type(summary["margin"]) is not float:
         raise ObservationValidationError("evidence_summary.margin must be a float")
 
@@ -357,7 +390,9 @@ class SqliteObservationStore:
             )
             existing_cols = {
                 row["name"]
-                for row in conn.execute("PRAGMA table_info(strategy_assignments)").fetchall()
+                for row in conn.execute(
+                    "PRAGMA table_info(strategy_assignments)"
+                ).fetchall()
             }
             if "strategy_version" not in existing_cols:
                 conn.execute(
@@ -397,18 +432,31 @@ class SqliteObservationStore:
         outcome_evidence: str | None = None,
         source: str,
     ) -> Observation:
-        workspace = _bounded_text(workspace_id, field="workspace_id", limit=400, required=True)
+        workspace = _bounded_text(
+            workspace_id, field="workspace_id", limit=400, required=True
+        )
         task = _bounded_text(task_kind, field="task_kind", limit=80, required=True)
-        strategy = _bounded_text(approach, field="approach", limit=MAX_APPROACH_CHARS, required=True)
+        strategy = _bounded_text(
+            approach, field="approach", limit=MAX_APPROACH_CHARS, required=True
+        )
         origin = _bounded_text(source, field="source", limit=80, required=True)
-        evidence = _bounded_text(outcome_evidence, field="outcome_evidence", limit=MAX_EVIDENCE_CHARS)
+        evidence = _bounded_text(
+            outcome_evidence, field="outcome_evidence", limit=MAX_EVIDENCE_CHARS
+        )
         safe_run_id = _bounded_text(run_id, field="run_id", limit=100)
         safe_thread_id = _bounded_text(thread_id, field="thread_id", limit=160)
         safe_signature = _validate_task_signature(task_signature)
         refs = _validate_artifact_refs(artifact_refs)
         if outcome_signal not in _OUTCOME_SIGNALS:
-            raise ObservationValidationError("outcome_signal must be accepted, rejected, edited, or unknown")
-        assert workspace is not None and task is not None and strategy is not None and origin is not None
+            raise ObservationValidationError(
+                "outcome_signal must be accepted, rejected, edited, or unknown"
+            )
+        assert (
+            workspace is not None
+            and task is not None
+            and strategy is not None
+            and origin is not None
+        )
         now = _now()
         observation = Observation(
             observation_id=str(uuid.uuid4()),
@@ -495,8 +543,12 @@ class SqliteObservationStore:
         evidence: str | None,
     ) -> Observation | None:
         if signal not in {"accepted", "rejected", "edited"}:
-            raise ObservationValidationError("signal must be accepted, rejected, or edited")
-        safe_evidence = _bounded_text(evidence, field="evidence", limit=MAX_EVIDENCE_CHARS)
+            raise ObservationValidationError(
+                "signal must be accepted, rejected, or edited"
+            )
+        safe_evidence = _bounded_text(
+            evidence, field="evidence", limit=MAX_EVIDENCE_CHARS
+        )
         now = _now()
         with contextlib.closing(self._connect()) as conn:
             cursor = conn.execute(
@@ -535,7 +587,9 @@ class SqliteObservationStore:
             GROUP BY approach
         """
         with contextlib.closing(self._connect()) as conn:
-            rows = conn.execute(query, (workspace_id, task_kind, *strategy_ids)).fetchall()
+            rows = conn.execute(
+                query, (workspace_id, task_kind, *strategy_ids)
+            ).fetchall()
         values = {row["strategy_id"]: row for row in rows}
         patterns = []
         for strategy_id in strategy_ids:
@@ -603,7 +657,9 @@ class SqliteObservationStore:
                 rejected = int(row["rejected_count"] or 0)
                 edited = int(row["edited_count"] or 0)
                 occurrence_count = accepted + rejected + edited
-                if occurrence_count == 0:  # defensive: SQL predicate above guarantees this.
+                if (
+                    occurrence_count == 0
+                ):  # defensive: SQL predicate above guarantees this.
                     continue
                 sample_rows = conn.execute(
                     """
@@ -615,7 +671,12 @@ class SqliteObservationStore:
                     ORDER BY created_at DESC, observation_id DESC
                     LIMIT ?
                     """,
-                    (workspace_id, row["task_kind"], row["task_signature"], safe_sample_limit),
+                    (
+                        workspace_id,
+                        row["task_kind"],
+                        row["task_signature"],
+                        safe_sample_limit,
+                    ),
                 ).fetchall()
                 patterns.append(
                     TaskSignaturePattern(
@@ -627,7 +688,9 @@ class SqliteObservationStore:
                         edited_count=edited,
                         occurrence_count=occurrence_count,
                         outcome_score=(accepted + 0.5 * edited) / occurrence_count,
-                        sample_run_ids=tuple(str(sample["run_id"]) for sample in sample_rows),
+                        sample_run_ids=tuple(
+                            str(sample["run_id"]) for sample in sample_rows
+                        ),
                     )
                 )
         return patterns
@@ -678,10 +741,15 @@ class SqliteObservationStore:
         with contextlib.closing(self._connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
+                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?",
+                (run_id,),
             ).fetchone()
             if row is None:
-                raw_evidence = json.dumps(evidence_summary) if evidence_summary is not None else None
+                raw_evidence = (
+                    json.dumps(evidence_summary)
+                    if evidence_summary is not None
+                    else None
+                )
                 conn.execute(
                     """
                     INSERT INTO strategy_assignments
@@ -726,11 +794,14 @@ class SqliteObservationStore:
             or strategy_versions[strategy_id] < 1
             for strategy_id in strategy_ids
         ):
-            raise ObservationValidationError("strategy_versions must provide a positive integer for every strategy")
+            raise ObservationValidationError(
+                "strategy_versions must provide a positive integer for every strategy"
+            )
         with contextlib.closing(self._connect()) as conn:
             conn.execute("BEGIN IMMEDIATE")
             existing = conn.execute(
-                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?", (run_id,)
+                "SELECT strategy_id FROM strategy_assignments WHERE run_id = ?",
+                (run_id,),
             ).fetchone()
             if existing is not None:
                 conn.commit()
@@ -742,11 +813,19 @@ class SqliteObservationStore:
                 WHERE workspace_id = ? AND task_kind = ? AND strategy_id IN ({placeholders})
                 GROUP BY strategy_id
             """
-            rows = conn.execute(query, (workspace_id, task_kind, *strategy_ids)).fetchall()
+            rows = conn.execute(
+                query, (workspace_id, task_kind, *strategy_ids)
+            ).fetchall()
             counts = {str(row["strategy_id"]): int(row["count"]) for row in rows}
             minimum = min(counts.get(strategy_id, 0) for strategy_id in strategy_ids)
-            tied = sorted(strategy_id for strategy_id in strategy_ids if counts.get(strategy_id, 0) == minimum)
-            digest = hashlib.sha256(f"{workspace_id}\0{task_kind}\0{run_id}".encode()).digest()
+            tied = sorted(
+                strategy_id
+                for strategy_id in strategy_ids
+                if counts.get(strategy_id, 0) == minimum
+            )
+            digest = hashlib.sha256(
+                f"{workspace_id}\0{task_kind}\0{run_id}".encode()
+            ).digest()
             selected = tied[int.from_bytes(digest, "big") % len(tied)]
             conn.execute(
                 """

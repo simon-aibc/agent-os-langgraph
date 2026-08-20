@@ -106,9 +106,7 @@ async def test_dispatch_run_schedule(run_schedule):
         mock_exec.assert_called_once()
 
         # Verify result was recorded.
-        mock_record.assert_called_once_with(
-            "sched-1", status="completed", error=None
-        )
+        mock_record.assert_called_once_with("sched-1", status="completed", error=None)
 
 
 @pytest.mark.anyio
@@ -232,15 +230,11 @@ async def test_dispatch_app_callback_http_error(app_callback_schedule, caplog):
         assert "private-response-body" not in (result.error or "")
         assert "private-request-body" not in caplog.text
         assert "private-response-body" not in caplog.text
-        mock_record.assert_called_once_with(
-            "sched-3", status="error", error="HTTP 502"
-        )
+        mock_record.assert_called_once_with("sched-3", status="error", error="HTTP 502")
 
 
 @pytest.mark.anyio
-async def test_dispatch_app_callback_transport_error(
-    app_callback_schedule, caplog
-):
+async def test_dispatch_app_callback_transport_error(app_callback_schedule, caplog):
     import httpx
 
     mock_client = AsyncMock()
@@ -352,7 +346,9 @@ async def test_scheduler_tick_dispatches_due_schedules():
 
     with (
         patch("agent_os.scheduler.claim_due_schedules") as mock_claim,
-        patch("agent_os.scheduler.dispatch_schedule", new_callable=AsyncMock) as mock_dispatch,
+        patch(
+            "agent_os.scheduler.dispatch_schedule", new_callable=AsyncMock
+        ) as mock_dispatch,
     ):
         mock_claim.return_value = [fake_schedule]
         mock_dispatch.return_value = ScheduleDispatchResult(
@@ -424,10 +420,16 @@ async def test_scheduler_concurrent_dispatch():
             schedule_id=schedule["schedule_id"], kind="run", status="completed"
         )
 
-    fake_schedules = [{"schedule_id": "s1"}, {"schedule_id": "s2"}, {"schedule_id": "s3"}]
+    fake_schedules = [
+        {"schedule_id": "s1"},
+        {"schedule_id": "s2"},
+        {"schedule_id": "s3"},
+    ]
     with patch("agent_os.scheduler.claim_due_schedules") as mock_claim:
         mock_claim.return_value = fake_schedules
-        with patch("agent_os.scheduler.dispatch_schedule", new_callable=AsyncMock) as mock_dispatch:
+        with patch(
+            "agent_os.scheduler.dispatch_schedule", new_callable=AsyncMock
+        ) as mock_dispatch:
             mock_dispatch.side_effect = slow_dispatch
 
             start = dt.datetime.now()

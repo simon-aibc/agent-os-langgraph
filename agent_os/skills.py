@@ -71,7 +71,9 @@ class SkillRegistry:
                 )
             for alias in skill.aliases:
                 if alias == existing.name or alias in existing.aliases:
-                    raise ValueError(f"Alias '{alias}' already used by '{existing.name}'")
+                    raise ValueError(
+                        f"Alias '{alias}' already used by '{existing.name}'"
+                    )
 
         self._skills[skill.name] = skill
 

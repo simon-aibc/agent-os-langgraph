@@ -63,7 +63,9 @@ def _result_payload(snapshot: object) -> dict[str, Any]:
     executor_output = values.get("executor_output")
     if isinstance(executor_output, BaseModel):
         executor_output = executor_output.model_dump(mode="json")
-    if isinstance(executor_output, dict) and isinstance(executor_output.get("self_check"), dict):
+    if isinstance(executor_output, dict) and isinstance(
+        executor_output.get("self_check"), dict
+    ):
         payload["self_check"] = executor_output["self_check"]
     return payload
 
@@ -114,15 +116,21 @@ def _capture_terminal_observation(
     serialized tool output.  A terminal execution is not user acceptance, so
     every automatically captured record starts as ``unknown``.
     """
-    result = _result_payload(snapshot).get("tool_result") if snapshot is not None else None
+    result = (
+        _result_payload(snapshot).get("tool_result") if snapshot is not None else None
+    )
     tool = result.get("tool") if isinstance(result, dict) else None
     values = getattr(snapshot, "values", None)
     hint = values.get("strategy_hint") if isinstance(values, dict) else None
     hint_data = hint.model_dump() if isinstance(hint, BaseModel) else hint
     strategy_id = hint_data.get("strategy_id") if isinstance(hint_data, dict) else None
-    strategy_task_kind = hint_data.get("task_kind") if isinstance(hint_data, dict) else None
+    strategy_task_kind = (
+        hint_data.get("task_kind") if isinstance(hint_data, dict) else None
+    )
     task_kind = str(strategy_task_kind or tool or "workflow")
-    approach = str(strategy_id or (f"native_tool:{task_kind}" if tool else "graph_terminal"))
+    approach = str(
+        strategy_id or (f"native_tool:{task_kind}" if tool else "graph_terminal")
+    )
     try:
         from agent_os.server.runtime import composed_workspace
 
@@ -187,7 +195,9 @@ async def execute_run(
                     else:
                         graph_input = Command(resume=resume_feedback)
 
-                    async for event in graph.astream_events(graph_input, config, version="v2"):
+                    async for event in graph.astream_events(
+                        graph_input, config, version="v2"
+                    ):
                         if isinstance(event, dict):
                             _append_stream_event(run_id, event)
 

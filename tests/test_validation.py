@@ -25,11 +25,19 @@ def _rule(check: str, param: str) -> ValidationRule:
 @pytest.mark.parametrize(
     ("context", "expected_passed"),
     [
-        ({"verify_commands": {"pytest -q": {"exit_code": 0, "output": "12 passed"}}}, True),
-        ({"verify_commands": {"pytest -q": {"returncode": 1, "stdout": "1 failed"}}}, False),
+        (
+            {"verify_commands": {"pytest -q": {"exit_code": 0, "output": "12 passed"}}},
+            True,
+        ),
+        (
+            {"verify_commands": {"pytest -q": {"returncode": 1, "stdout": "1 failed"}}},
+            False,
+        ),
     ],
 )
-def test_verify_cmd_uses_only_supplied_command_result(context: dict[str, object], expected_passed: bool) -> None:
+def test_verify_cmd_uses_only_supplied_command_result(
+    context: dict[str, object], expected_passed: bool
+) -> None:
     result = run_validation([_rule("verify_cmd", "pytest -q")], context)[0]
 
     assert result.passed is expected_passed
@@ -44,8 +52,12 @@ def test_verify_cmd_uses_only_supplied_command_result(context: dict[str, object]
         ({"artifacts": ["tests/test_validation.py"], "diff": ""}, False),
     ],
 )
-def test_file_exists_checks_only_artifacts_or_diff(context: dict[str, object], expected_passed: bool) -> None:
-    result = run_validation([_rule("file_exists", "agent_os/validation.py")], context)[0]
+def test_file_exists_checks_only_artifacts_or_diff(
+    context: dict[str, object], expected_passed: bool
+) -> None:
+    result = run_validation([_rule("file_exists", "agent_os/validation.py")], context)[
+        0
+    ]
 
     assert result.passed is expected_passed
     assert result.method == "deterministic"
@@ -85,8 +97,12 @@ def test_malformed_regex_and_unknown_checker_fail_closed() -> None:
 def test_summarize_counts_met_rules_and_preserves_audit_records() -> None:
     summary = summarize(
         [
-            ValidationResult(rule_id="one", passed=True, method="deterministic", evidence="ok"),
-            ValidationResult(rule_id="two", passed=False, method="llm", evidence="not met"),
+            ValidationResult(
+                rule_id="one", passed=True, method="deterministic", evidence="ok"
+            ),
+            ValidationResult(
+                rule_id="two", passed=False, method="llm", evidence="not met"
+            ),
         ]
     )
 
@@ -94,13 +110,20 @@ def test_summarize_counts_met_rules_and_preserves_audit_records() -> None:
         "total": 2,
         "met": 1,
         "results": [
-            {"rule_id": "one", "passed": True, "method": "deterministic", "evidence": "ok"},
+            {
+                "rule_id": "one",
+                "passed": True,
+                "method": "deterministic",
+                "evidence": "ok",
+            },
             {"rule_id": "two", "passed": False, "method": "llm", "evidence": "not met"},
         ],
     }
 
 
-def test_llm_judge_is_optional_injected_and_receives_only_independent_evidence() -> None:
+def test_llm_judge_is_optional_injected_and_receives_only_independent_evidence() -> (
+    None
+):
     rule = ValidationRule(
         id="semantic",
         description="Semantic criterion",

@@ -88,8 +88,7 @@ def test_no_schedules_table_in_checkpoint_db(tmp_path, monkeypatch):
     # Verify the checkpoint DB has no scheduler tables.
     with contextlib.closing(sqlite3.connect(ckpt)) as conn:
         cursor = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'schedules'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
         )
         assert cursor.fetchone() is None, (
             "Scheduler table was created in the checkpoint DB"
@@ -99,9 +98,7 @@ def test_no_schedules_table_in_checkpoint_db(tmp_path, monkeypatch):
 # ── Separate file while an async-style connection is open ───────────
 
 
-def test_separate_file_while_checkpoint_connection_open(
-    tmp_path, monkeypatch
-):
+def test_separate_file_while_checkpoint_connection_open(tmp_path, monkeypatch):
     ckpt = str(tmp_path / "checkpoints.db")
     monkeypatch.setenv(CHECKPOINT_DB_ENV, ckpt)
     monkeypatch.delenv(SCHED_DB_ENV, raising=False)

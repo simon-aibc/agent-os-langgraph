@@ -109,7 +109,12 @@ def build_public_contract() -> dict[str, object]:
         "PolicyEngine": {},
     }
     models = {}
-    for model in (api.ActionProposal, api.AuthStatus, api.ExecutionResult, api.PolicyDecision):
+    for model in (
+        api.ActionProposal,
+        api.AuthStatus,
+        api.ExecutionResult,
+        api.PolicyDecision,
+    ):
         models[model.__name__] = {
             name: {
                 "annotation": _annotation(field.annotation),
@@ -121,7 +126,8 @@ def build_public_contract() -> dict[str, object]:
         "exports": list(api.__all__),
         "protocol_attributes": protocol_attributes,
         "callables": {
-            name: _signature(target) for name, target in sorted(callable_targets.items())
+            name: _signature(target)
+            for name, target in sorted(callable_targets.items())
         },
         "models": models,
     }

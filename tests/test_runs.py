@@ -93,7 +93,7 @@ def test_list_runs_supports_status_workspace_and_limit_filters(runs_db):
         first,
         third,
     }
-    assert [run["run_id"] for run in list_runs(status="running", workspace="workspace-a")] == [
-        third
-    ]
+    assert [
+        run["run_id"] for run in list_runs(status="running", workspace="workspace-a")
+    ] == [third]
     assert len(list_runs(limit=2)) == 2
