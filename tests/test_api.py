@@ -17,8 +17,20 @@ def test_health_version():
     payload = resp.json()
     assert payload["status"] == "ok"
     assert payload["version"] == "2.2.1"
+    assert "current_version" in payload
+    assert "latest_version" in payload
+    assert "update_available" in payload
     assert payload["workspace"]["status"] == "not_configured"
     assert payload["active_runs"] == 0
+
+
+def test_update_check_api_endpoint():
+    resp = client.post("/api/update/check")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "current_version" in data
+    assert "latest_version" in data
+    assert "update_available" in data
 
 
 def test_health_reports_configured_workspace(tmp_path, monkeypatch):
