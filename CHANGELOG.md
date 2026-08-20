@@ -5,6 +5,20 @@ for public releases.
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-08-20
+
+### Added
+
+- **Self-update lifecycle (client-ready)**: `agent-os update` CLI detects the runtime (Docker vs pip/wheel) and prints/runs the correct upgrade path, backing up databases first; `--check` dry-runs, `-y/--yes`, `--pull`, and `--reload` flags supported.
+- **Update discovery**: `agent_os/update_check.py` checks GitHub Releases with a 24h on-disk cache, a 3s timeout, and fail-closed behaviour. `/api/health` is cache-only (no inline network) and exposes `current_version`, `latest_version`, and `update_available`; the cache refreshes out-of-band from the FastAPI lifespan. New `POST /api/update/check` forces a refresh.
+- **Additive migration runner**: `agent_os/migrations.py` applies additive-only DDL (`ADD COLUMN`, `CREATE TABLE/INDEX IF NOT EXISTS`), guards against destructive statements, tracks `PRAGMA user_version`, and takes a WAL-aware backup (`wal_checkpoint(TRUNCATE)` with sidecar fallback) before running. Wired into the runs, schedules, permission, and observation store initialisers; fail-closed rollback on error.
+- **Semantic M/N post-execution evaluator**: `agent_os/semantic_judge.py` adds an evidence-bounded LLM judge for natural-language acceptance criteria, evaluated after execution alongside the existing deterministic checks. Token-capped and wrapped in a bounded timeout; no LangGraph node and no execution-state schema change.
+
+### Fixed
+
+- Semantic judge timeout is now truly bounded — the worker executor is shut down with `wait=False` so a hung LLM call cannot block the judge's return.
+- Migration-runner WAL backup no longer risks losing committed frames still in the write-ahead log.
+
 ## [2.2.1] — 2026-08-18
 
 ### Added
