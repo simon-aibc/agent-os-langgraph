@@ -184,9 +184,7 @@ def test_build_cli_executor_invoker_codex_success(monkeypatch, tmp_path):
 
         return MagicMock()
 
-    with patch(
-        "agent_os.backends.run_cli_command", side_effect=mock_run_command
-    ):
+    with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
         report = invoker(state)
 
         assert isinstance(report, CodingResult)
@@ -217,9 +215,7 @@ def test_build_cli_executor_invoker_codex_invalid_payload(monkeypatch, tmp_path)
 
         return MagicMock()
 
-    with patch(
-        "agent_os.backends.run_cli_command", side_effect=mock_run_command
-    ):
+    with patch("agent_os.backends.run_cli_command", side_effect=mock_run_command):
         with pytest.raises(ValueError) as exc_info:
             invoker(state)
 

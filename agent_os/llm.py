@@ -79,7 +79,9 @@ def get_architect_llm(model_name: str | None = None) -> BaseChatModel:
     """
     resolved_model = model_name or os.getenv("LLM_ARCHITECT")
     if not resolved_model:
-        raise ValueError("No architect model configured. Pass model_name or set LLM_ARCHITECT.")
+        raise ValueError(
+            "No architect model configured. Pass model_name or set LLM_ARCHITECT."
+        )
 
     return ChatLiteLLM(model=resolved_model)
 
@@ -92,7 +94,9 @@ def get_executor_llm(model_name: str | None = None) -> BaseChatModel:
     """
     resolved_model = model_name or os.getenv("LLM_EXECUTOR")
     if not resolved_model:
-        raise ValueError("No executor model configured. Pass model_name or set LLM_EXECUTOR.")
+        raise ValueError(
+            "No executor model configured. Pass model_name or set LLM_EXECUTOR."
+        )
 
     return ChatLiteLLM(model=resolved_model)
 
@@ -105,6 +109,8 @@ def get_router_llm(model_name: str | None = None) -> BaseChatModel:
     """
     resolved_model = model_name or os.getenv("LLM_ROUTER")
     if not resolved_model:
-        raise ValueError("No router model configured. Pass model_name or set LLM_ROUTER.")
+        raise ValueError(
+            "No router model configured. Pass model_name or set LLM_ROUTER."
+        )
 
     return ChatLiteLLM(model=resolved_model)

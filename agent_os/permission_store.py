@@ -22,6 +22,7 @@ PERMISSION_KEY_REGEX = re.compile(
 @dataclass
 class PermissionRule:
     """A learned user-taught permission rule."""
+
     permission_key: str
     effect: Literal["always_approve", "always_deny"]
     tier_at_creation: Literal["trivial", "low", "medium", "high"]
@@ -34,23 +35,17 @@ class PermissionRule:
 class PermissionRuleStore(Protocol):
     """Protocol for storing learned permission rules."""
 
-    def get(self, permission_key: str) -> PermissionRule | None:
-        ...
+    def get(self, permission_key: str) -> PermissionRule | None: ...
 
-    def upsert(self, rule: PermissionRule) -> None:
-        ...
+    def upsert(self, rule: PermissionRule) -> None: ...
 
-    def list(self) -> list[PermissionRule]:
-        ...
+    def list(self) -> list[PermissionRule]: ...
 
-    def delete(self, permission_key: str) -> bool:
-        ...
+    def delete(self, permission_key: str) -> bool: ...
 
-    def increment_approve(self, permission_key: str) -> None:
-        ...
+    def increment_approve(self, permission_key: str) -> None: ...
 
-    def increment_deny(self, permission_key: str) -> None:
-        ...
+    def increment_deny(self, permission_key: str) -> None: ...
 
 
 class SqlitePermissionStore:
@@ -88,7 +83,9 @@ class SqlitePermissionStore:
             conn.commit()
 
     def _validate_key(self, permission_key: str) -> None:
-        if not isinstance(permission_key, str) or not PERMISSION_KEY_REGEX.fullmatch(permission_key):
+        if not isinstance(permission_key, str) or not PERMISSION_KEY_REGEX.fullmatch(
+            permission_key
+        ):
             raise ValueError(f"Invalid permission_key format: {permission_key}")
 
     def get(self, permission_key: str) -> PermissionRule | None:
@@ -215,7 +212,9 @@ class InMemoryPermissionStore:
         self._rules: dict[str, PermissionRule] = {}
 
     def _validate_key(self, permission_key: str) -> None:
-        if not isinstance(permission_key, str) or not PERMISSION_KEY_REGEX.fullmatch(permission_key):
+        if not isinstance(permission_key, str) or not PERMISSION_KEY_REGEX.fullmatch(
+            permission_key
+        ):
             raise ValueError(f"Invalid permission_key format: {permission_key}")
 
     def get(self, permission_key: str) -> PermissionRule | None:

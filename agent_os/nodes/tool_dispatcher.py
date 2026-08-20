@@ -110,10 +110,7 @@ def build_tool_dispatcher_node(
             except Exception as error:
                 return _escalate(error=error)
 
-        if (
-            decision.tool is None
-            or decision.confidence < ROUTER_CONFIDENCE_THRESHOLD
-        ):
+        if decision.tool is None or decision.confidence < ROUTER_CONFIDENCE_THRESHOLD:
             return _escalate()
 
         skill = resolved_registry.get(decision.tool)

@@ -141,7 +141,9 @@ def test_execute_brief_does_not_expose_a_ref_for_an_uncommitted_write(
         "agent_os.brief_runtime.build_brief_summarizer",
         lambda: lambda _prompt: "# Brief",
     )
-    monkeypatch.setattr("agent_os.brief_runtime.write_brief", lambda *_args, **_kwargs: failed_write)
+    monkeypatch.setattr(
+        "agent_os.brief_runtime.write_brief", lambda *_args, **_kwargs: failed_write
+    )
 
     result = execute_brief(date="2026-08-18", connector=connector, write=True)
 
@@ -171,7 +173,9 @@ async def test_scheduler_marks_denied_brief_write_as_error(monkeypatch) -> None:
     monkeypatch.setattr("agent_os.scheduler.execute_brief", lambda **_kwargs: denied)
     monkeypatch.setattr(
         "agent_os.scheduler.record_schedule_result",
-        lambda schedule_id, *, status, error=None: records.append((schedule_id, status, error)),
+        lambda schedule_id, *, status, error=None: records.append(
+            (schedule_id, status, error)
+        ),
     )
 
     result = await dispatch_schedule(
@@ -204,7 +208,9 @@ async def test_brief_cli_does_not_claim_an_uncommitted_write_was_saved(
         error="rejected: brief not wanted",
     )
     monkeypatch.setenv("AGENT_OS_PERMISSIONS_DB", str(tmp_path / "permissions.db"))
-    monkeypatch.setattr("agent_os.brief_runtime.execute_brief", lambda **_kwargs: denied)
+    monkeypatch.setattr(
+        "agent_os.brief_runtime.execute_brief", lambda **_kwargs: denied
+    )
 
     exit_code = await async_main(["brief", "--date", "2026-08-18"])
     captured = capsys.readouterr()

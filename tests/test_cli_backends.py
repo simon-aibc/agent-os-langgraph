@@ -44,7 +44,9 @@ def test_sandbox_cwd_enforcement(monkeypatch, tmp_path):
         patch("shutil.which", return_value="/fake/path/fake_bin"),
         patch("subprocess.run") as mock_run,
     ):
-        mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        )
         run_cli_command("fake_bin", ["arg"])
 
     mock_run.assert_called_once()
@@ -70,7 +72,10 @@ def test_sandbox_path_escape_rejected(monkeypatch, tmp_path):
         (["exec", "--sandbox", "danger-full-access", "task"], "danger-full-access"),
         (["-p", "task", "--permission-mode=bypassPermissions"], "bypassPermissions"),
         (["-p", "task", "--add-dir=/var/tmp"], "expand sandbox access"),
-        (["exec", "--dangerously-bypass-approvals-and-sandbox", "task"], "expand sandbox access"),
+        (
+            ["exec", "--dangerously-bypass-approvals-and-sandbox", "task"],
+            "expand sandbox access",
+        ),
     ],
 )
 def test_cli_security_bypass_arguments_rejected(args, expected_error):
@@ -234,7 +239,9 @@ def test_codex_output_parser_invalid_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("TEST_API_KEY", "secret-value")
     invalid_file = tmp_path / "invalid.json"
     invalid_file.write_text("not json api_key=secret-value", encoding="utf-8")
-    with pytest.raises(ValueError, match="Failed to parse Codex JSON output") as exc_info:
+    with pytest.raises(
+        ValueError, match="Failed to parse Codex JSON output"
+    ) as exc_info:
         parse_codex_output_file(invalid_file)
     assert "secret-value" not in str(exc_info.value)
 
@@ -254,45 +261,41 @@ def test_claude_stream_json_parser_success_direct():
 
 
 def test_claude_stream_json_parser_success_assistant():
-    stdout = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "text", "text": '{"structured": "data"}'}
-            ]
+    stdout = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [{"type": "text", "text": '{"structured": "data"}'}]
+            },
         }
-    })
+    )
     data = parse_claude_stream_json(stdout)
     assert data == {"structured": "data"}
 
 
 def test_claude_stream_json_parser_success_markdown_fence():
-    stdout = json.dumps({
-        "type": "assistant",
-        "message": {
-            "content": [
-                {"type": "text", "text": '```json\n{"structured": "data"}\n```'}
-            ]
-        },
-    })
+    stdout = json.dumps(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": '```json\n{"structured": "data"}\n```'}
+                ]
+            },
+        }
+    )
     data = parse_claude_stream_json(stdout)
     assert data == {"structured": "data"}
 
 
 def test_claude_stream_json_parser_success_result():
-    stdout = json.dumps({
-        "type": "result",
-        "result": '{"structured": "data"}'
-    })
+    stdout = json.dumps({"type": "result", "result": '{"structured": "data"}'})
     data = parse_claude_stream_json(stdout)
     assert data == {"structured": "data"}
 
 
 def test_claude_stream_json_parser_success_structured_output():
-    stdout = json.dumps({
-        "type": "result",
-        "structured_output": {"schema": "valid"}
-    })
+    stdout = json.dumps({"type": "result", "structured_output": {"schema": "valid"}})
     data = parse_claude_stream_json(stdout)
     assert data == {"schema": "valid"}
 

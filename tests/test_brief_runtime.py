@@ -46,9 +46,7 @@ def test_resolve_brief_connector_gbrain(monkeypatch):
 
 def test_build_brief_summarizer_cli_model(monkeypatch):
     monkeypatch.setenv("LLM_ARCHITECT", "cli/claude-code")
-    with patch(
-        "agent_os.brief_runtime.build_cli_architect_invoker"
-    ) as mock_build:
+    with patch("agent_os.brief_runtime.build_cli_architect_invoker") as mock_build:
         mock_invoker = MagicMock()
         mock_invoker.return_value = MagicMock(summary="test brief")
         mock_build.return_value = mock_invoker

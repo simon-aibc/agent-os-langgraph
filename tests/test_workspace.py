@@ -182,7 +182,9 @@ async def test_no_workspace_backward_compat(monkeypatch):
             yield {"event": "unknown"}
 
         async def aget_state(self, config):
-            return SimpleNamespace(created_at="now", values={"task": "done"}, next=(), tasks=())
+            return SimpleNamespace(
+                created_at="now", values={"task": "done"}, next=(), tasks=()
+            )
 
     graph = CompletedGraph()
     console = Console(file=io.StringIO(), force_terminal=False, color_system=None)

@@ -52,13 +52,11 @@ def test_init_creates_schedules_table(sched_db):
     _init_schedules_db()
     with contextlib.closing(sqlite3.connect(sched_db)) as conn:
         cursor = conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'schedules'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
         )
         assert cursor.fetchone() is not None
         table_sql = conn.execute(
-            "SELECT sql FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'schedules'"
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'schedules'"
         ).fetchone()[0]
         assert "'app_callback'" in table_sql
 
@@ -175,7 +173,9 @@ def test_coalesce_next_run_long_gap():
     assert res == now + dt.timedelta(hours=1)
 
     # For cron, it should jump to next occurrence
-    res_cron = coalesce_next_run("cron", "0 * * * *", "UTC", persisted=persisted, now=now)
+    res_cron = coalesce_next_run(
+        "cron", "0 * * * *", "UTC", persisted=persisted, now=now
+    )
     assert res_cron == now + dt.timedelta(hours=1)
 
 
@@ -186,9 +186,7 @@ def test_coalesce_skips_missed_fires():
     # Schedule fires every 1 hour. Last persisted was 3 hours ago.
     persisted = dt.datetime(2026, 1, 1, 6, 0, 0, tzinfo=dt.UTC)
     now = dt.datetime(2026, 1, 1, 9, 30, 0, tzinfo=dt.UTC)
-    result = coalesce_next_run(
-        "interval", "1h", "UTC", persisted=persisted, now=now
-    )
+    result = coalesce_next_run("interval", "1h", "UTC", persisted=persisted, now=now)
     # Should be strictly after now.
     assert result > now
     assert result == dt.datetime(2026, 1, 1, 10, 0, 0, tzinfo=dt.UTC)
@@ -198,9 +196,7 @@ def test_coalesce_cron_missed_fires():
     # Daily at 09:00 UTC. Process was down for 3 days.
     persisted = dt.datetime(2026, 1, 1, 9, 0, 0, tzinfo=dt.UTC)
     now = dt.datetime(2026, 1, 4, 10, 0, 0, tzinfo=dt.UTC)
-    result = coalesce_next_run(
-        "cron", "0 9 * * *", "UTC", persisted=persisted, now=now
-    )
+    result = coalesce_next_run("cron", "0 9 * * *", "UTC", persisted=persisted, now=now)
     assert result > now
     assert result == dt.datetime(2026, 1, 5, 9, 0, 0, tzinfo=dt.UTC)
 
@@ -251,11 +247,16 @@ def test_get_schedule_unknown(sched_db):
 
 def test_list_schedules_all(sched_db):
     create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     create_schedule(
-        name="b1", kind="brief", trigger_kind="interval",
+        name="b1",
+        kind="brief",
+        trigger_kind="interval",
         trigger_value="24h",
     )
     all_schedules = list_schedules()
@@ -264,11 +265,16 @@ def test_list_schedules_all(sched_db):
 
 def test_list_schedules_filter_by_kind(sched_db):
     create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     create_schedule(
-        name="b1", kind="brief", trigger_kind="interval",
+        name="b1",
+        kind="brief",
+        trigger_kind="interval",
         trigger_value="24h",
     )
     runs = list_schedules(kind="run")
@@ -281,8 +287,11 @@ def test_list_schedules_filter_by_kind(sched_db):
 
 def test_list_schedules_filter_by_enabled(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     set_schedule_enabled(sid, False)
     assert len(list_schedules(enabled=True)) == 0
@@ -291,12 +300,18 @@ def test_list_schedules_filter_by_enabled(sched_db):
 
 def test_list_schedules_ordered_by_created_at_desc(sched_db):
     s1 = create_schedule(
-        name="first", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="first",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     s2 = create_schedule(
-        name="second", kind="run", trigger_kind="interval",
-        trigger_value="1h", payload={"task": "t2"},
+        name="second",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="1h",
+        payload={"task": "t2"},
     )
     schedules = list_schedules()
     assert schedules[0]["schedule_id"] == s2
@@ -305,8 +320,11 @@ def test_list_schedules_ordered_by_created_at_desc(sched_db):
 
 def test_remove_schedule(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     assert remove_schedule(sid) is True
     assert get_schedule(sid) is None
@@ -319,8 +337,11 @@ def test_remove_schedule_unknown(sched_db):
 
 def test_set_schedule_enabled(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     assert set_schedule_enabled(sid, False) is True
     assert get_schedule(sid)["enabled"] is False  # type: ignore[index]
@@ -339,25 +360,31 @@ def test_set_schedule_enabled_unknown(sched_db):
 def test_invalid_kind(sched_db):
     with pytest.raises(ValueError, match="kind must be"):
         create_schedule(
-            name="bad", kind="webhook",  # type: ignore[arg-type]
-            trigger_kind="interval", trigger_value="30m",
+            name="bad",
+            kind="webhook",  # type: ignore[arg-type]
+            trigger_kind="interval",
+            trigger_value="30m",
         )
 
 
 def test_invalid_trigger_kind(sched_db):
     with pytest.raises(ValueError, match="trigger_kind must be"):
         create_schedule(
-            name="bad", kind="run",
+            name="bad",
+            kind="run",
             trigger_kind="webhook",  # type: ignore[arg-type]
-            trigger_value="30m", payload={"task": "t"},
+            trigger_value="30m",
+            payload={"task": "t"},
         )
 
 
 def test_interval_rejects_non_utc_timezone(sched_db):
     with pytest.raises(ValueError, match="non-UTC timezone"):
         create_schedule(
-            name="bad", kind="run",
-            trigger_kind="interval", trigger_value="30m",
+            name="bad",
+            kind="run",
+            trigger_kind="interval",
+            trigger_value="30m",
             timezone="America/New_York",
             payload={"task": "t"},
         )
@@ -366,8 +393,10 @@ def test_interval_rejects_non_utc_timezone(sched_db):
 def test_run_requires_task_in_payload(sched_db):
     with pytest.raises(ValueError, match="task"):
         create_schedule(
-            name="bad", kind="run",
-            trigger_kind="interval", trigger_value="30m",
+            name="bad",
+            kind="run",
+            trigger_kind="interval",
+            trigger_value="30m",
             payload={},
         )
 
@@ -375,8 +404,10 @@ def test_run_requires_task_in_payload(sched_db):
 def test_run_rejects_unknown_payload_keys(sched_db):
     with pytest.raises(ValueError, match="Unknown payload"):
         create_schedule(
-            name="bad", kind="run",
-            trigger_kind="interval", trigger_value="30m",
+            name="bad",
+            kind="run",
+            trigger_kind="interval",
+            trigger_value="30m",
             payload={"task": "t", "extra": "nope"},
         )
 
@@ -384,8 +415,10 @@ def test_run_rejects_unknown_payload_keys(sched_db):
 def test_brief_rejects_unknown_payload_keys(sched_db):
     with pytest.raises(ValueError, match="Unknown payload"):
         create_schedule(
-            name="bad", kind="brief",
-            trigger_kind="interval", trigger_value="30m",
+            name="bad",
+            kind="brief",
+            trigger_kind="interval",
+            trigger_value="30m",
             payload={"task": "should not be here"},
         )
 
@@ -395,7 +428,9 @@ def test_brief_rejects_unknown_payload_keys(sched_db):
 
 def test_payload_round_trip(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
         trigger_value="30m",
         payload={"task": "test task", "workspace": "/some/path"},
     )
@@ -411,8 +446,11 @@ def test_payload_round_trip(sched_db):
 
 def test_claim_due_schedules(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     sched = get_schedule(sid)
     assert sched is not None
@@ -430,8 +468,11 @@ def test_claim_due_schedules(sched_db):
 def test_claim_due_respects_limit(sched_db):
     for i in range(5):
         create_schedule(
-            name=f"r{i}", kind="run", trigger_kind="interval",
-            trigger_value="30m", payload={"task": f"t{i}"},
+            name=f"r{i}",
+            kind="run",
+            trigger_kind="interval",
+            trigger_value="30m",
+            payload={"task": f"t{i}"},
         )
     # Claim with a far-future time so all are due.
     far_future = dt.datetime(2099, 1, 1, tzinfo=dt.UTC)
@@ -441,8 +482,11 @@ def test_claim_due_respects_limit(sched_db):
 
 def test_claim_due_excludes_disabled(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     set_schedule_enabled(sid, False)
     far_future = dt.datetime(2099, 1, 1, tzinfo=dt.UTC)
@@ -452,8 +496,11 @@ def test_claim_due_excludes_disabled(sched_db):
 
 def test_claim_due_does_not_double_fire(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     sched = get_schedule(sid)
     assert sched is not None
@@ -470,8 +517,11 @@ def test_claim_due_does_not_double_fire(sched_db):
 
 def test_record_schedule_result(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     record_schedule_result(sid, status="completed")
     sched = get_schedule(sid)
@@ -482,8 +532,11 @@ def test_record_schedule_result(sched_db):
 
 def test_record_schedule_result_with_error(sched_db):
     sid = create_schedule(
-        name="r1", kind="run", trigger_kind="interval",
-        trigger_value="30m", payload={"task": "t1"},
+        name="r1",
+        kind="run",
+        trigger_kind="interval",
+        trigger_value="30m",
+        payload={"task": "t1"},
     )
     record_schedule_result(sid, status="error", error="boom")
     sched = get_schedule(sid)
@@ -749,7 +802,10 @@ def test_db_migration_rolls_back_on_failure(sched_db, monkeypatch):
         assert conn.execute(
             "SELECT name FROM schedules WHERE schedule_id = 'preserved-id'"
         ).fetchone() == ("preserved",)
-        assert conn.execute(
-            "SELECT 1 FROM sqlite_master "
-            "WHERE type = 'table' AND name = 'schedules__migration'"
-        ).fetchone() is None
+        assert (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type = 'table' AND name = 'schedules__migration'"
+            ).fetchone()
+            is None
+        )

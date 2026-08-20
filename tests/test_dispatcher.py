@@ -31,7 +31,9 @@ def test_dispatcher_tier1():
     registry = SkillRegistry()
 
     mock_handler = MagicMock(return_value=DummyResult(foo="bar"))
-    registry.register(RegisteredSkill(name="read_file", aliases=["read"], handler=mock_handler))
+    registry.register(
+        RegisteredSkill(name="read_file", aliases=["read"], handler=mock_handler)
+    )
 
     mock_llm = MagicMock()
 
@@ -52,7 +54,9 @@ def test_dispatcher_tier1():
 def test_dispatcher_tier2_high_confidence():
     registry = SkillRegistry()
     mock_handler = MagicMock(return_value="done")
-    registry.register(RegisteredSkill(name="custom_tool", aliases=[], handler=mock_handler))
+    registry.register(
+        RegisteredSkill(name="custom_tool", aliases=[], handler=mock_handler)
+    )
 
     mock_llm = MagicMock()
     mock_structured = MagicMock()
@@ -73,7 +77,9 @@ def test_dispatcher_tier2_high_confidence():
 def test_dispatcher_tier3_low_confidence():
     registry = SkillRegistry()
     mock_handler = MagicMock(return_value="done")
-    registry.register(RegisteredSkill(name="custom_tool", aliases=[], handler=mock_handler))
+    registry.register(
+        RegisteredSkill(name="custom_tool", aliases=[], handler=mock_handler)
+    )
 
     mock_llm = MagicMock()
     mock_structured = MagicMock()
@@ -114,7 +120,9 @@ def test_dispatcher_tier3_unknown_tool():
 def test_dispatcher_tool_failure():
     registry = SkillRegistry()
     mock_handler = MagicMock(side_effect=RuntimeError("Tool crashed"))
-    registry.register(RegisteredSkill(name="read_file", aliases=["read"], handler=mock_handler))
+    registry.register(
+        RegisteredSkill(name="read_file", aliases=["read"], handler=mock_handler)
+    )
 
     node = build_tool_dispatcher_node(registry=registry, router_llm=MagicMock())
 
@@ -158,9 +166,7 @@ def test_dispatcher_bash_nonzero_returncode_marks_failure():
             timed_out=False,
         )
     )
-    registry.register(
-        RegisteredSkill(name="bash", aliases=[], handler=mock_handler)
-    )
+    registry.register(RegisteredSkill(name="bash", aliases=[], handler=mock_handler))
 
     node = build_tool_dispatcher_node(registry=registry, router_llm=MagicMock())
     cmd = node(make_state("bash python"))
@@ -247,7 +253,7 @@ def test_dispatcher_output_truncation():
     output = cmd.update["tool_result"].output
     match = re.match(r"^\[truncated (\d+) bytes\]\n", output)
     assert match is not None
-    retained = output[match.end():]
+    retained = output[match.end() :]
     assert len(output.encode("utf-8")) <= 50 * 1024
     assert int(match.group(1)) == len(large_output.encode()) - len(retained.encode())
 

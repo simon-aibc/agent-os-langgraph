@@ -33,6 +33,7 @@ class _CodexCodingPlanOutput(BaseModel):
 
     summary: str = ""
     steps: list[str] = Field(default_factory=list)
+    acceptance_criteria: list[str] = Field(default_factory=list)
     files: list[str]
     changes: list[str]
     verify_cmd: str
@@ -139,7 +140,9 @@ def _check_cli_auth_status(
 
     binary_path = shutil.which(binary)
     if not binary_path:
-        return AuthStatus(status="unknown", detail=f"Binary '{binary}' not found on PATH.")
+        return AuthStatus(
+            status="unknown", detail=f"Binary '{binary}' not found on PATH."
+        )
 
     try:
         result = subprocess.run(
@@ -152,9 +155,13 @@ def _check_cli_auth_status(
             env=build_safe_subprocess_env(),
         )
     except subprocess.TimeoutExpired:
-        return AuthStatus(status="unknown", detail=f"Command '{binary}' timed out during auth check.")
+        return AuthStatus(
+            status="unknown", detail=f"Command '{binary}' timed out during auth check."
+        )
     except Exception as e:
-        return AuthStatus(status="unknown", detail=f"Subprocess error: {type(e).__name__}")
+        return AuthStatus(
+            status="unknown", detail=f"Subprocess error: {type(e).__name__}"
+        )
 
     output = _coerce_text(result.stdout) + "\n" + _coerce_text(result.stderr)
     lower_output = output.lower()
@@ -162,13 +169,15 @@ def _check_cli_auth_status(
     if any(ind in lower_output for ind in unauth_indicators):
         return AuthStatus(status="unauthenticated", detail=unauth_detail)
 
-    if result.returncode == 0 and any(ind in lower_output for ind in success_indicators):
+    if result.returncode == 0 and any(
+        ind in lower_output for ind in success_indicators
+    ):
         return AuthStatus(status="ok", detail="Authenticated")
 
     excerpt = _redact_secrets_in_text(output[:200].replace("\n", " ").strip())
     return AuthStatus(
         status="unknown",
-        detail=f"Exit {result.returncode}, unrecognized output. Excerpt: {excerpt}"
+        detail=f"Exit {result.returncode}, unrecognized output. Excerpt: {excerpt}",
     )
 
 
@@ -182,7 +191,9 @@ class ClaudeCodeAdapter:
 
     def build_invoker(self, role: BackendRole) -> BackendInvoker:
         if role not in self.supported_roles:
-            raise ValueError(f"Backend adapter '{self.name}' does not support role '{role}'")
+            raise ValueError(
+                f"Backend adapter '{self.name}' does not support role '{role}'"
+            )
 
         def invoker(state: SimonState) -> BackendArtifact:
             if role == "architect":
@@ -255,7 +266,9 @@ class CodexAdapter:
 
     def build_invoker(self, role: BackendRole) -> BackendInvoker:
         if role not in self.supported_roles:
-            raise ValueError(f"Backend adapter '{self.name}' does not support role '{role}'")
+            raise ValueError(
+                f"Backend adapter '{self.name}' does not support role '{role}'"
+            )
 
         def invoker(state: SimonState) -> BackendArtifact:
             if role == "architect":
@@ -308,7 +321,12 @@ class CodexAdapter:
             self.binary_name,
             ["login", "status"],
             success_indicators=["logged in", "authenticated"],
-            unauth_indicators=["not logged in", "oauth session expired", "invalid_api_key", "unauthorized"],
+            unauth_indicators=[
+                "not logged in",
+                "oauth session expired",
+                "invalid_api_key",
+                "unauthorized",
+            ],
             unauth_detail="run: codex login",
         )
 

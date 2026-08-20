@@ -149,9 +149,7 @@ def _init_schedules_db() -> None:
                         FROM schedules
                     """)
                     conn.execute("DROP TABLE schedules")
-                    conn.execute(
-                        "ALTER TABLE schedules__migration RENAME TO schedules"
-                    )
+                    conn.execute("ALTER TABLE schedules__migration RENAME TO schedules")
                     for statement in index_sql:
                         conn.execute(statement)
 
@@ -170,9 +168,7 @@ def _init_schedules_db() -> None:
 
 def validate_app_callback_url(value: Any) -> str:
     """Return a stripped HTTP(S) URL or raise ``ValueError``."""
-    message = (
-        "url must start with 'http://' or 'https://' and include a valid host"
-    )
+    message = "url must start with 'http://' or 'https://' and include a valid host"
     if not isinstance(value, str):
         raise ValueError(message)
 
@@ -231,9 +227,7 @@ def _validate_schedule_fields(
     elif kind == "brief":
         unknown = set(payload) - _BRIEF_PAYLOAD_KEYS
         if unknown:
-            raise ValueError(
-                f"Unknown payload keys for kind=brief: {sorted(unknown)}"
-            )
+            raise ValueError(f"Unknown payload keys for kind=brief: {sorted(unknown)}")
     elif kind == "app_callback":
         unknown = set(payload) - _APP_CALLBACK_PAYLOAD_KEYS
         if unknown:
@@ -289,9 +283,7 @@ def create_schedule(
     _init_schedules_db()
     schedule_id = str(uuid.uuid4())
     now = dt.datetime.now(dt.UTC)
-    computed_next = next_run_at(
-        trigger_kind, trigger_value, timezone, after=now
-    )
+    computed_next = next_run_at(trigger_kind, trigger_value, timezone, after=now)
     now_iso = now.isoformat()
     next_iso = computed_next.isoformat()
 

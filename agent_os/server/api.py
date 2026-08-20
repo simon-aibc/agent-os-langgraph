@@ -18,7 +18,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
 from agent_os.connectors import MemoryConnector
@@ -61,6 +61,13 @@ from agent_os.server.runtime import (
     task_kind_for_input,
 )
 from agent_os.sessions import delete_session, list_sessions
+from agent_os.skill_authoring import (
+    CandidateAuthoringInput,
+    SkillAuthoringError,
+    SkillAuthoringService,
+)
+from agent_os.skill_candidates import mine_skill_candidates
+from agent_os.skills import SkillRegistry
 from agent_os.strategies import strategies_for
 
 
@@ -124,6 +131,21 @@ class RecordObservationOutcomeRequest(BaseModel):
     evidence: str | None = None
 
 
+class PrepareSkillAuthoringRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    candidate: CandidateAuthoringInput
+
+
+class SubmitSkillDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    draft_path: str
+
+
+class ConfirmSkillRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: bool
+
+
 def _public_concierge_rate_limit(request: Request) -> None:
     limit = int(os.getenv("AGENT_OS_PUBLIC_CONCIERGE_RATE_LIMIT", "20"))
     if limit <= 0:
@@ -144,7 +166,9 @@ def _public_concierge_rate_limit(request: Request) -> None:
     ]
     if len(bucket) >= limit:
         PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
-        raise HTTPException(status_code=429, detail="Public concierge rate limit exceeded")
+        raise HTTPException(
+            status_code=429, detail="Public concierge rate limit exceeded"
+        )
     bucket.append(now)
     PUBLIC_CONCIERGE_BUCKETS[client_key] = bucket
 
@@ -271,6 +295,29 @@ def _runtime_observation_store() -> tuple[Any, str]:
     return store, observation_workspace_id(workspace)
 
 
+def _runtime_skill_candidate_context() -> tuple[Any, str, SkillRegistry]:
+    """Return only read-only inputs required by the candidate miner."""
+    from agent_os.server.runtime import composed_workspace
+
+    runtime = composed_workspace()
+    workspace = runtime.workspace if runtime is not None else None
+    store = open_observation_store(workspace)
+    if store is None:
+        raise RuntimeError("Observations store is unavailable")
+    registry = runtime.skill_registry if runtime is not None else SkillRegistry()
+    return store, observation_workspace_id(workspace), registry
+
+
+def _runtime_skill_authoring_service() -> SkillAuthoringService:
+    """Authoring is deliberately unavailable without a configured workspace."""
+    from agent_os.server.runtime import composed_workspace
+
+    runtime = composed_workspace()
+    if runtime is None:
+        raise RuntimeError("Skill authoring requires an active workspace")
+    return SkillAuthoringService(runtime.workspace)
+
+
 @app.get("/api/health")
 def health_check() -> dict[str, Any]:
     workspace = runtime_summary()
@@ -300,7 +347,9 @@ async def public_concierge_chat(
 ) -> PublicChatResponse:
     profile = load_public_concierge_profile()
     if profile is None:
-        raise HTTPException(status_code=404, detail="Public concierge is not configured")
+        raise HTTPException(
+            status_code=404, detail="Public concierge is not configured"
+        )
     _public_concierge_rate_limit(request)
     return await asyncio.to_thread(PublicConciergeAI(profile).respond, payload)
 
@@ -312,7 +361,9 @@ def public_concierge_leads(
 ) -> list[dict[str, object]]:
     token = os.getenv("AGENT_OS_PUBLIC_CONCIERGE_ADMIN_TOKEN", "").strip()
     if not token:
-        raise HTTPException(status_code=404, detail="Public concierge lead review is not configured")
+        raise HTTPException(
+            status_code=404, detail="Public concierge lead review is not configured"
+        )
     # This endpoint is intentionally token-gated and should sit behind HTTPS in
     # production. It is for internal review dashboards, not the public website.
     provided = request.headers.get("x-admin-token", "").strip()
@@ -323,13 +374,16 @@ def public_concierge_leads(
         raise HTTPException(status_code=403, detail="Forbidden")
     return list_public_leads(limit=limit)
 
+
 @app.get("/api/sessions")
 def get_sessions() -> list[dict[str, Any]]:
     return list_sessions()
 
+
 @app.get("/api/sessions/{session_id}")
 def get_session(session_id: str) -> dict[str, Any]:
     from langgraph.checkpoint.sqlite import SqliteSaver
+
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
     try:
         conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -338,20 +392,25 @@ def get_session(session_id: str) -> dict[str, Any]:
         tup = saver.get_tuple(config)
         if tup is None:
             raise HTTPException(status_code=404, detail="Session not found")
-            
+
         state_vals = tup.checkpoint.get("channel_values", {})
-        messages = [{"type": type(m).__name__, "content": m.content} for m in state_vals.get("messages", [])]
+        messages = [
+            {"type": type(m).__name__, "content": m.content}
+            for m in state_vals.get("messages", [])
+        ]
         state = {k: v for k, v in state_vals.items() if k != "messages"}
         return {"id": session_id, "messages": messages, "state": state}
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 @app.delete("/api/sessions/{session_id}")
 def remove_session(session_id: str, confirm: bool = False) -> dict[str, str]:
     if not confirm:
         raise HTTPException(status_code=400, detail="Missing confirm=true")
     from langgraph.checkpoint.sqlite import SqliteSaver
+
     db_path = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
     try:
         conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -368,8 +427,9 @@ def remove_session(session_id: str, confirm: bool = False) -> dict[str, str]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     finally:
-        if 'conn' in locals():
+        if "conn" in locals():
             conn.close()
+
 
 @app.post("/api/brief")
 @app.get("/api/brief")
@@ -378,6 +438,7 @@ def create_brief() -> dict[str, str]:
 
     res = execute_brief(write=False)
     return {"date": res.date, "content": res.content}
+
 
 def build_graph_data(
     connector: MemoryConnector,
@@ -474,9 +535,14 @@ def _start_run_task(
 @app.post("/api/runs")
 async def create_run_endpoint(request: CreateRunRequest) -> dict[str, str]:
     if request.strategy_id is not None:
-        allowed = {item.strategy_id for item in strategies_for(task_kind_for_input(request.task))}
+        allowed = {
+            item.strategy_id
+            for item in strategies_for(task_kind_for_input(request.task))
+        }
         if request.strategy_id not in allowed:
-            raise HTTPException(status_code=422, detail="Strategy is not allowed for this task kind")
+            raise HTTPException(
+                status_code=422, detail="Strategy is not allowed for this task kind"
+            )
     try:
         workspace = str(resolve_workspace_root(request.workspace))
     except ValueError as error:
@@ -491,13 +557,37 @@ async def create_run_endpoint(request: CreateRunRequest) -> dict[str, str]:
     )
     return {"run_id": run_id, "thread_id": thread_id, "status": "queued"}
 
+
 @app.get("/api/runs")
 def list_runs_endpoint(
     status: str | None = None,
     workspace: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    return list_runs(status=status, workspace=workspace, limit=limit)
+    return [
+        _with_result_self_check(run)
+        for run in list_runs(status=status, workspace=workspace, limit=limit)
+    ]
+
+
+def _latest_result_self_check(run_id: str) -> dict[str, Any] | None:
+    for event in reversed(list_events(run_id)):
+        if event["kind"] != "result" or not isinstance(event["payload"], dict):
+            continue
+        self_check = event["payload"].get("self_check")
+        if isinstance(self_check, dict):
+            return self_check
+    return None
+
+
+def _with_result_self_check(run: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(run)
+    if enriched.get("status") == "completed":
+        self_check = _latest_result_self_check(str(enriched["run_id"]))
+        if self_check is not None:
+            enriched["self_check"] = self_check
+    return enriched
+
 
 def _latest_interrupt_prompt(run_id: str) -> object | None:
     for event in reversed(list_events(run_id)):
@@ -508,17 +598,18 @@ def _latest_interrupt_prompt(run_id: str) -> object | None:
             return payload
     return None
 
+
 @app.get("/api/runs/{run_id}")
 def get_run_endpoint(run_id: str) -> dict[str, Any]:
     run = get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
+    run = _with_result_self_check(run)
     run["interrupt"] = (
-        _latest_interrupt_prompt(run_id)
-        if run["status"] == "interrupted"
-        else None
+        _latest_interrupt_prompt(run_id) if run["status"] == "interrupted" else None
     )
     return run
+
 
 @app.post("/api/runs/{run_id}/approve")
 async def approve_run_endpoint(
@@ -546,6 +637,7 @@ async def approve_run_endpoint(
     )
     return {"run_id": run_id, "status": "running"}
 
+
 @app.post("/api/runs/{run_id}/cancel")
 async def cancel_run_endpoint(run_id: str) -> dict[str, str]:
     run = get_run(run_id)
@@ -563,6 +655,7 @@ async def cancel_run_endpoint(run_id: str) -> dict[str, str]:
 
     LocalPolicy.clear_session(run_id)
     return {"run_id": run_id, "status": "cancelled"}
+
 
 @app.get("/api/runs/{run_id}/events")
 def get_run_events(run_id: str, after: int = 0) -> StreamingResponse:
@@ -588,7 +681,6 @@ def get_run_events(run_id: str, after: int = 0) -> StreamingResponse:
             await asyncio.sleep(0.5)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
 
 
 @app.get("/api/schedules")
@@ -619,7 +711,9 @@ def create_schedule_endpoint(request: ScheduleInput) -> dict[str, Any]:
 
     sched = get_schedule(sid)
     if sched is None:
-        raise HTTPException(status_code=500, detail="Failed to retrieve created schedule")
+        raise HTTPException(
+            status_code=500, detail="Failed to retrieve created schedule"
+        )
     return sched
 
 
@@ -632,7 +726,9 @@ def list_permissions_endpoint(request: Request) -> list[dict[str, Any]]:
         store = _runtime_permission_store()
         return [asdict(r) for r in store.list()]
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to read permissions store") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to read permissions store"
+        ) from exc
 
 
 @app.delete("/api/permissions/{permission_key:path}")
@@ -643,7 +739,9 @@ def revoke_permission_endpoint(permission_key: str, request: Request) -> dict[st
         store = _runtime_permission_store()
         rule = store.get(permission_key)
         if not rule:
-            raise HTTPException(status_code=404, detail=f"Permission rule '{permission_key}' not found")
+            raise HTTPException(
+                status_code=404, detail=f"Permission rule '{permission_key}' not found"
+            )
         store.delete(permission_key)
         return {"status": "ok", "revoked": permission_key}
     except ValueError as exc:
@@ -651,7 +749,9 @@ def revoke_permission_endpoint(permission_key: str, request: Request) -> dict[st
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to revoke permission rule") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to revoke permission rule"
+        ) from exc
 
 
 @app.get("/api/observations")
@@ -671,7 +771,114 @@ def list_observations_endpoint(
             )
         ]
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to read observations store") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to read observations store"
+        ) from exc
+
+
+@app.get("/api/skill-candidates")
+def list_skill_candidates_endpoint() -> dict[str, object]:
+    """Read deterministic, review-only skill candidates for this workspace."""
+    try:
+        store, workspace_id, registry = _runtime_skill_candidate_context()
+        candidates = mine_skill_candidates(store, registry, workspace_id=workspace_id)
+        return {
+            "workspace_id": workspace_id,
+            "candidates": [
+                candidate.model_dump(mode="json") for candidate in candidates
+            ],
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to mine skill candidates"
+        ) from exc
+
+
+@app.get("/api/skill-authoring/requests")
+def list_skill_authoring_requests_endpoint() -> dict[str, object]:
+    try:
+        service = _runtime_skill_authoring_service()
+        return {
+            "requests": [
+                request.model_dump(mode="json") for request in service.list_requests()
+            ]
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to read skill authoring requests"
+        ) from exc
+
+
+@app.post("/api/skill-authoring/requests")
+def prepare_skill_authoring_request_endpoint(
+    request: PrepareSkillAuthoringRequest,
+) -> dict[str, object]:
+    try:
+        created = _runtime_skill_authoring_service().prepare_brief(
+            request.candidate,
+            now=int(time.time() * 1000),
+        )
+        return created.model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to prepare skill authoring brief"
+        ) from exc
+
+
+@app.post("/api/skill-authoring/requests/{request_id}/draft")
+def submit_skill_draft_endpoint(
+    request_id: str, request: SubmitSkillDraftRequest
+) -> dict[str, object]:
+    try:
+        result = _runtime_skill_authoring_service().submit_draft(
+            request_id, request.draft_path, now=int(time.time() * 1000)
+        )
+        return result.model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to validate skill draft"
+        ) from exc
+
+
+@app.post("/api/skill-authoring/requests/{request_id}/cancel")
+def cancel_skill_authoring_request_endpoint(request_id: str) -> dict[str, object]:
+    try:
+        return (
+            _runtime_skill_authoring_service()
+            .cancel(request_id)
+            .model_dump(mode="json")
+        )
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to cancel skill authoring request"
+        ) from exc
+
+
+@app.post("/api/skill-authoring/requests/{request_id}/register")
+def confirm_skill_registration_endpoint(
+    request_id: str,
+    request: ConfirmSkillRegistrationRequest,
+) -> dict[str, object]:
+    try:
+        result = _runtime_skill_authoring_service().confirm_registration(
+            request_id, confirm=request.confirm, now=int(time.time() * 1000)
+        )
+        from agent_os.server.runtime import composed_workspace
+
+        composed_workspace.cache_clear()
+        return result.model_dump(mode="json")
+    except SkillAuthoringError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail="Failed to register skill package"
+        ) from exc
 
 
 @app.post("/api/observations/{observation_id}/outcome")
@@ -698,7 +905,9 @@ def record_observation_outcome_endpoint(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to record observation outcome") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to record observation outcome"
+        ) from exc
 
 
 @app.get("/api/observations/assignments/{run_id}")
@@ -713,7 +922,9 @@ def get_strategy_assignment_endpoint(run_id: str) -> dict[str, object]:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Failed to read strategy assignment") from exc
+        raise HTTPException(
+            status_code=500, detail="Failed to read strategy assignment"
+        ) from exc
 
 
 @app.websocket("/api/chat/{thread_id}")
@@ -767,17 +978,28 @@ async def websocket_endpoint(websocket: WebSocket, thread_id: str) -> None:
                             else initial_state(data)
                         )
 
-                        async for event in graph.astream_events(state_update, config, version="v2"):
+                        async for event in graph.astream_events(
+                            state_update, config, version="v2"
+                        ):
                             if event["event"] == "on_chat_model_stream":
                                 chunk = event["data"]["chunk"]
                                 if chunk.content:
-                                    await websocket.send_text(json.dumps({"type": "token", "content": chunk.content}))
+                                    await websocket.send_text(
+                                        json.dumps(
+                                            {"type": "token", "content": chunk.content}
+                                        )
+                                    )
                         snapshot = await graph.aget_state(config)
                         interrupt_prompt = _pending_interrupt(snapshot)
                         if interrupt_prompt is not None:
                             pending_interrupt = True
                             await websocket.send_text(
-                                json.dumps({"type": "interrupt", "prompt": str(interrupt_prompt)})
+                                json.dumps(
+                                    {
+                                        "type": "interrupt",
+                                        "prompt": str(interrupt_prompt),
+                                    }
+                                )
                             )
                         else:
                             pending_interrupt = False

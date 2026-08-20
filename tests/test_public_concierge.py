@@ -125,7 +125,11 @@ def test_public_concierge_answers_job_fit_questions(monkeypatch, tmp_path):
     assert "Simon phù hợp nhất" in payload["answer"]
     assert "Growth / GTM / Commercial Growth" in payload["answer"]
     assert "Mình là Simos" not in payload["answer"]
-    assert payload["citations"] == ["profile.summary", "profile.services", "profile.proof_points"]
+    assert payload["citations"] == [
+        "profile.summary",
+        "profile.services",
+        "profile.proof_points",
+    ]
 
 
 def test_public_concierge_answers_about_simon_without_self_intro(monkeypatch, tmp_path):
@@ -140,7 +144,9 @@ def test_public_concierge_answers_about_simon_without_self_intro(monkeypatch, tm
 
     assert resp.status_code == 200
     payload = resp.json()
-    assert "Acme helps teams connect market insight to GTM execution." in payload["answer"]
+    assert (
+        "Acme helps teams connect market insight to GTM execution." in payload["answer"]
+    )
     assert "Mình là Simos" not in payload["answer"]
     assert payload["citations"] == ["profile.summary", "profile.services"]
 

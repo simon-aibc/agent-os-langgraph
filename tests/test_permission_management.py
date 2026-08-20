@@ -44,7 +44,9 @@ def test_cli_accepts_policy_learning_feedback(response: str, expected: str) -> N
 
 
 @pytest.mark.anyio
-async def test_permissions_cli_uses_workspace_store(tmp_path: Path, monkeypatch) -> None:
+async def test_permissions_cli_uses_workspace_store(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.delenv("AGENT_OS_PERMISSIONS_DB", raising=False)
     workspace_path = _workspace_file(tmp_path / "workspace", "cli-permissions")
     key = "memory_write:write:markdown_vault:create:AI/Decisions/cli.md"
@@ -112,7 +114,9 @@ def test_permissions_api_requires_token_and_uses_active_workspace(
         runtime.composed_workspace.cache_clear()
 
 
-def test_permissions_cli_subprocess_reads_and_revokes_persisted_rule(tmp_path: Path) -> None:
+def test_permissions_cli_subprocess_reads_and_revokes_persisted_rule(
+    tmp_path: Path,
+) -> None:
     """A fresh CLI process manages the same workspace-owned SQLite rule."""
     workspace_path = _workspace_file(tmp_path / "workspace", "subprocess-permissions")
     key = "memory_write:write:markdown_vault:create:AI/Decisions/subprocess.md"

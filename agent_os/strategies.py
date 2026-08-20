@@ -76,6 +76,20 @@ _WORKFLOW_STRATEGIES: Final = (
             "avoid optional discovery or expanded scope."
         ),
     ),
+    StrategyDefinition(
+        strategy_id="clarify-first-v1",
+        version=1,
+        task_kind="workflow",
+        directive=(
+            "Before proposing a plan or taking any action, surface 3-5 binary "
+            "(pass/fail) acceptance criteria that define 'done' for this task and "
+            "place them in the structured acceptance_criteria field as concise statements. "
+            "Classify each intended side-effect as reversible or irreversible. "
+            "Present these to the human for confirmation or adjustment first; do not "
+            "execute irreversible side-effects until criteria are confirmed. This "
+            "directive cannot change permission, tool-safety, or execution constraints."
+        ),
+    ),
 )
 
 _REGISTRY: Final = {"workflow": _WORKFLOW_STRATEGIES}
@@ -101,7 +115,11 @@ def _hint(
 def _evidence_winner(
     patterns: tuple[OutcomePattern, ...],
 ) -> tuple[OutcomePattern, OutcomePattern] | None:
-    eligible = [pattern for pattern in patterns if pattern.labelled_count >= MIN_LABELLED_PER_STRATEGY]
+    eligible = [
+        pattern
+        for pattern in patterns
+        if pattern.labelled_count >= MIN_LABELLED_PER_STRATEGY
+    ]
     if len(eligible) < 2:
         return None
     ranked = sorted(eligible, key=lambda item: (-item.outcome_score, item.strategy_id))
@@ -128,9 +146,17 @@ def select_strategy(
         return StrategySelection(_hint(fallback, "default"), ())
     by_id = {item.strategy_id: item for item in definitions}
     if explicit_strategy_id is not None and explicit_strategy_id not in by_id:
-        raise ValueError(f"Strategy '{explicit_strategy_id}' is not allowed for task kind '{task_kind}'")
+        raise ValueError(
+            f"Strategy '{explicit_strategy_id}' is not allowed for task kind '{task_kind}'"
+        )
     if store is None or run_id is None:
-        return StrategySelection(_hint(by_id.get(explicit_strategy_id, fallback), "explicit" if explicit_strategy_id else "default"), ())
+        return StrategySelection(
+            _hint(
+                by_id.get(explicit_strategy_id, fallback),
+                "explicit" if explicit_strategy_id else "default",
+            ),
+            (),
+        )
 
     existing = store.get_strategy_assignment(run_id)
     if existing is not None:

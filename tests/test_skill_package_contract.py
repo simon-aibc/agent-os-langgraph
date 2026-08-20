@@ -72,11 +72,23 @@ def test_loads_plain_callable_and_base_tool(tmp_path: Path) -> None:
     [
         (None, None),
         ("not = [valid", None),
-        ("[skill]\nversion='1'\n[[skill.handlers]]\nmatch=['x']\nentrypoint='handlers:handle'", "def handle(): pass"),
+        (
+            "[skill]\nversion='1'\n[[skill.handlers]]\nmatch=['x']\nentrypoint='handlers:handle'",
+            "def handle(): pass",
+        ),
         ("[skill]\nname='x'\nversion='1'", None),
-        ("[skill]\nname='x'\nversion='1'\n[[skill.handlers]]\nmatch=[]\nentrypoint='handlers:handle'", "def handle(): pass"),
-        ("[skill]\nname='x'\nversion='1'\n[[skill.handlers]]\nmatch=['x']\nentrypoint='../bad:handle'", None),
-        ("[skill]\nname='x'\nversion='1'\n[[skill.handlers]]\nmatch=['x']\nentrypoint='handlers:missing'", "VALUE = 1"),
+        (
+            "[skill]\nname='x'\nversion='1'\n[[skill.handlers]]\nmatch=[]\nentrypoint='handlers:handle'",
+            "def handle(): pass",
+        ),
+        (
+            "[skill]\nname='x'\nversion='1'\n[[skill.handlers]]\nmatch=['x']\nentrypoint='../bad:handle'",
+            None,
+        ),
+        (
+            "[skill]\nname='x'\nversion='1'\n[[skill.handlers]]\nmatch=['x']\nentrypoint='handlers:missing'",
+            "VALUE = 1",
+        ),
     ],
 )
 def test_malformed_packages_raise_with_manifest_path(

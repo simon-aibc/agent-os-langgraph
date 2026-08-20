@@ -88,6 +88,21 @@ def _build_architect_prompt(state: SimonState) -> str:
 
     prompt = f"Task:\n{state['task']}\n\n"
 
+    strategy_hint = state.get("strategy_hint")
+    if strategy_hint:
+        strategy_data = (
+            strategy_hint.model_dump()
+            if hasattr(strategy_hint, "model_dump")
+            else strategy_hint
+        )
+        if not isinstance(strategy_data, dict):
+            strategy_data = {}
+        prompt += (
+            "Planning strategy:\n"
+            f"Selected strategy: {strategy_data.get('strategy_id', 'default-v1')}\n"
+            f"Directive: {strategy_data.get('directive', '')}\n\n"
+        )
+
     if inventory:
         prompt += "Available files in sandbox:\n"
         for f in inventory:
@@ -116,5 +131,7 @@ def build_cli_architect_invoker(
     try:
         adapter = get_default_backend_registry().resolve("architect", backend)
     except ValueError as exc:
-        raise ValueError(f"Unsupported CLI architect backend: {backend}. {exc}") from exc
+        raise ValueError(
+            f"Unsupported CLI architect backend: {backend}. {exc}"
+        ) from exc
     return adapter.build_invoker("architect")

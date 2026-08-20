@@ -30,13 +30,20 @@ def test_schedule_help_is_exposed():
 
 def test_schedule_add_parser():
     parser = build_parser()
-    args = parser.parse_args([
-        "schedule", "add",
-        "--name", "daily-run",
-        "--kind", "run",
-        "--cron", "0 9 * * *",
-        "--task", "refactor",
-    ])
+    args = parser.parse_args(
+        [
+            "schedule",
+            "add",
+            "--name",
+            "daily-run",
+            "--kind",
+            "run",
+            "--cron",
+            "0 9 * * *",
+            "--task",
+            "refactor",
+        ]
+    )
     assert args.command == "schedule"
     assert args.schedule_command == "add"
     assert args.name == "daily-run"
@@ -47,12 +54,18 @@ def test_schedule_add_parser():
 
 def test_schedule_add_interval():
     parser = build_parser()
-    args = parser.parse_args([
-        "schedule", "add",
-        "--name", "hourly-brief",
-        "--kind", "brief",
-        "--every", "1h",
-    ])
+    args = parser.parse_args(
+        [
+            "schedule",
+            "add",
+            "--name",
+            "hourly-brief",
+            "--kind",
+            "brief",
+            "--every",
+            "1h",
+        ]
+    )
     assert args.every == "1h"
     assert args.cron is None
 
@@ -62,13 +75,22 @@ def test_schedule_add_interval():
 
 def test_schedule_add_list_remove(capsys):
     """Exercise the full add → list → remove lifecycle."""
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "test-run",
-        "--kind", "run",
-        "--every", "30m",
-        "--task", "test task",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "test-run",
+                "--kind",
+                "run",
+                "--every",
+                "30m",
+                "--task",
+                "test task",
+            ]
+        )
+    )
     assert exit_code == 0
     capsys.readouterr()
 
@@ -85,9 +107,15 @@ def test_schedule_add_list_remove(capsys):
     assert len(schedule_id) == 36  # Must be full UUID length
 
     # Now actually remove it
-    exit_code = asyncio.run(async_main([
-        "schedule", "remove", schedule_id,
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "remove",
+                schedule_id,
+            ]
+        )
+    )
     assert exit_code == 0
 
     # List as JSON.
@@ -96,42 +124,72 @@ def test_schedule_add_list_remove(capsys):
 
 
 def test_schedule_remove_unknown_returns_2():
-    exit_code = asyncio.run(async_main([
-        "schedule", "remove", "nonexistent-id",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "remove",
+                "nonexistent-id",
+            ]
+        )
+    )
     assert exit_code == 2
 
 
 def test_schedule_add_invalid_kind():
     """CLI must reject invalid kind/trigger combinations."""
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "bad",
-        "--kind", "run",
-        # Missing --cron or --every.
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "bad",
+                "--kind",
+                "run",
+                # Missing --cron or --every.
+            ]
+        )
+    )
     assert exit_code == 2
 
 
 def test_schedule_add_run_requires_task():
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "no-task",
-        "--kind", "run",
-        "--every", "1h",
-        # Missing --task.
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "no-task",
+                "--kind",
+                "run",
+                "--every",
+                "1h",
+                # Missing --task.
+            ]
+        )
+    )
     assert exit_code == 2
 
 
 def test_schedule_add_brief_rejects_task():
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "brief-with-task",
-        "--kind", "brief",
-        "--every", "24h",
-        "--task", "should fail",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "brief-with-task",
+                "--kind",
+                "brief",
+                "--every",
+                "24h",
+                "--task",
+                "should fail",
+            ]
+        )
+    )
     assert exit_code == 2
 
 
@@ -147,16 +205,26 @@ def test_normalize_argv_includes_schedule():
 
 def test_schedule_add_app_callback_parser():
     parser = build_parser()
-    args = parser.parse_args([
-        "schedule", "add",
-        "--name", "cb-sched",
-        "--kind", "app_callback",
-        "--every", "5m",
-        "--url", "https://api.example.com/hook",
-        "--method", "POST",
-        "--headers", '{"X-Key": "val"}',
-        "--body", '{"msg": "test"}',
-    ])
+    args = parser.parse_args(
+        [
+            "schedule",
+            "add",
+            "--name",
+            "cb-sched",
+            "--kind",
+            "app_callback",
+            "--every",
+            "5m",
+            "--url",
+            "https://api.example.com/hook",
+            "--method",
+            "POST",
+            "--headers",
+            '{"X-Key": "val"}',
+            "--body",
+            '{"msg": "test"}',
+        ]
+    )
     assert args.kind == "app_callback"
     assert args.url == "https://api.example.com/hook"
     assert args.method == "POST"
@@ -165,15 +233,26 @@ def test_schedule_add_app_callback_parser():
 
 
 def test_schedule_add_app_callback_lifecycle(capsys):
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "test-cb",
-        "--kind", "app_callback",
-        "--every", "15m",
-        "--url", "https://api.example.com/hook",
-        "--headers", '{"Authorization": "Bearer 123"}',
-        "--body", '{"action": "ping"}',
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "test-cb",
+                "--kind",
+                "app_callback",
+                "--every",
+                "15m",
+                "--url",
+                "https://api.example.com/hook",
+                "--headers",
+                '{"Authorization": "Bearer 123"}',
+                "--body",
+                '{"action": "ping"}',
+            ]
+        )
+    )
     assert exit_code == 0
     capsys.readouterr()
 
@@ -187,13 +266,22 @@ def test_schedule_add_app_callback_lifecycle(capsys):
 def test_schedule_run_once_app_callback(capsys):
     from unittest.mock import AsyncMock, MagicMock, patch
 
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "run-once-cb",
-        "--kind", "app_callback",
-        "--every", "1h",
-        "--url", "https://api.example.com/hook",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "run-once-cb",
+                "--kind",
+                "app_callback",
+                "--every",
+                "1h",
+                "--url",
+                "https://api.example.com/hook",
+            ]
+        )
+    )
     assert exit_code == 0
     capsys.readouterr()
 
@@ -219,35 +307,62 @@ def test_schedule_run_once_app_callback(capsys):
 
 
 def test_schedule_add_app_callback_invalid_headers():
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "bad-headers",
-        "--kind", "app_callback",
-        "--every", "1h",
-        "--url", "https://example.com",
-        "--headers", "not-json",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "bad-headers",
+                "--kind",
+                "app_callback",
+                "--every",
+                "1h",
+                "--url",
+                "https://example.com",
+                "--headers",
+                "not-json",
+            ]
+        )
+    )
     assert exit_code == 2
 
 
 def test_schedule_add_app_callback_invalid_body():
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "bad-body",
-        "--kind", "app_callback",
-        "--every", "1h",
-        "--url", "https://example.com",
-        "--body", "not-json",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "bad-body",
+                "--kind",
+                "app_callback",
+                "--every",
+                "1h",
+                "--url",
+                "https://example.com",
+                "--body",
+                "not-json",
+            ]
+        )
+    )
     assert exit_code == 2
 
 
 def test_schedule_add_app_callback_missing_url():
-    exit_code = asyncio.run(async_main([
-        "schedule", "add",
-        "--name", "no-url",
-        "--kind", "app_callback",
-        "--every", "1h",
-    ]))
+    exit_code = asyncio.run(
+        async_main(
+            [
+                "schedule",
+                "add",
+                "--name",
+                "no-url",
+                "--kind",
+                "app_callback",
+                "--every",
+                "1h",
+            ]
+        )
+    )
     assert exit_code == 2
-

@@ -64,10 +64,7 @@ class ToolDispatcherSpy:
 
     def __call__(self, state: SimonState) -> Command:
         self.call_count += 1
-        return Command(
-            update={"router_escalated": True},
-            goto="supervisor"
-        )
+        return Command(update={"router_escalated": True}, goto="supervisor")
 
 
 def build_test_graph():

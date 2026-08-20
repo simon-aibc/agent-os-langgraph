@@ -64,6 +64,7 @@
       "artifacts": {"annotation": "list[str]", "required": false},
       "errors": {"annotation": "list[str]", "required": false},
       "outputs": {"annotation": "dict[str, object]", "required": false},
+      "self_check": {"annotation": "dict", "required": false},
       "status": {"annotation": "Literal['completed', 'failed', 'cancelled', 'waiting']", "required": true},
       "usage": {"annotation": "dict[str, float]", "required": false}
     },

@@ -13,6 +13,7 @@ from agent_os.observations import (
     observation_workspace_id,
     open_observation_store,
     render_advisory_context,
+    task_signature_for_input,
 )
 from agent_os.server.api import EXECUTION_TOKEN_ENV, app
 
@@ -21,7 +22,9 @@ def _store(path: Path) -> SqliteObservationStore:
     return SqliteObservationStore(str(path))
 
 
-def _record(store: SqliteObservationStore, workspace: str, *, kind: str = "memory_write"):
+def _record(
+    store: SqliteObservationStore, workspace: str, *, kind: str = "memory_write"
+):
     return store.create(
         workspace_id=workspace,
         run_id="run-1",
@@ -55,6 +58,72 @@ def test_observations_persist_and_require_explicit_outcomes(tmp_path: Path) -> N
     assert updated.outcome_evidence == "Operator adjusted the delivered artifact."
 
 
+def test_task_signature_is_deterministic_private_and_persisted_for_new_writes(
+    tmp_path: Path,
+) -> None:
+    first_task = (
+        "SimonOS private task 01AAA: Prepare weekly report\n\n"
+        "Prepare weekly report for leadership\n\n"
+        "Private application context:\n- Requested workspace: /private/path"
+    )
+    same_shape = (
+        "SimonOS private task 01BBB: Prepare weekly report\n\n"
+        "Prepare weekly report for leadership\n\n"
+        "Private application context:\n- Requested workspace: /different/path"
+    )
+    signature = task_signature_for_input(first_task)
+
+    assert signature is not None
+    assert signature == task_signature_for_input(same_shape)
+    assert "weekly report" not in signature
+
+    store = _store(tmp_path / "observations.db")
+    observation = store.create(
+        workspace_id="workspace-a",
+        run_id="run-signature",
+        thread_id="thread-signature",
+        task_kind="workflow",
+        task_signature=signature,
+        approach="default-v1",
+        source="server.run",
+    )
+
+    assert (
+        _store(tmp_path / "observations.db").get(observation.observation_id)
+        == observation
+    )
+    assert observation.task_signature == signature
+
+
+def test_existing_observations_table_migrates_task_signature_additively(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    db_path = tmp_path / "legacy-observations.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        CREATE TABLE observations (
+            observation_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+            workspace_id TEXT NOT NULL, run_id TEXT, thread_id TEXT,
+            task_kind TEXT NOT NULL, approach TEXT NOT NULL, artifact_refs TEXT NOT NULL,
+            outcome_signal TEXT NOT NULL, outcome_evidence TEXT, source TEXT NOT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    _store(db_path)
+    with sqlite3.connect(db_path) as migrated:
+        columns = {
+            row[1] for row in migrated.execute("PRAGMA table_info(observations)")
+        }
+    assert "task_signature" in columns
+
+
 def test_observation_validation_and_workspace_isolation(tmp_path: Path) -> None:
     store = _store(tmp_path / "observations.db")
     first = _record(store, "workspace-a")
@@ -84,10 +153,14 @@ def test_advisory_retrieval_is_bounded_relevant_and_not_unknown(tmp_path: Path) 
     store = _store(tmp_path / "observations.db")
     for index in range(MAX_ADVISORIES + 2):
         record = _record(store, "workspace-a")
-        store.record_outcome(record.observation_id, signal="accepted", evidence=f"review {index}")
+        store.record_outcome(
+            record.observation_id, signal="accepted", evidence=f"review {index}"
+        )
     unknown = _record(store, "workspace-a")
     other_kind = _record(store, "workspace-a", kind="workflow")
-    store.record_outcome(other_kind.observation_id, signal="rejected", evidence="not relevant")
+    store.record_outcome(
+        other_kind.observation_id, signal="rejected", evidence="not relevant"
+    )
 
     context = render_advisory_context(
         store,
@@ -111,7 +184,9 @@ def test_runtime_initial_state_injects_fixed_strategy_not_raw_evidence(
     monkeypatch.setattr(runtime, "composed_workspace", lambda: None)
     store = _store(database)
     record = _record(store, "standalone")
-    store.record_outcome(record.observation_id, signal="edited", evidence="Operator refined it")
+    store.record_outcome(
+        record.observation_id, signal="edited", evidence="Operator refined it"
+    )
 
     state = runtime.initial_state("private task text", run_id="run-strategy")
 
@@ -257,7 +332,9 @@ def test_strategy_assignment_crud_and_workspace_isolation(tmp_path: Path) -> Non
     assert store.get_strategy_assignment("nonexistent-run") is None
 
 
-def test_strategy_assignment_evidence_summary_rejects_extra_keys(tmp_path: Path) -> None:
+def test_strategy_assignment_evidence_summary_rejects_extra_keys(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path / "observations.db")
     assignment = {
         "workspace_id": "workspace-a",
@@ -270,7 +347,9 @@ def test_strategy_assignment_evidence_summary_rejects_extra_keys(tmp_path: Path)
         store.assign_strategy(**assignment, evidence_summary={"task": "raw text"})
 
 
-def test_strategy_assignment_evidence_summary_rejects_wrong_key_set(tmp_path: Path) -> None:
+def test_strategy_assignment_evidence_summary_rejects_wrong_key_set(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path / "observations.db")
     assignment = {
         "workspace_id": "workspace-a",
@@ -286,8 +365,9 @@ def test_strategy_assignment_evidence_summary_rejects_wrong_key_set(tmp_path: Pa
         )
 
 
-
-def test_strategy_assignment_evidence_summary_accepts_full_shape(tmp_path: Path) -> None:
+def test_strategy_assignment_evidence_summary_accepts_full_shape(
+    tmp_path: Path,
+) -> None:
     store = _store(tmp_path / "observations.db")
     assignment = {
         "workspace_id": "workspace-a",
@@ -342,7 +422,13 @@ async def test_observations_cli_assignment_subcommand(
     console = Console(file=output, force_terminal=False, color_system=None)
 
     code = await async_main(
-        ["observations", "assignment", "run-audit-cli", "--workspace", str(workspace_path)],
+        [
+            "observations",
+            "assignment",
+            "run-audit-cli",
+            "--workspace",
+            str(workspace_path),
+        ],
         console=console,
     )
     assert code == 0
@@ -355,7 +441,13 @@ async def test_observations_cli_assignment_subcommand(
     err_output = io.StringIO()
     err_console = Console(file=err_output, force_terminal=False, color_system=None)
     missing_code = await async_main(
-        ["observations", "assignment", "unknown-run", "--workspace", str(workspace_path)],
+        [
+            "observations",
+            "assignment",
+            "unknown-run",
+            "--workspace",
+            str(workspace_path),
+        ],
         console=err_console,
     )
     assert missing_code == 1

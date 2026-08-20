@@ -92,7 +92,9 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         }
 
     checkpoint_env = os.getenv("AGENT_OS_CHECKPOINTS_DB")
-    cp_path_str = checkpoint_env if checkpoint_env is not None else DEFAULT_CHECKPOINT_DB
+    cp_path_str = (
+        checkpoint_env if checkpoint_env is not None else DEFAULT_CHECKPOINT_DB
+    )
     cp_path = Path(cp_path_str).resolve()
 
     cp_exists = cp_path.exists()
@@ -108,7 +110,9 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     else:
         cp_writable = os.access(cp_path.parent, os.W_OK)
         if not cp_writable:
-            warnings.append(f"Checkpoint DB parent directory is not writable: {cp_path.parent}")
+            warnings.append(
+                f"Checkpoint DB parent directory is not writable: {cp_path.parent}"
+            )
 
     if not cp_writable:
         warnings.append("Checkpoint DB is not writable.")
@@ -117,7 +121,7 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
     checkpoints_db = {
         "path": str(cp_path),
         "exists": cp_exists,
-        "writable": cp_writable
+        "writable": cp_writable,
     }
     backend_binding = BackendBinding(
         router=resolved_config["router"],
@@ -133,9 +137,13 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         if backend_str and backend_str.startswith("cli/"):
             backend_name = backend_str[4:]
 
-            adapter_info = next((a for a in adapters_info if a["name"] == backend_name), None)
+            adapter_info = next(
+                (a for a in adapters_info if a["name"] == backend_name), None
+            )
             if not adapter_info:
-                warnings.append(f"Configured {role} backend '{backend_str}' is not registered.")
+                warnings.append(
+                    f"Configured {role} backend '{backend_str}' is not registered."
+                )
                 exit_code = 1
                 continue
 
@@ -147,18 +155,26 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
                 continue
 
             if role not in adapter_info["supported_roles"]:
-                warnings.append(f"Configured {role} backend '{backend_str}' does not support role '{role}'.")
+                warnings.append(
+                    f"Configured {role} backend '{backend_str}' does not support role '{role}'."
+                )
                 exit_code = 1
 
             if adapter_info["binary_path"] is None:
-                warnings.append(f"Configured {role} backend '{backend_str}' binary is missing.")
+                warnings.append(
+                    f"Configured {role} backend '{backend_str}' binary is missing."
+                )
                 exit_code = 1
 
             if adapter_info["auth_status"]["status"] == "unauthenticated":
-                warnings.append(f"Configured {role} backend '{backend_str}' is unauthenticated.")
+                warnings.append(
+                    f"Configured {role} backend '{backend_str}' is unauthenticated."
+                )
                 exit_code = 1
             elif adapter_info["auth_status"]["status"] == "unknown":
-                warnings.append(f"Configured {role} backend '{backend_str}' auth status is unknown.")
+                warnings.append(
+                    f"Configured {role} backend '{backend_str}' auth status is unknown."
+                )
 
     router_backend = resolved_config["router"]
     if router_backend and router_backend.startswith("cli/"):
@@ -180,7 +196,7 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         "profile_source": profile_source,
         "checkpoints_db": checkpoints_db,
         "backend_binding": backend_binding.model_dump(),
-        "warnings": warnings
+        "warnings": warnings,
     }
 
     if json_output:
@@ -196,7 +212,9 @@ def run_doctor(json_output: bool) -> tuple[int, str]:
         lines.append(f"- {ad['name']} ({ad['binary_name']})")
         lines.append(f"  Roles : {', '.join(ad['supported_roles'])}")
         lines.append(f"  Binary: {ad['binary_path'] or 'missing'}")
-        lines.append(f"  Auth  : {ad['auth_status']['status']} ({ad['auth_status']['detail']})")
+        lines.append(
+            f"  Auth  : {ad['auth_status']['status']} ({ad['auth_status']['detail']})"
+        )
 
     candidates = [item for item in adapters_info if item["stub"]]
     if candidates:

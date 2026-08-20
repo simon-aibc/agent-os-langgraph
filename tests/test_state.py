@@ -53,7 +53,7 @@ def test_simon_state_validation_success():
         "plan": "My plan",
         "executor_output": "Success",
         "human_feedback": "approved",
-        "hot_context": "Some context"
+        "hot_context": "Some context",
     }
     # Should not raise exception
     validated = adapter.validate_python(valid_state)
@@ -103,7 +103,9 @@ def test_simon_state_accepts_optional_r7_dispatch_fields():
 
 
 def fake_architect_node(state):
-    return {"plan": ArchitectBrief(files=["dummy"], changes=["dummy"], verify_cmd="dummy")}
+    return {
+        "plan": ArchitectBrief(files=["dummy"], changes=["dummy"], verify_cmd="dummy")
+    }
 
 
 def test_build_graph_compiles():
@@ -179,6 +181,7 @@ def test_graph_invocation():
     assert result["hot_context"] is None
     assert result["messages"] == []
 
+
 def test_architect_brief_validation():
     """ArchitectBrief validates a correct payload."""
     brief = ArchitectBrief(files=["a.py"], changes=["fix"], verify_cmd="pytest")
@@ -219,7 +222,9 @@ def test_edit_file_result_validation():
 
 
 def test_bash_result_validation():
-    res = BashResult(args=["ls"], returncode=0, stdout="out", stderr="", timed_out=False)
+    res = BashResult(
+        args=["ls"], returncode=0, stdout="out", stderr="", timed_out=False
+    )
     assert res.args == ["ls"]
 
 

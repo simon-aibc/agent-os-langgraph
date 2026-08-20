@@ -13,9 +13,7 @@ _original_executor = os.environ.get("LLM_EXECUTOR")
 
 os.environ["LLM_ARCHITECT"] = "offline/architect"
 os.environ["LLM_EXECUTOR"] = "offline/executor"
-os.environ[CHECKPOINT_DB_ENV] = str(
-    Path(_checkpoint_directory.name) / "checkpoints.db"
-)
+os.environ[CHECKPOINT_DB_ENV] = str(Path(_checkpoint_directory.name) / "checkpoints.db")
 
 
 @pytest.fixture(scope="session", autouse=True)

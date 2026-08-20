@@ -118,11 +118,15 @@ def _validate_cli_args(args: list[str]) -> None:
         if arg in {"-s", "--sandbox"} and next_arg == "danger-full-access":
             raise CliBackendError("CLI sandbox mode 'danger-full-access' is forbidden")
         if arg == "--permission-mode" and next_arg == "bypassPermissions":
-            raise CliBackendError("CLI permission mode 'bypassPermissions' is forbidden")
+            raise CliBackendError(
+                "CLI permission mode 'bypassPermissions' is forbidden"
+            )
         if arg == "--sandbox=danger-full-access":
             raise CliBackendError("CLI sandbox mode 'danger-full-access' is forbidden")
         if arg == "--permission-mode=bypassPermissions":
-            raise CliBackendError("CLI permission mode 'bypassPermissions' is forbidden")
+            raise CliBackendError(
+                "CLI permission mode 'bypassPermissions' is forbidden"
+            )
 
 
 def strict_json_schema(schema_model: type[BaseModel]) -> dict[str, Any]:
@@ -142,9 +146,7 @@ def strict_json_schema(schema_model: type[BaseModel]) -> dict[str, Any]:
                 visit(value)
 
             properties = node.get("properties")
-            is_object = node.get("type") == "object" or isinstance(
-                properties, dict
-            )
+            is_object = node.get("type") == "object" or isinstance(properties, dict)
             if is_object:
                 node["additionalProperties"] = False
                 node["required"] = (
@@ -206,9 +208,7 @@ def run_cli_command(
             env=safe_env,
         )
     except subprocess.TimeoutExpired as e:
-        stderr_excerpt = _redact_secrets_in_text(
-            _coerce_text(e.stderr)[-500:]
-        )
+        stderr_excerpt = _redact_secrets_in_text(_coerce_text(e.stderr)[-500:])
         raise CliBackendTimeout(
             f"Command '{binary}' timed out after {timeout_seconds} seconds. "
             f"Stderr excerpt: {stderr_excerpt}"
@@ -353,4 +353,6 @@ def parse_claude_stream_json(stdout: str) -> dict[str, Any]:
             return payload
 
     excerpt = _redact_secrets_in_text(stdout[-500:])
-    raise ValueError(f"No valid JSON payload found in Claude output. Excerpt: {excerpt}")
+    raise ValueError(
+        f"No valid JSON payload found in Claude output. Excerpt: {excerpt}"
+    )

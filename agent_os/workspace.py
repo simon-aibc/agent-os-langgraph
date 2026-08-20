@@ -101,13 +101,17 @@ def resolve_permission_db_path(workspace: Workspace | None = None) -> str:
     return DEFAULT_PERMISSION_DB
 
 
-def open_permission_store(workspace: Workspace | None = None) -> SqlitePermissionStore | None:
+def open_permission_store(
+    workspace: Workspace | None = None,
+) -> SqlitePermissionStore | None:
     """Open the workspace (or standalone) rule store with a fail-safe fallback."""
     db_path = resolve_permission_db_path(workspace)
     try:
         return SqlitePermissionStore(db_path)
     except Exception as exc:
-        logger.warning(f"Failed to initialize SqlitePermissionStore at '{db_path}': {exc}")
+        logger.warning(
+            f"Failed to initialize SqlitePermissionStore at '{db_path}': {exc}"
+        )
         return None
 
 
@@ -201,7 +205,9 @@ def _reject_restricted_path(path: Path) -> None:
         or "token" in name
         or name.startswith("auth")
     ):
-        raise WorkspaceLoadError(f"Refusing to load restricted configuration path: {path}")
+        raise WorkspaceLoadError(
+            f"Refusing to load restricted configuration path: {path}"
+        )
 
 
 def _resolve_workspace_paths(ws: Workspace) -> Workspace:
@@ -216,7 +222,9 @@ def _resolve_workspace_paths(ws: Workspace) -> Workspace:
         candidate = Path(skill).expanduser()
         if not candidate.is_absolute():
             candidate = ws.base_path / candidate
-        resolved_skills.append(str(candidate.resolve()) if candidate.exists() else skill)
+        resolved_skills.append(
+            str(candidate.resolve()) if candidate.exists() else skill
+        )
 
     return ws.model_copy(update={"memory": memory, "skills": resolved_skills})
 
@@ -248,9 +256,13 @@ def _validate_backend_bindings(
         backend_value = value.strip()
         if role == "router":
             if backend_value.startswith("cli/"):
-                raise WorkspaceLoadError(f"Router cannot be a CLI backend: {backend_value}")
+                raise WorkspaceLoadError(
+                    f"Router cannot be a CLI backend: {backend_value}"
+                )
             continue
-        backend_name = backend_value[4:] if backend_value.startswith("cli/") else backend_value
+        backend_name = (
+            backend_value[4:] if backend_value.startswith("cli/") else backend_value
+        )
         try:
             registry.resolve(role, backend_name)
         except ValueError as exc:
@@ -282,7 +294,9 @@ def _build_workspace_skill_registry(
                 elif path.is_dir():
                     loader.load_from_directories([str(path)])
                 else:
-                    raise WorkspaceLoadError(f"Skill path '{entry}' is not a directory.")
+                    raise WorkspaceLoadError(
+                        f"Skill path '{entry}' is not a directory."
+                    )
             except Exception as exc:
                 if isinstance(exc, WorkspaceLoadError):
                     raise
@@ -306,7 +320,9 @@ def _build_workspace_skill_registry(
     return registry
 
 
-def _build_connector_registry(ws: Workspace) -> tuple[ConnectorRegistry, WritableMemory]:
+def _build_connector_registry(
+    ws: Workspace,
+) -> tuple[ConnectorRegistry, WritableMemory]:
     registry = ConnectorRegistry()
     registry.register("filesystem", FilesystemConnector())
 
@@ -320,11 +336,15 @@ def _build_connector_registry(ws: Workspace) -> tuple[ConnectorRegistry, Writabl
 
 
 def _build_memory_connector(ws: Workspace) -> WritableMemory:
-    memory_type = str(
-        ws.memory.get("type", ws.memory.get("connector", "markdown"))
-    ).strip().lower()
+    memory_type = (
+        str(ws.memory.get("type", ws.memory.get("connector", "markdown")))
+        .strip()
+        .lower()
+    )
     if memory_type in ("markdown", "markdown_vault"):
-        root = ws.memory.get("path", ws.memory.get("root_path", ws.memory.get("root", ".")))
+        root = ws.memory.get(
+            "path", ws.memory.get("root_path", ws.memory.get("root", "."))
+        )
         root_path = _resolve_relative_path(ws.base_path, str(root))
         return MarkdownVaultConnector(root_path)
     if memory_type == "gbrain":
@@ -367,11 +387,15 @@ def _workspace_environment(ws: Workspace) -> dict[str, str | None]:
             normalized = f"cli/{normalized}"
         env[env_name] = normalized
 
-    memory_type = str(
-        ws.memory.get("type", ws.memory.get("connector", "markdown"))
-    ).strip().lower()
+    memory_type = (
+        str(ws.memory.get("type", ws.memory.get("connector", "markdown")))
+        .strip()
+        .lower()
+    )
     if memory_type in ("markdown", "markdown_vault"):
-        root = ws.memory.get("path", ws.memory.get("root_path", ws.memory.get("root", ".")))
+        root = ws.memory.get(
+            "path", ws.memory.get("root_path", ws.memory.get("root", "."))
+        )
         env["AGENT_OS_MEMORY_CONNECTOR"] = "markdown"
         env["AGENT_OS_VAULT_PATH"] = _resolve_relative_path(ws.base_path, str(root))
     elif memory_type == "gbrain":

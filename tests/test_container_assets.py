@@ -22,12 +22,15 @@ def test_dockerfile_non_root_user():
 def test_dockerfile_serve_extra():
     content = DOCKERFILE.read_text()
     assert 'pip install --no-cache-dir "${WHEEL}[serve]"' in content
-    assert 'WHEEL=$(ls /tmp/wheel/*.whl | head -n 1)' in content
+    assert "WHEEL=$(ls /tmp/wheel/*.whl | head -n 1)" in content
 
 
 def test_dockerfile_pinned_digest():
     content = DOCKERFILE.read_text()
-    assert "FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff" in content
+    assert (
+        "FROM python:3.11-slim@sha256:90744cff8f32887f075c47d747a173ff333e9e98801667af93c357fa9f5e28ff"
+        in content
+    )
 
 
 def test_dockerfile_multi_stage():
