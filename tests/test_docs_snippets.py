@@ -1,3 +1,5 @@
+import re
+from pathlib import Path
 from typing import Any, Literal
 
 from agent_os.api import (
@@ -150,6 +152,21 @@ def test_extending_docs_snippets():
     pol = CustomReadOnlyPolicy()
     p_dec = pol.evaluate(ActionProposal(tool="read_file", side_effect="read"))
     assert p_dec.decision == "allow"
+
+
+def test_readme_connector_snippet():
+    readme = Path(__file__).resolve().parents[1] / "README.md"
+    content = readme.read_text(encoding="utf-8")
+    match = re.search(
+        r"### Authoring an Agent OS Plugin\n.*?```python\n(.*?)```",
+        content,
+        flags=re.DOTALL,
+    )
+    assert match is not None, "README connector snippet is missing"
+
+    namespace: dict[str, Any] = {}
+    exec(match.group(1), namespace)
+    check_connector(namespace["MyCustomConnector"]())
 
 
 def test_bring_your_own_memory_tutorial_snippet():

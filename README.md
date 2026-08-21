@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11-3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-[![Release](https://img.shields.io/badge/release-v2.4.0-green.svg)](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0)
+[![Release](https://img.shields.io/badge/release-v2.3.0-green.svg)](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.3.0)
 [![Typed](https://img.shields.io/badge/types-py.typed-informational.svg)](agent_os/api)
 
 > **Agent OS: Everything is a Plugin.**<br>
@@ -11,7 +11,7 @@
 
 Agent OS is an auditable, self-hostable agent operating system providing deterministic fast-path execution, read-only architect planning, human approval governance, immutable policy floors, memory retrieval lifecycles, anti-SSRF signed event egress, and a modular plugin runtime. Under the hood, stateful graph execution and checkpointing are powered by LangGraph.
 
-**Current release:** [v2.4.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0) |
+**Current release:** [v2.3.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.3.0) |
 [Changelog](CHANGELOG.md) |
 [Architecture](docs/architecture.md) |
 [Extending Agent OS](docs/EXTENDING.md) |
@@ -25,13 +25,16 @@ Agent OS is an auditable, self-hostable agent operating system providing determi
 
 1. [Core OS Primitives](#core-os-primitives)
 2. [Everything is a Plugin](#everything-is-a-plugin)
-3. [Quickstart](#quickstart)
-4. [Usage & Operating Modes](#usage--operating-modes)
-5. [Self-Hosting & Operations](#self-hosting--operations)
-6. [Extension Conformance Kit](#extension-conformance-kit)
-7. [Security & Governance Invariants](#security--governance-invariants)
-8. [Development & Contributing](#development--contributing)
-9. [License](#license)
+3. [Built With](#built-with)
+4. [Quickstart](#quickstart)
+5. [Usage & Operating Modes](#usage--operating-modes)
+6. [Self-Hosting & Operations](#self-hosting--operations)
+7. [Extension Conformance Kit](#extension-conformance-kit)
+8. [Security & Governance Invariants](#security--governance-invariants)
+9. [Development & Contributing](#development--contributing)
+10. [License](#license)
+11. [Contact](#contact)
+12. [Acknowledgments](#acknowledgments)
 
 ---
 
@@ -84,30 +87,38 @@ Agent OS exposes a frozen, identity-preserving public facade under `agent_os.api
 Third-party extensions build directly against `agent_os.api` without private internals:
 
 ```python
+from typing import Any
+
 from agent_os.api import (
     Connector,
-    ContextProvider,
-    ContextBlock,
-    EventSink,
-    IndexableMemory,
-    MemoryConnector,
-    PluginRegistry,
-    Principal,
-    SUPPORTED_SIDE_EFFECTS,
+    ExecutionResult,
 )
 
 class MyCustomConnector:
     name = "my_tool"
 
-    def capabilities(self) -> list[str]:
-        return ["custom_action"]
+    def capabilities(self) -> dict[str, Any]:
+        return {"actions": ["custom_action"]}
 
-    def describe_side_effect(self, action: str, arguments: dict) -> str:
+    def describe_side_effect(self, action: str) -> str:
         return "read"
 
-    def invoke(self, action: str, arguments: dict) -> dict:
-        return {"status": "ok"}
+    def invoke(self, action: str, args: dict[str, Any]) -> ExecutionResult:
+        return ExecutionResult(status="completed", outputs={"status": "ok"})
 ```
+
+---
+
+## Built With
+
+- [LangGraph](https://github.com/langchain-ai/langgraph) for graph execution,
+  interrupts, and checkpointed workflows
+- [LangChain](https://github.com/langchain-ai/langchain) and
+  [LiteLLM](https://github.com/BerriAI/litellm) for model/provider boundaries
+- [Pydantic](https://docs.pydantic.dev/) for structured contracts
+- [FastAPI](https://fastapi.tiangolo.com/) for the runtime API
+- SQLite for local checkpoints, run ledgers, schedules, and state
+- Docker Compose for local self-hosting
 
 ---
 
@@ -226,7 +237,7 @@ docker compose up -d
 ```
 
 - **Agent OS Runtime API**: `http://127.0.0.1:4680`
-- **Operator Console**: `http://127.0.0.1:3000`
+- **Operator Console**: `http://127.0.0.1:4100`
 - **Health Check**: `http://127.0.0.1:4680/api/health`
 
 ### Run Runtime Server Locally
@@ -238,7 +249,7 @@ agent-os serve --host 127.0.0.1 --port 4680
 Core Runtime Endpoints:
 - `GET /api/health` — Runtime health and update cache
 - `POST /api/runs` — Trigger non-blocking asynchronous agent runs
-- `GET /api/runs/events` — Server-Sent Events (SSE) stream for live execution logs
+- `GET /api/runs/{run_id}/events` — Server-Sent Events (SSE) stream for live execution logs
 - `POST /api/runs/{run_id}/approve` — Submit gate decisions for suspended runs
 
 ---
@@ -275,6 +286,21 @@ pytest -q
 - **Server-Trusted Actor Identity**: `Principal` provenance is resolved server-side to prevent header spoofing in multi-tenant environments.
 - **Workspace Isolation**: Database files, permission rules, and observation records are isolated per workspace path.
 
+### Deployment Trust Boundaries
+
+Agent OS provides application-level controls, not complete isolation. Human
+approval governs agent-planned executor work, but explicit Tier-1
+`write_file` and `bash` requests remain direct user instructions. Native
+writes and subprocesses resolve under `AGENT_OS_SANDBOX`; subprocesses use
+argument arrays, `shell=False`, timeouts, redaction, and output caps.
+
+Checkpoints can contain tasks, messages, plans, tool results, and file
+content, so treat them as sensitive local data. CLI argument guards and
+permission modes are defense-in-depth rather than an OS sandbox. Run
+untrusted workloads in a container, microVM, or another isolation layer.
+Never commit `.env`, checkpoints, sandboxes, provider credentials, private
+vault content, or real workflow logs.
+
 ---
 
 ## Development & Contributing
@@ -288,3 +314,18 @@ pytest -q
 ## License
 
 [MIT](LICENSE) © Simon Tran
+
+---
+
+## Contact
+
+Simon Tran — [GitHub @simon-aibc](https://github.com/simon-aibc)
+
+Project: [simon-aibc/agent-os-langgraph](https://github.com/simon-aibc/agent-os-langgraph)
+
+## Acknowledgments
+
+- The README structure follows the community-friendly shape popularized by
+  [Best-README-Template](https://github.com/othneildrew/Best-README-Template).
+- LangGraph, LangChain, LiteLLM, FastAPI, Docker, Claude Code, and Codex
+  provide ecosystem components that Agent OS integrates.

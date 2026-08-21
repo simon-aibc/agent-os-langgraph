@@ -873,10 +873,6 @@ async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(
         encoding="utf-8"
     ) == "entry\nentry"
 
-    import gc
-    gc.collect()
-
-
 def test_serve_missing_extra(monkeypatch, capsys):
     import asyncio
 
