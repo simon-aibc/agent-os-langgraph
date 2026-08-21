@@ -42,6 +42,7 @@ __all__ = (
     "ConnectorRegistry",
     "ContextBlock",
     "ContextProvider",
+    "EventSink",
     "ExecutionResult",
     "IndexResult",
     "IndexableMemory",

@@ -587,6 +587,16 @@ async def create_run_endpoint(
         workspace_id=workspace,
         principal=principal,
     )
+    from agent_os.events import emit_run_lifecycle_event
+
+    emit_run_lifecycle_event(
+        "run.created",
+        run_id=run_id,
+        workspace_id=workspace,
+        status="queued",
+        principal=principal,
+        thread_id=thread_id,
+    )
     _start_run_task(
         run_id,
         thread_id,
@@ -686,6 +696,16 @@ async def approve_run_endpoint(
         if latest is not None and latest["status"] == "running":
             return {"run_id": run_id, "status": "running"}
         raise HTTPException(status_code=409, detail="Run is not interrupted")
+    from agent_os.events import emit_run_lifecycle_event
+
+    emit_run_lifecycle_event(
+        "run.approved",
+        run_id=run_id,
+        workspace_id=str(run.get("workspace_id") or run.get("workspace") or "default"),
+        status="running",
+        principal=principal,
+        thread_id=str(run.get("thread_id") or ""),
+    )
     _start_run_task(
         run_id,
         run["thread_id"],
@@ -719,6 +739,16 @@ async def cancel_run_endpoint(run_id: str, request: Request) -> dict[str, str]:
     if active_task is not None and not active_task.done():
         active_task.cancel()
     _run_store.append_event(run_id, "status", {"status": "cancelled"})
+    from agent_os.events import emit_run_lifecycle_event
+
+    emit_run_lifecycle_event(
+        "run.cancelled",
+        run_id=run_id,
+        workspace_id=str(run.get("workspace_id") or run.get("workspace") or "default"),
+        status="cancelled",
+        principal=principal,
+        thread_id=str(run.get("thread_id") or ""),
+    )
     from agent_os.policy import LocalPolicy
 
     LocalPolicy.clear_session(run_id)

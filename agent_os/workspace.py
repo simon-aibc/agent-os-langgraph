@@ -22,6 +22,7 @@ from agent_os.connectors import (
 )
 from agent_os.context import ContextProvider
 from agent_os.default_registry import build_default_registry as build_skill_registry
+from agent_os.events import EventSink
 from agent_os.hot_context import load_hot_context
 from agent_os.permission_store import (
     DEFAULT_PERMISSION_DB,
@@ -33,6 +34,7 @@ from agent_os.policy import CompositePolicyEngine, LocalPolicy, PolicyEngine
 from agent_os.skill_packages import SkillPackageLoader
 from agent_os.skills import SkillRegistry
 from agent_os.state import BackendBinding
+from agent_os.webhooks import WebhookEventSink, is_safe_webhook_url
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,7 @@ class ComposedWorkspace:
     limits: dict[str, Any]
     environment: dict[str, str | None]
     context_providers: list[ContextProvider] = field(default_factory=list)
+    event_sinks: list[EventSink] = field(default_factory=list)
 
 
 _BACKEND_ROLES = frozenset({"router", "architect", "executor"})
@@ -191,6 +194,7 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
     store = open_permission_store(ws)
     policy = _build_policy(ws, store=store, plugin_registry=plugin_registry)
     context_providers = _build_context_providers(ws, plugin_registry=plugin_registry)
+    event_sinks = _build_event_sinks(ws, plugin_registry=plugin_registry)
 
     return ComposedWorkspace(
         workspace=ws,
@@ -204,6 +208,7 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
         limits=dict(ws.limits),
         environment=environment,
         context_providers=context_providers,
+        event_sinks=event_sinks,
     )
 
 
