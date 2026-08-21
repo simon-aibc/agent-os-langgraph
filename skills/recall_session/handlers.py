@@ -61,7 +61,10 @@ def recall_session(task: str, **kwargs) -> str:
             except Exception:
                 pass
 
-        out.append(f"- Phiên [{ref}]:\n  Trích đoạn: {snippet}...\n")
+        heading = res.get("source", {}).get("heading") if isinstance(res.get("source"), dict) else None
+        title = res.get("title")
+        header_tag = f" ({heading})" if heading else (f" ({title})" if title else "")
+        out.append(f"- Phiên [{ref}]{header_tag}:\n  Trích đoạn: {snippet}...\n")
 
     if not found:
         return f"Không tìm thấy thông tin nào trong lịch sử session (AI/Logs/) cho: '{query}'"

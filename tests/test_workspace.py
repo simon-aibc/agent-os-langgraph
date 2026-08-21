@@ -215,3 +215,360 @@ def test_both_reference_workspaces_load():
         assert composed.workspace.workspace.name
         assert composed.memory_connector.name == "markdown_vault"
         assert composed.hot_context
+
+
+class DummyPluginMemory:
+    name = "synthetic_memory"
+    supported_write_modes = frozenset({"create"})
+
+    def search(self, query: str, limit: int = 3) -> list[dict]:
+        return []
+
+    def read_note(self, ref: str) -> dict:
+        return {"ref": ref, "content": ""}
+
+    def list_notes(self, filters: dict | None = None) -> list[dict]:
+        return []
+
+    def write_note(self, ref: str, content: str, **kwargs: object) -> object:
+        return object()
+
+    def describe_write_side_effect(self, ref: str, mode: str) -> str:
+        return "write"
+
+
+class DummyPluginActionConnector:
+    name = "github_tool"
+
+    def capabilities(self) -> dict:
+        return {"actions": []}
+
+    def describe_side_effect(self, action: str) -> str:
+        return "read"
+
+    def invoke(self, action: str, args: dict) -> object:
+        return object()
+
+
+class SyntheticEntryPoint:
+    def __init__(self, name: str, target: object = None, error: Exception | None = None):
+        self.name = name
+        self.target = target
+        self.error = error
+
+    def load(self):
+        if self.error:
+            raise self.error
+        return self.target
+
+
+def test_workspace_external_memory_connector_plugin(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("synthetic_mem", target=DummyPluginMemory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    # Edit workspace.toml to use synthetic_mem
+    content = workspace_path.read_text()
+    content = content.replace('type = "markdown"', 'type = "synthetic_mem"')
+    workspace_path.write_text(content)
+
+    workspace = load_workspace(workspace_path)
+    composed = compose_workspace(workspace)
+    assert composed.memory_connector.name == "synthetic_memory"
+    assert composed.connector_registry.resolve("memory").name == "synthetic_memory"
+
+
+def test_workspace_external_action_connector_plugin(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("github", target=DummyPluginActionConnector)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(
+        tmp_path,
+        connectors=["filesystem", "memory", "github"],
+    )
+
+    workspace = load_workspace(workspace_path)
+    composed = compose_workspace(workspace)
+    assert composed.connector_registry.resolve("github").name == "github_tool"
+
+
+def test_workspace_plugin_cannot_override_builtin_memory_name(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("markdown", target=DummyPluginMemory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    content = workspace_path.read_text()
+    content = content.replace('type = "markdown"', 'type = "other_mem"')
+    workspace_path.write_text(content)
+
+    with pytest.raises(WorkspaceLoadError, match="Plugin in 'agent_os.memory_connectors' cannot override built-in memory connector 'markdown'"):
+        load_workspace(workspace_path)
+
+
+def test_workspace_plugin_cannot_override_builtin_memory_when_configured_as_markdown(tmp_path: Path, monkeypatch):
+    # Regression test: Even when workspace config is standard markdown, an external plugin named 'markdown' must be rejected
+    eps = [SyntheticEntryPoint("markdown", target=DummyPluginMemory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)  # Default is type = "markdown"
+
+    with pytest.raises(WorkspaceLoadError, match="Plugin in 'agent_os.memory_connectors' cannot override built-in memory connector 'markdown'"):
+        load_workspace(workspace_path)
+
+
+def test_workspace_normal_builtin_composes_when_no_collision(tmp_path: Path, monkeypatch):
+    # Regression test: Normal built-in workspace composes cleanly when no colliding plugin exists
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    workspace = load_workspace(workspace_path)
+    composed = compose_workspace(workspace)
+    assert composed.memory_connector.name == "markdown_vault"
+
+
+def test_workspace_callable_connector_instance(tmp_path: Path, monkeypatch):
+    class CallableActionConnector:
+        name = "callable_action"
+
+        def __call__(self, *args, **kwargs):
+            return "invoked"
+
+        def capabilities(self) -> dict:
+            return {"actions": []}
+
+        def describe_side_effect(self, action: str) -> str:
+            return "read"
+
+        def invoke(self, action: str, args: dict) -> object:
+            return object()
+
+    callable_instance = CallableActionConnector()
+    eps = [SyntheticEntryPoint("callable_action", target=callable_instance)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(
+        tmp_path,
+        connectors=["filesystem", "memory", "callable_action"],
+    )
+
+    workspace = load_workspace(workspace_path)
+    composed = compose_workspace(workspace)
+    resolved = composed.connector_registry.resolve("callable_action")
+    assert resolved is callable_instance
+    assert resolved.name == "callable_action"
+
+
+def test_workspace_action_connector_valid_zero_arg_factory(tmp_path: Path, monkeypatch):
+    def action_factory():
+        return DummyPluginActionConnector()
+
+    eps = [SyntheticEntryPoint("factory_action", target=action_factory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(
+        tmp_path,
+        connectors=["filesystem", "memory", "factory_action"],
+    )
+
+    workspace = load_workspace(workspace_path)
+    composed = compose_workspace(workspace)
+    assert composed.connector_registry.resolve("factory_action").name == "github_tool"
+
+
+def test_workspace_action_connector_unsupported_factory_args_fails_closed(tmp_path: Path, monkeypatch):
+    def bad_action_factory(unsupported_arg: str, another_arg: int):
+        return DummyPluginActionConnector()
+
+    eps = [SyntheticEntryPoint("bad_action", target=bad_action_factory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(
+        tmp_path,
+        connectors=["filesystem", "memory", "bad_action"],
+    )
+
+    with pytest.raises(WorkspaceLoadError) as exc_info:
+        load_workspace(workspace_path)
+
+    msg = str(exc_info.value)
+    assert "Action connector plugin 'bad_action' in group 'agent_os.connectors' requires unsupported arguments" in msg
+    assert "unsupported_arg" in msg
+
+
+def test_workspace_action_connector_requires_connector_contract(tmp_path: Path, monkeypatch):
+    class InvalidActionConnector:
+        name = "invalid_action"
+
+    eps = [SyntheticEntryPoint("invalid_action", target=InvalidActionConnector)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(
+        tmp_path,
+        connectors=["filesystem", "memory", "invalid_action"],
+    )
+
+    with pytest.raises(WorkspaceLoadError, match="does not satisfy the Connector interface"):
+        load_workspace(workspace_path)
+
+
+def test_workspace_memory_connector_missing_required_args_fails_closed(tmp_path: Path, monkeypatch):
+    def custom_mem_factory(missing_db_url: str):
+        return DummyPluginMemory()
+
+    eps = [SyntheticEntryPoint("needs_db", target=custom_mem_factory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    content = workspace_path.read_text()
+    content = content.replace('type = "markdown"', 'type = "needs_db"')
+    workspace_path.write_text(content)
+
+    with pytest.raises(WorkspaceLoadError) as exc_info:
+        load_workspace(workspace_path)
+
+    msg = str(exc_info.value)
+    assert "Memory connector plugin 'needs_db' in group 'agent_os.memory_connectors' requires parameter(s)" in msg
+    assert "missing_db_url" in msg
+
+
+def test_workspace_memory_connector_requires_writable_contract(tmp_path: Path, monkeypatch):
+    class ReadOnlyMemoryPlugin:
+        name = "read_only"
+
+        def search(self, query: str, limit: int = 3) -> list[dict]:
+            return []
+
+        def read_note(self, ref: str) -> dict:
+            return {"ref": ref, "content": ""}
+
+    eps = [SyntheticEntryPoint("read_only", target=ReadOnlyMemoryPlugin)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    content = workspace_path.read_text()
+    workspace_path.write_text(
+        content.replace('type = "markdown"', 'type = "read_only"')
+    )
+
+    with pytest.raises(WorkspaceLoadError, match="WritableMemory write methods"):
+        load_workspace(workspace_path)
+
+
+def test_workspace_plugin_cannot_override_builtin_action_name(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("filesystem", target=DummyPluginActionConnector)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+
+    with pytest.raises(WorkspaceLoadError, match="Plugin in 'agent_os.connectors' cannot override built-in connector 'filesystem'"):
+        load_workspace(workspace_path)
+
+
+def test_workspace_unknown_memory_connector_lists_builtins_and_plugins(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("vector_store", target=DummyPluginMemory)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    content = workspace_path.read_text()
+    content = content.replace('type = "markdown"', 'type = "nonexistent_memory"')
+    workspace_path.write_text(content)
+
+    with pytest.raises(WorkspaceLoadError) as exc_info:
+        load_workspace(workspace_path)
+
+    msg = str(exc_info.value)
+    assert "Unknown memory connector 'nonexistent_memory'" in msg
+    assert "markdown, gbrain" in msg
+    assert "vector_store" in msg
+
+
+def test_workspace_unknown_action_connector_lists_builtins_and_plugins(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("slack", target=DummyPluginActionConnector)]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.connectors" else [],
+    )
+
+    workspace_path = _write_workspace(
+        tmp_path,
+        connectors=["filesystem", "memory", "missing_tool"],
+    )
+
+    with pytest.raises(WorkspaceLoadError) as exc_info:
+        load_workspace(workspace_path)
+
+    msg = str(exc_info.value)
+    assert "Unknown workspace connector 'missing_tool'" in msg
+    assert "filesystem" in msg
+    assert "slack" in msg
+
+
+def test_workspace_plugin_load_failure_fail_closed(tmp_path: Path, monkeypatch):
+    eps = [SyntheticEntryPoint("broken_mem", error=ImportError("Missing C extension"))]
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: eps if group == "agent_os.memory_connectors" else [],
+    )
+
+    workspace_path = _write_workspace(tmp_path)
+    content = workspace_path.read_text()
+    content = content.replace('type = "markdown"', 'type = "broken_mem"')
+    workspace_path.write_text(content)
+
+    with pytest.raises(WorkspaceLoadError) as exc_info:
+        load_workspace(workspace_path)
+
+    msg = str(exc_info.value)
+    assert "Failed to load memory connector plugin 'broken_mem'" in msg
+    assert "Missing C extension" in msg
+
+
+def test_workspace_gbrain_memory_connector_unmodified(tmp_path: Path):
+    workspace_path = _write_workspace(tmp_path)
+    content = workspace_path.read_text()
+    content = content.replace('type = "markdown"', 'type = "gbrain"')
+    workspace_path.write_text(content)
+
+    workspace = load_workspace(workspace_path)
+    composed = compose_workspace(workspace)
+    assert composed.memory_connector.name == "gbrain"
+    assert composed.connector_registry.resolve("memory").name == "gbrain"
