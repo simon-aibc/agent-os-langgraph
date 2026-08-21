@@ -33,8 +33,9 @@ def test_simon_state_keys():
         "backend_binding",
         "conversation_summary",
         "observation_context",
-        "strategy_hint",
-    }
+            "strategy_hint",
+            "run_id",
+        }
     assert set(SimonState.__annotations__.keys()) == expected_all_keys
     # TypedDict fields are required unless declared with NotRequired.
     # Note: TypedDict.__required_keys__ excludes fields declared as NotRequired.

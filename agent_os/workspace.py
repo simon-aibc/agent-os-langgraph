@@ -20,6 +20,7 @@ from agent_os.connectors import (
     MemoryConnector,
     WritableMemory,
 )
+from agent_os.context import ContextProvider
 from agent_os.default_registry import build_default_registry as build_skill_registry
 from agent_os.hot_context import load_hot_context
 from agent_os.permission_store import (
@@ -80,6 +81,7 @@ class ComposedWorkspace:
     hot_context: str
     limits: dict[str, Any]
     environment: dict[str, str | None]
+    context_providers: list[ContextProvider] = field(default_factory=list)
 
 
 _BACKEND_ROLES = frozenset({"router", "architect", "executor"})
@@ -188,6 +190,7 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
 
     store = open_permission_store(ws)
     policy = _build_policy(ws, store=store, plugin_registry=plugin_registry)
+    context_providers = _build_context_providers(ws, plugin_registry=plugin_registry)
 
     return ComposedWorkspace(
         workspace=ws,
@@ -200,6 +203,7 @@ def compose_workspace(ws: Workspace) -> ComposedWorkspace:
         hot_context=hot_context,
         limits=dict(ws.limits),
         environment=environment,
+        context_providers=context_providers,
     )
 
 
