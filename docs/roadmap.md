@@ -68,6 +68,8 @@ decisions.
 | v2.1 | Complete | Scoped, user-taught memory permissions with workspace isolation |
 | v2.2 | Complete | Structured outcome evidence and bounded adaptive planning |
 | v2.2.1 | Complete | Strategy assignment audit-trace integrity across replay |
+| v2.3 | Complete | Self-update lifecycle, update discovery, additive migrations, semantic M/N judge |
+| v2.4 | In Progress (Unreleased) | Plugin runtime, stable API facade, retrieval lifecycle, event egress & conformance kit |
 
 ## v2.x Direction
 
