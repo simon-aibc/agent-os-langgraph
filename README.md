@@ -3,7 +3,7 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11-3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-[![Release](https://img.shields.io/badge/release-v2.3.0-green.svg)](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.3.0)
+[![Release](https://img.shields.io/badge/release-v2.4.0-green.svg)](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0)
 [![Typed](https://img.shields.io/badge/types-py.typed-informational.svg)](agent_os/api)
 
 > **Agent OS: Everything is a Plugin.**<br>
@@ -11,7 +11,7 @@
 
 Agent OS is an auditable, self-hostable agent operating system providing deterministic fast-path execution, read-only architect planning, human approval governance, immutable policy floors, memory retrieval lifecycles, anti-SSRF signed event egress, and a modular plugin runtime. Under the hood, stateful graph execution and checkpointing are powered by LangGraph.
 
-**Current release:** [v2.3.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.3.0) |
+**Current release:** [v2.4.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0) |
 [Changelog](CHANGELOG.md) |
 [Architecture](docs/architecture.md) |
 [Extending Agent OS](docs/EXTENDING.md) |
