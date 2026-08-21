@@ -8,6 +8,7 @@ import http.client
 import ipaddress
 import json
 import logging
+import queue
 import socket
 import ssl
 import threading
@@ -19,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WEBHOOK_TIMEOUT_SECONDS = 2.0
 DEFAULT_WEBHOOK_MAX_RETRIES = 3
+DEFAULT_WEBHOOK_QUEUE_SIZE = 1000
+DEFAULT_WEBHOOK_WORKERS = 1
+_SHUTDOWN_SENTINEL = object()
 
 
 def _redact_url_for_log(url: str) -> str:
@@ -46,7 +50,11 @@ def is_safe_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     )
 
 
-def validate_webhook_url_syntax(url: str) -> tuple[bool, str, urllib.parse.ParseResult | None]:
+def validate_webhook_url_syntax(
+    url: str,
+    allow_insecure_http: bool = False,
+    allowed_internal_hosts: list[str] | set[str] | None = None,
+) -> tuple[bool, str, urllib.parse.ParseResult | None]:
     """Validate URL scheme and structure, rejecting non-HTTP(S) and embedded credentials."""
     try:
         parsed = urllib.parse.urlparse(url)
@@ -62,19 +70,33 @@ def validate_webhook_url_syntax(url: str) -> tuple[bool, str, urllib.parse.Parse
     if not parsed.hostname:
         return False, "URL is missing a valid hostname.", None
 
+    if parsed.scheme == "http" and not allow_insecure_http:
+        allowed = {h.strip().lower() for h in (allowed_internal_hosts or []) if h.strip()}
+        if (parsed.hostname or "").lower() not in allowed:
+            return (
+                False,
+                "Insecure HTTP webhook URLs are disallowed by default. Use HTTPS or set 'allow_insecure_http = true' (or add host to 'allowed_internal_hosts').",
+                None,
+            )
+
     return True, "", parsed
 
 
 def is_safe_webhook_url(
     url: str,
     allowed_internal_hosts: list[str] | set[str] | None = None,
+    allow_insecure_http: bool = False,
 ) -> tuple[bool, str]:
     """Static validation of webhook URL and its current DNS resolution against SSRF.
 
     Note: At connection time, WebhookEventSink resolves and pins IP addresses
     directly to prevent DNS rebinding / TOCTOU vulnerabilities.
     """
-    valid, reason, parsed = validate_webhook_url_syntax(url)
+    valid, reason, parsed = validate_webhook_url_syntax(
+        url,
+        allow_insecure_http=allow_insecure_http,
+        allowed_internal_hosts=allowed_internal_hosts,
+    )
     if not valid or parsed is None:
         return False, reason
 
@@ -145,12 +167,17 @@ class PinnedIPHTTPSConnection(http.client.HTTPSConnection):
 def _resolve_and_validate_target(
     url: str,
     allowed_internal_hosts: list[str] | set[str] | None = None,
+    allow_insecure_http: bool = False,
 ) -> tuple[bool, str, str, str, int, str, str]:
     """Resolve destination hostname immediately and validate all returned IPs against SSRF.
 
     Returns: (is_safe, error_reason, scheme, hostname, port, pinned_ip, path)
     """
-    valid, reason, parsed = validate_webhook_url_syntax(url)
+    valid, reason, parsed = validate_webhook_url_syntax(
+        url,
+        allow_insecure_http=allow_insecure_http,
+        allowed_internal_hosts=allowed_internal_hosts,
+    )
     if not valid or parsed is None:
         return False, reason, "", "", 0, "", ""
 
@@ -209,26 +236,102 @@ class WebhookEventSink:
         secret: str,
         *,
         allowed_internal_hosts: list[str] | set[str] | None = None,
+        allow_insecure_http: bool = False,
         max_retries: int = DEFAULT_WEBHOOK_MAX_RETRIES,
         timeout_seconds: float = DEFAULT_WEBHOOK_TIMEOUT_SECONDS,
         ssl_context: ssl.SSLContext | None = None,
+        max_queue_size: int = DEFAULT_WEBHOOK_QUEUE_SIZE,
+        num_workers: int = DEFAULT_WEBHOOK_WORKERS,
     ) -> None:
         self.url = url
         self.secret = secret
         self.allowed_internal_hosts = list(allowed_internal_hosts or [])
+        self.allow_insecure_http = allow_insecure_http
         self.max_retries = max(1, max_retries)
         self.timeout_seconds = max(0.1, timeout_seconds)
         self.ssl_context = ssl_context
+        self.max_queue_size = max(1, max_queue_size)
+        self.num_workers = max(1, num_workers)
+
+        self._queue: queue.Queue[Any] = queue.Queue(maxsize=self.max_queue_size)
+        self._workers: list[threading.Thread] = []
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def _ensure_workers_started(self) -> None:
+        if self._closed:
+            return
+        if not self._workers:
+            with self._lock:
+                if not self._workers and not self._closed:
+                    for i in range(self.num_workers):
+                        worker = threading.Thread(
+                            target=self._worker_loop,
+                            name=f"agent-os-webhook-worker-{i}",
+                            daemon=True,
+                        )
+                        worker.start()
+                        self._workers.append(worker)
+
+    def _worker_loop(self) -> None:
+        while True:
+            try:
+                item = self._queue.get()
+            except Exception:
+                break
+            if item is _SHUTDOWN_SENTINEL:
+                self._queue.task_done()
+                break
+            try:
+                self._send_with_retry(item)
+            except Exception as exc:
+                redacted = _redact_url_for_log(self.url)
+                logger.error(
+                    f"Unexpected error in webhook delivery to '{redacted}': {exc}"
+                )
+            finally:
+                self._queue.task_done()
 
     def emit(self, event: dict[str, Any]) -> None:
         """Deliver lifecycle event in the background off the execution path."""
-        thread = threading.Thread(
-            target=self._send_with_retry,
-            args=(event,),
-            name=f"agent-os-webhook-{event.get('event')}",
-            daemon=True,
-        )
-        thread.start()
+        if self._closed:
+            redacted = _redact_url_for_log(self.url)
+            logger.warning(
+                f"WebhookEventSink is closed; dropping event '{event.get('event')}' to '{redacted}'."
+            )
+            return
+
+        self._ensure_workers_started()
+
+        try:
+            self._queue.put_nowait(event)
+        except queue.Full:
+            redacted = _redact_url_for_log(self.url)
+            logger.warning(
+                f"Webhook queue is full (maxsize={self.max_queue_size}); "
+                f"dropping event '{event.get('event')}' to '{redacted}'."
+            )
+
+    def close(self, timeout: float = 5.0) -> None:
+        """Drain queued webhook events and stop background workers."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+
+        if not self._workers:
+            return
+
+        for _ in self._workers:
+            try:
+                self._queue.put_nowait(_SHUTDOWN_SENTINEL)
+            except queue.Full:
+                pass
+
+        deadline = time.time() + max(0.0, timeout)
+        for worker in self._workers:
+            remaining = max(0.0, deadline - time.time())
+            worker.join(timeout=remaining)
 
     def _send_single_request(
         self,
@@ -238,7 +341,7 @@ class WebhookEventSink:
     ) -> tuple[bool, int, str]:
         """Perform a single HTTP request connecting only to a validated pinned IP address."""
         is_safe, reason, scheme, hostname, port, pinned_ip, path = _resolve_and_validate_target(
-            target_url, self.allowed_internal_hosts
+            target_url, self.allowed_internal_hosts, self.allow_insecure_http
         )
         if not is_safe:
             logger.warning(f"Webhook delivery aborted for destination: {reason}")

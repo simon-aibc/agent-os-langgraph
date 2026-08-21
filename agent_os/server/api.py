@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import ipaddress
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -64,6 +65,8 @@ from agent_os.stores import SqliteRunStore
 from agent_os.strategies import strategies_for
 from agent_os.update_check import check_for_update, read_cached_update
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
@@ -82,6 +85,16 @@ async def _lifespan(app: FastAPI):
         yield
     finally:
         await scheduler.stop()
+        try:
+            from agent_os.server.runtime import composed_workspace
+
+            runtime = composed_workspace()
+            if runtime is not None:
+                for sink in getattr(runtime, "event_sinks", ()):
+                    if hasattr(sink, "close") and callable(sink.close):
+                        sink.close()
+        except Exception as exc:
+            logger.warning("Error closing event sinks during shutdown: %s", exc)
 
 
 SERVER_VERSION = package_version()

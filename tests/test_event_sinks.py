@@ -202,7 +202,7 @@ type = "markdown"
 path = "."
 
 [webhooks]
-url = "http://127.0.0.1:8080/events"
+url = "https://127.0.0.1:8080/events"
 secret_env = "MY_WEBHOOK_SECRET"
 """,
         encoding="utf-8",
@@ -210,3 +210,64 @@ secret_env = "MY_WEBHOOK_SECRET"
 
     with pytest.raises(WorkspaceLoadError, match="Blocked unsafe/internal IP"):
         load_workspace(workspace_path)
+
+
+def test_workspace_webhook_insecure_http_rejected_by_default_and_allowed_with_flag(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("MY_WEBHOOK_SECRET", "super-secret-key")
+    monkeypatch.setattr(
+        "agent_os.webhooks.socket.getaddrinfo",
+        lambda *_args, **_kwargs: [(2, 1, 6, "", ("93.184.216.34", 80))],
+    )
+
+    # 1. Default rejects http://
+    workspace_path = tmp_path / "workspace_default_http.toml"
+    workspace_path.write_text(
+        """
+[workspace]
+name = "insecure-http-ws"
+
+[backends]
+architect = "codex"
+executor = "codex"
+
+[memory]
+type = "markdown"
+path = "."
+
+[webhooks]
+url = "http://example.com/events"
+secret_env = "MY_WEBHOOK_SECRET"
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(WorkspaceLoadError, match="Insecure HTTP webhook URLs are disallowed"):
+        load_workspace(workspace_path)
+
+    # 2. Explicit allow_insecure_http = true succeeds
+    workspace_optin_path = tmp_path / "workspace_optin_http.toml"
+    workspace_optin_path.write_text(
+        """
+[workspace]
+name = "insecure-http-ws"
+
+[backends]
+architect = "codex"
+executor = "codex"
+
+[memory]
+type = "markdown"
+path = "."
+
+[webhooks]
+url = "http://example.com/events"
+secret_env = "MY_WEBHOOK_SECRET"
+allow_insecure_http = true
+""",
+        encoding="utf-8",
+    )
+    ws = load_workspace(workspace_optin_path)
+    composed = compose_workspace(ws)
+    assert len(composed.event_sinks) == 1
+    assert composed.event_sinks[0].allow_insecure_http is True
