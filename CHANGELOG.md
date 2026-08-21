@@ -3,6 +3,13 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
+## [Unreleased]
+
+### Fixed
+
+- **Bounded Webhook Worker & Shutdown Drain**: `WebhookEventSink` now routes background delivery through a bounded FIFO queue and fixed worker pool, ensuring `emit()` never blocks the execution path, drops with a warning under queue saturation, and cleanly drains in-flight deliveries during graceful shutdown via `close()`.
+- **Explicit Insecure HTTP Opt-in**: Webhook URLs now reject unencrypted `http://` schemes by default. Insecure HTTP requires explicit opt-in via workspace configuration `[webhooks] allow_insecure_http = true` or `allowed_internal_hosts`.
+
 ## [2.4.0] — 2026-08-21
 
 ### Added

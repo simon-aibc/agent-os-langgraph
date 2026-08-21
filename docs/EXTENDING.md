@@ -310,9 +310,10 @@ result = skills.get("hello").invoke({"name": "Ada"})
 The reference `WebhookEventSink` enforces strict security invariants:
 
 1. **Payload Privacy**: Webhook events contain sanitized operational metadata only (`event`, `run_id`, `workspace_id`, `status`, `timestamp`, `actor`, `references`). Payloads **never** include prompt text, model outputs, tool arguments/results, approval reasons, or secrets.
-2. **HMAC-SHA256 Signatures**: Payloads are signed with a shared secret using `X-AgentOS-Timestamp` and `X-AgentOS-Signature: sha256=<hex>`.
-3. **SSRF & DNS-Rebinding Protection**: Target hostnames are resolved immediately before connecting, every IP address is checked against private/loopback/internal ranges, and the connection is pinned directly to the validated IP. TLS SNI and server certificate validation use the original domain name.
-4. **Asynchronous Non-Blocking Offload**: Webhook deliveries execute in background threads with bounded retries and exponential backoff; failures never crash or delay agent execution.
+2. **Encrypted Transport by Default**: Webhook URLs must use HTTPS by default. Unencrypted HTTP is disallowed unless explicitly opted into via `[webhooks] allow_insecure_http = true` in workspace configuration or for hosts listed in `allowed_internal_hosts`.
+3. **HMAC-SHA256 Signatures**: Payloads are signed with a shared secret using `X-AgentOS-Timestamp` and `X-AgentOS-Signature: sha256=<hex>`.
+4. **SSRF & DNS-Rebinding Protection**: Target hostnames are resolved immediately before connecting, every IP address is checked against private/loopback/internal ranges, and the connection is pinned directly to the validated IP. TLS SNI and server certificate validation use the original domain name. Redirects are not followed to prevent token/signature forwarding.
+5. **Bounded Worker Queue & Graceful Shutdown Drain**: Deliveries are buffered in a bounded FIFO queue serviced by a dedicated background worker pool. `emit()` never blocks runtime execution (dropping under saturation with a warning), and `close()` cleanly drains in-flight items during process shutdown.
 
 ---
 

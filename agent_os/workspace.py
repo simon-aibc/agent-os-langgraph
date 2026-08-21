@@ -619,7 +619,14 @@ def _build_event_sinks(
                     allowed = [allowed]
                 elif not isinstance(allowed, list):
                     allowed = []
-                is_safe, reason = is_safe_webhook_url(url, allowed)
+                allow_insecure_http = bool(
+                    ws.webhooks.get("allow_insecure_http", False)
+                )
+                is_safe, reason = is_safe_webhook_url(
+                    url,
+                    allowed,
+                    allow_insecure_http=allow_insecure_http,
+                )
                 if not is_safe:
                     raise WorkspaceLoadError(
                         f"Invalid webhook URL configuration: {reason}"
@@ -631,6 +638,7 @@ def _build_event_sinks(
                         url=url,
                         secret=secret,
                         allowed_internal_hosts=allowed,
+                        allow_insecure_http=allow_insecure_http,
                         max_retries=max_retries,
                         timeout_seconds=timeout_s,
                     )

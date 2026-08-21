@@ -30,6 +30,8 @@ def test_is_safe_webhook_url_validation(monkeypatch):
         "http://127.0.0.1:8000/webhook", allowed_internal_hosts=["127.0.0.1"]
     )[0]
     monkeypatch.setattr("agent_os.webhooks.socket.getaddrinfo", _public_dns)
+    assert not is_safe_webhook_url("http://example.com/webhook")[0]
+    assert is_safe_webhook_url("http://example.com/webhook", allow_insecure_http=True)[0]
     assert is_safe_webhook_url("https://example.com/webhook")[0]
 
 
@@ -223,3 +225,159 @@ def test_webhook_bounded_retry_and_fail_soft(monkeypatch):
 
     assert not sink._send_with_retry(event)
     assert attempts == 3
+
+
+def test_webhook_worker_pool_delivers_all_events(monkeypatch):
+    """Firing N events exceeding worker count delivers all events reliably."""
+    delivered = []
+
+    def mock_send(self, event):
+        delivered.append(event["run_id"])
+        return True
+
+    monkeypatch.setattr(WebhookEventSink, "_send_with_retry", mock_send)
+
+    sink = WebhookEventSink(
+        url="https://example.com/webhook",
+        secret="test-secret",
+        num_workers=1,
+        max_queue_size=50,
+    )
+
+    for i in range(10):
+        event = build_lifecycle_payload(
+            "run.created",
+            run_id=f"run-{i}",
+            workspace_id="ws-test",
+            status="queued",
+        )
+        sink.emit(event)
+
+    sink.close(timeout=5.0)
+    assert len(delivered) == 10
+    assert delivered == [f"run-{i}" for i in range(10)]
+
+
+def test_webhook_queue_full_drops_and_does_not_block(monkeypatch, caplog):
+    """When the queue is full, emit() must return immediately without blocking and log a warning."""
+    import threading
+
+    worker_proceed = threading.Event()
+    worker_started = threading.Event()
+    delivered = []
+
+    def blocking_send(self, event):
+        worker_started.set()
+        worker_proceed.wait(timeout=5.0)
+        delivered.append(event["run_id"])
+        return True
+
+    monkeypatch.setattr(WebhookEventSink, "_send_with_retry", blocking_send)
+
+    sink = WebhookEventSink(
+        url="https://example.com/webhook",
+        secret="test-secret",
+        num_workers=1,
+        max_queue_size=2,
+    )
+
+    # 1. First event is picked up by worker and blocks on worker_proceed
+    event1 = build_lifecycle_payload("run.created", run_id="run-1", workspace_id="ws", status="queued")
+    sink.emit(event1)
+    assert worker_started.wait(timeout=2.0)
+
+    # 2. Queue 2 more events to fill the queue (max_queue_size=2)
+    event2 = build_lifecycle_payload("run.created", run_id="run-2", workspace_id="ws", status="queued")
+    event3 = build_lifecycle_payload("run.created", run_id="run-3", workspace_id="ws", status="queued")
+    sink.emit(event2)
+    sink.emit(event3)
+
+    # 3. 4th event must be dropped immediately without blocking
+    event4 = build_lifecycle_payload("run.created", run_id="run-4", workspace_id="ws", status="queued")
+    sink.emit(event4)
+
+    assert "Webhook queue is full" in caplog.text
+
+    # Unblock and drain
+    worker_proceed.set()
+    sink.close(timeout=5.0)
+
+
+def test_webhook_close_and_post_close_emit(monkeypatch, caplog):
+    """Closing sink drains in-flight items; emit() after close does not hang."""
+    delivered = []
+
+    def mock_send(self, event):
+        delivered.append(event["run_id"])
+        return True
+
+    monkeypatch.setattr(WebhookEventSink, "_send_with_retry", mock_send)
+
+    sink = WebhookEventSink(
+        url="https://example.com/webhook",
+        secret="test-secret",
+        num_workers=1,
+    )
+    event = build_lifecycle_payload("run.created", run_id="run-1", workspace_id="ws", status="queued")
+    sink.emit(event)
+    sink.close(timeout=2.0)
+
+    assert len(delivered) == 1
+
+    # Emitting after close logs warning and drops event
+    post_event = build_lifecycle_payload("run.created", run_id="run-post", workspace_id="ws", status="queued")
+    sink.emit(post_event)
+    assert "WebhookEventSink is closed; dropping event" in caplog.text
+
+
+def test_webhook_insecure_http_opt_in(monkeypatch):
+    """Insecure HTTP is rejected by default unless allow_insecure_http or allowed_internal_hosts is set."""
+    monkeypatch.setattr("agent_os.webhooks.socket.getaddrinfo", _public_dns)
+
+    # Default rejects http://
+    sink_default = WebhookEventSink(url="http://example.com/webhook", secret="sec")
+    event = build_lifecycle_payload("run.created", run_id="run-1", workspace_id="ws", status="queued")
+    assert not sink_default._send_with_retry(event)
+
+    # Explicit allow_insecure_http=True accepts http://
+    received = []
+
+    class FakeHTTPConnection:
+        def __init__(self, pinned_ip, original_host, port, timeout):
+            self.pinned_ip = pinned_ip
+            self.original_host = original_host
+            self.port = port
+            self.timeout = timeout
+
+        def request(self, method, path, body=None, headers=None):
+            received.append(self.pinned_ip)
+
+        def getresponse(self):
+            class Resp:
+                status = 200
+                def read(self): return b'{"status":"ok"}'
+            return Resp()
+
+        def close(self): pass
+
+    monkeypatch.setattr("agent_os.webhooks.PinnedIPHTTPConnection", FakeHTTPConnection)
+
+    sink_allowed = WebhookEventSink(
+        url="http://example.com/webhook", secret="sec", allow_insecure_http=True
+    )
+    assert sink_allowed._send_with_retry(event)
+    assert len(received) == 1
+
+    # Host in allowed_internal_hosts works even with allow_insecure_http=False
+    def internal_dns(*_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 80))]
+
+    monkeypatch.setattr("agent_os.webhooks.socket.getaddrinfo", internal_dns)
+    sink_internal = WebhookEventSink(
+        url="http://internal.corp/webhook",
+        secret="sec",
+        allowed_internal_hosts=["internal.corp"],
+        allow_insecure_http=False,
+    )
+    assert sink_internal._send_with_retry(event)
+    assert len(received) == 2
