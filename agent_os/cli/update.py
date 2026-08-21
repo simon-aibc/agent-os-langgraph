@@ -4,13 +4,14 @@ Supports:
 - Dry-run update check (`--check`)
 - Safe pre-update DB backups
 - Docker container detection vs Pip/Wheel environment
-- Optional automated execution with `--yes`
+- Optional automated execution with `--yes`, `--pull`, and `--reload`
 - Daemon reload guidance
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
@@ -31,6 +32,8 @@ from agent_os.permission_store import DEFAULT_PERMISSION_DB, PERMISSION_DB_ENV
 from agent_os.runs import _get_db_path as get_runs_db_path
 from agent_os.schedules import _get_db_path as get_sched_db_path
 from agent_os.update_check import check_for_update
+
+logger = logging.getLogger(__name__)
 
 
 def is_docker_environment() -> bool:
@@ -66,15 +69,15 @@ def run_pre_update_db_backups() -> list[str]:
             try:
                 # 1. Explicitly backup database before update
                 backup_path = backup_database(p)
-                if backup_path:
+                if backup_path and backup_path.exists():
                     backed_up.append(str(p))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"Could not create pre-update backup for {p}: {exc}")
             try:
                 # 2. Run schema migrations
                 run_migrations(p, migrations=migrations, baseline_version=1)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(f"Pre-update migration check failed for {p}: {exc}")
     return backed_up
 
 
@@ -110,28 +113,67 @@ def handle_update_command(
         for db in backed_up:
             out.print(f"  ✓ Verified/backed up database: {db}")
     else:
-        out.print("  • No local SQLite databases found to backup.")
+        out.print("  ✓ No active database files needed backup.")
 
-    out.print("\n[bold cyan]2. Update procedure:[/bold cyan]")
-    if is_docker_environment():
-        out.print("Detected Docker container runtime.")
-        out.print("To update the container image, run:")
-        out.print("  [bold yellow]docker compose pull && docker compose up -d[/bold yellow]")
-    else:
-        out.print("To update your Python package installation, run:")
-        out.print("  [bold yellow]pip install --upgrade agent-os-langgraph[/bold yellow]")
-        if getattr(args, "yes", False):
-            out.print("\n[bold cyan]Executing pip upgrade...[/bold cyan]")
+    in_docker = is_docker_environment()
+    yes_flag = getattr(args, "yes", False)
+
+    out.print("\n[bold cyan]2. Update Execution[/bold cyan]")
+    if in_docker:
+        out.print("[yellow]Detected Docker container runtime.[/yellow]")
+        out.print("To update your container, run on host:")
+        out.print("  [bold]docker compose pull && docker compose up -d[/bold]\n")
+        if yes_flag and getattr(args, "pull", False):
+            out.print("Executing `docker compose pull`...")
             try:
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "agent-os-langgraph"]
-                )
-                out.print("[bold green]✓ Successfully upgraded agent-os-langgraph[/bold green]")
+                subprocess.run(["docker", "compose", "pull"], check=False)
             except Exception as e:
-                out.print(f"[bold red]Failed to run pip upgrade: {e}[/bold red]")
-                return 1
+                out.print(f"[red]Failed to execute docker compose pull: {e}[/red]")
+    else:
+        out.print("[yellow]Detected pip / local Python runtime.[/yellow]")
+        upgrade_cmd = [
+            sys.executable,
+            "-m",
+            "pip",
+            "install",
+            "--upgrade",
+            "agent-os-langgraph",
+        ]
+        if yes_flag:
+            out.print(f"Running: {' '.join(upgrade_cmd)}")
+            res = subprocess.run(upgrade_cmd, check=False)
+            if res.returncode != 0:
+                out.print(
+                    f"[bold red]Upgrade failed with exit code {res.returncode}[/bold red]"
+                )
+                return res.returncode
+            out.print(
+                "[bold green]Successfully upgraded agent-os-langgraph![/bold green]"
+            )
+        else:
+            out.print("To upgrade, execute:")
+            out.print("  [bold]pip install --upgrade agent-os-langgraph[/bold]")
+            out.print("Or re-run with `--yes`:")
+            out.print("  [bold]agent-os update --yes[/bold]")
 
-    out.print("\n[bold cyan]3. Post-update instructions:[/bold cyan]")
-    out.print("If you run the background daemon or web server, restart it now:")
-    out.print("  [dim]pkill -f 'agent-os server' && agent-os server[/dim]\n")
+    out.print("\n[bold cyan]3. Service Reload[/bold cyan]")
+    uid = os.getuid() if hasattr(os, "getuid") else 1000
+    kickstart_cmd = [
+        "launchctl",
+        "kickstart",
+        "-k",
+        f"gui/{uid}/com.simon.agentos",
+    ]
+    if getattr(args, "reload", False):
+        out.print(f"Reloading daemon: {' '.join(kickstart_cmd)}")
+        try:
+            subprocess.run(kickstart_cmd, check=False)
+        except Exception as e:
+            out.print(f"[yellow]Daemon reload note: {e}[/yellow]")
+    else:
+        out.print("If running as a background service, restart with:")
+        out.print(f"  [bold]launchctl kickstart -k gui/{uid}/com.simon.agentos[/bold]")
+        out.print("Or restart the server manually:")
+        out.print("  [dim]pkill -f 'agent-os serve' && agent-os serve[/dim]\n")
+
     return 0

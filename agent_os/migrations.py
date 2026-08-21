@@ -167,7 +167,7 @@ def _apply_statement(conn: sqlite3.Connection, sql: str) -> None:
     conn.execute(clean)
 
 
-def backup_database(db_path: str | Path, version: int = 1) -> Path | None:
+def backup_database(db_path: str | Path, version: int | None = None) -> Path | None:
     """Create a backup of the DB file before applying migrations.
 
     WAL-aware: Executes PRAGMA wal_checkpoint(TRUNCATE) before copying to flush
@@ -183,6 +183,14 @@ def backup_database(db_path: str | Path, version: int = 1) -> Path | None:
     path = Path(path_str).resolve()
     if not path.exists() or not path.is_file():
         return None
+
+    if version is None:
+        try:
+            with contextlib.closing(sqlite3.connect(str(path), timeout=5.0)) as v_conn:
+                row = v_conn.execute("PRAGMA user_version").fetchone()
+                version = int(row[0]) if row else 1
+        except Exception:
+            version = 1
 
     backup_path = path.with_name(f"{path.name}.bak-{version}")
 
