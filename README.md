@@ -1,15 +1,15 @@
-# Agent OS LangGraph
+# Agent OS
 
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11-3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
 [![Release](https://img.shields.io/badge/release-v2.4.0-green.svg)](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0)
-![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
+[![Typed](https://img.shields.io/badge/types-py.typed-informational.svg)](agent_os/api)
 
-> **Agent OS LangGraph: Everything is a Plugin.**<br>
-> An open-source, local-first backbone for building durable, controllable multi-agent systems with LangGraph.
+> **Agent OS: Everything is a Plugin.**<br>
+> An open-source, local-first Operating System and extensible harness for autonomous AI agents.
 
-Agent OS LangGraph provides an auditable, self-hosted reference harness featuring deterministic tool dispatch, read-only architect planning, human approval gates, sandbox-scoped execution, SQLite checkpoints, durable run ledgers, anti-SSRF webhook egress, and a stable extension plugin system.
+Agent OS is an auditable, self-hostable agent operating system providing deterministic fast-path execution, read-only architect planning, human approval governance, immutable policy floors, memory retrieval lifecycles, anti-SSRF signed event egress, and a modular plugin runtime. Under the hood, stateful graph execution and checkpointing are powered by LangGraph.
 
 **Current release:** [v2.4.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0) |
 [Changelog](CHANGELOG.md) |
@@ -23,63 +23,65 @@ Agent OS LangGraph provides an auditable, self-hosted reference harness featurin
 
 ## Table of Contents
 
-1. [Architecture](#architecture)
+1. [Core OS Primitives](#core-os-primitives)
 2. [Everything is a Plugin](#everything-is-a-plugin)
 3. [Quickstart](#quickstart)
-4. [Usage Guide](#usage-guide)
-5. [Self-Hosting & Docker](#self-hosting--docker)
-6. [Testing & Conformance Kit](#testing--conformance-kit)
-7. [Security & Trust Boundaries](#security--trust-boundaries)
-8. [Contributing & Development](#contributing--development)
+4. [Usage & Operating Modes](#usage--operating-modes)
+5. [Self-Hosting & Operations](#self-hosting--operations)
+6. [Extension Conformance Kit](#extension-conformance-kit)
+7. [Security & Governance Invariants](#security--governance-invariants)
+8. [Development & Contributing](#development--contributing)
 9. [License](#license)
 
 ---
 
-## Architecture
+## Core OS Primitives
 
-Agent OS separates agent reasoning into bounded, observable stages:
+Agent OS organizes autonomous agent operations into distinct operating system subsystems:
 
-- **Deterministic Fast-Path**: Exact low-risk tool invocations execute immediately without invoking an LLM.
-- **Architect Planning**: Complex or ambiguous goals escalate to a read-only architect that produces structured execution proposals.
-- **Human Gate & Policy Floor**: Side-effect proposals require approval; non-bypassable policy floors enforce hard safety denials.
-- **Sandboxed Execution**: Side effects execute only within configured workspace sandboxes.
-- **Durable Checkpoints & Audit**: Graph execution states, run ledgers, permission rules, and observation evidence persist across restarts in WAL-mode SQLite databases.
+- **Kernel / Deterministic Fast-Path**: Exact, low-risk tool operations execute immediately with zero model latency and zero token cost.
+- **Architect & Planning Subsystem**: Ambiguous or high-complexity tasks escalate to a read-only architect that produces structured execution proposals.
+- **Governance & Policy Floor**: Side-effect proposals require approval; non-bypassable policy floors enforce strict security constraints regardless of policy mode.
+- **Process Isolation & Sandbox Execution**: Side effects execute strictly within configured workspace sandbox boundaries.
+- **Memory & Retrieval Subsystem**: Multi-vault connectors (Markdown, G-Brain, SQLite, vectors) with cold-start indexing lifecycles (`IndexableMemory`) and non-blocking context injection (`ContextProvider`).
+- **Persistence & Audit Subsystem**: SQLite state stores with live additive migrations, WAL-checkpoint backups, strategy assignment audit traces, and actor provenance (`Principal`).
+- **IPC & Event Egress**: Real-time Server-Sent Events (SSE), local cron/interval scheduling, and DNS-rebinding-safe HMAC-signed webhooks (`EventSink`).
 
 ```mermaid
 flowchart TD
-    START(["START"]) --> planner["planner (Context Injection)"]
-    planner --> supervisor["supervisor"]
-    supervisor -->|"deterministic task"| dispatcher["tool_dispatcher"]
-    dispatcher -->|"success"| END(["END"])
-    dispatcher -->|"ambiguous / complex"| supervisor
-    supervisor -->|"escalate"| architect["architect (Read-Only)"]
-    architect --> gate["human_gate (Policy Floor)"]
+    START(["User Request"]) --> planner["Planner (Context Injection & Retrieval)"]
+    planner --> supervisor["Supervisor Engine"]
+    supervisor -->|"deterministic fast-path"| dispatcher["Tool Dispatcher (Kernel Mode)"]
+    dispatcher -->|"success"| END(["Task Complete"])
+    dispatcher -->|"complex / ambiguous"| supervisor
+    supervisor -->|"escalate"| architect["Architect (Read-Only Planning)"]
+    architect --> gate["Human Gate (Immutable Policy Floor)"]
     gate -->|"approved"| supervisor
     gate -->|"rejected"| architect
-    supervisor -->|"execute"| executor["executor (Sandbox Scoped)"]
+    supervisor -->|"execute"| executor["Executor (Sandbox Scoped)"]
     executor --> supervisor
-    supervisor -->|"done"| END
+    supervisor -->|"complete"| END
 ```
 
 ---
 
 ## Everything is a Plugin
 
-Agent OS exposes a frozen, stable public facade under `agent_os.api` with 7 standard plugin entry-point groups:
+Agent OS exposes a frozen, identity-preserving public facade under `agent_os.api` with 7 standard plugin entry-point groups:
 
-| Plugin Group | Protocol / Base | Description |
+| Plugin Group | Protocol / Contract | Description |
 |---|---|---|
-| `agent_os.connectors` | `Connector` | Custom action tools and external API adapters |
-| `agent_os.memory_connectors` | `MemoryConnector`, `WritableMemory`, `IndexableMemory` | Long-term memory vaults (Markdown, G-Brain, SQLite, vector) |
+| `agent_os.connectors` | `Connector` | Custom action tools, CLI integrations, and external API connectors |
+| `agent_os.memory_connectors` | `MemoryConnector`, `WritableMemory`, `IndexableMemory` | Long-term memory vaults, knowledge bases, and vector storage |
 | `agent_os.backends` | `BackendAdapter` | Model execution backends (Claude Code, Codex CLI, LiteLLM, Ollama) |
-| `agent_os.policies` | `PolicyEngine` | Custom policy evaluators and organizational approval rules |
-| `agent_os.skill_packages` | `SkillPackageLoader` | Reusable skill bundles and prompt workflows |
-| `agent_os.context_providers` | `ContextProvider` | Pre-planner retrieval and dynamic context injection hooks |
-| `agent_os.event_sinks` | `EventSink` | Lifecycle run event egress and signed webhook delivery |
+| `agent_os.policies` | `PolicyEngine` | Custom policy evaluators, role constraints, and governance rules |
+| `agent_os.skill_packages` | `SkillPackageLoader` | Reusable skill bundles, domain workflows, and instruction sets |
+| `agent_os.context_providers` | `ContextProvider` | Pre-planner retrieval hooks and dynamic context injection |
+| `agent_os.event_sinks` | `EventSink` | Lifecycle run event egress, telemetry, and signed webhook sinks |
 
-### Stable Public API
+### Authoring an Agent OS Plugin
 
-All third-party extensions build directly against `agent_os.api`:
+Third-party extensions build directly against `agent_os.api` without private internals:
 
 ```python
 from agent_os.api import (
@@ -91,7 +93,20 @@ from agent_os.api import (
     MemoryConnector,
     PluginRegistry,
     Principal,
+    SUPPORTED_SIDE_EFFECTS,
 )
+
+class MyCustomConnector:
+    name = "my_tool"
+
+    def capabilities(self) -> list[str]:
+        return ["custom_action"]
+
+    def describe_side_effect(self, action: str, arguments: dict) -> str:
+        return "read"
+
+    def invoke(self, action: str, arguments: dict) -> dict:
+        return {"status": "ok"}
 ```
 
 ---
@@ -102,7 +117,7 @@ from agent_os.api import (
 
 - Python 3.11 or 3.12
 - Git
-- Docker with Compose v2 (optional, for local self-hosted stack)
+- Docker with Compose v2 (optional, for self-hosted container deployment)
 
 ### 1. Installation
 
@@ -115,9 +130,9 @@ source .venv/bin/activate
 pip install -e ".[dev,serve]"
 ```
 
-### 2. Zero-LLM Deterministic Fast-Path
+### 2. Zero-LLM Fast-Path Execution
 
-Run exact tool commands with zero model dependencies:
+Execute deterministic operations directly through the kernel fast-path:
 
 ```bash
 agent-os "read_file README.md" --thread-id quickstart --sandbox .
@@ -128,12 +143,10 @@ Output:
 [THREAD] quickstart
 [SUPERVISOR] -> tool_dispatcher
 [TOOL] read_file({"path": "README.md"})
-[RESULT] # Agent OS LangGraph ...
+[RESULT] # Agent OS ...
 ```
 
-### 3. Configure LLM Model Roles
-
-Copy the environment template and set your model backends:
+### 3. Configure Model Roles
 
 ```bash
 cp .env.example .env
@@ -147,7 +160,7 @@ LLM_ARCHITECT="anthropic/claude-opus-4-8"
 LLM_EXECUTOR="openai/gpt-5.5"
 ```
 
-You can also use authenticated subscription CLIs:
+Subscription CLIs are also supported out of the box:
 
 ```bash
 LLM_ARCHITECT=cli/claude-code
@@ -156,65 +169,65 @@ LLM_EXECUTOR=cli/codex
 
 ---
 
-## Usage Guide
+## Usage & Operating Modes
 
-### Architect + Human Approval Gate
+### Architect Planning & Approval Gates
 
-When a goal requires complex changes, the system creates a proposal and pauses for interactive or API review:
+When tasks require file modifications, code creation, or complex workflows, Agent OS builds a formal proposal and waits for approval:
 
 ```bash
-agent-os "add docstrings to math_util.py and verify syntax" \
-  --thread-id docstring-task \
+agent-os "add type annotations to math_util.py and run tests" \
+  --thread-id type-check-task \
   --sandbox ./sandbox
 ```
 
-At the approval prompt, choose `approved`, `session`, `always_approve`, or `rejected: <reason>`.
+At the approval prompt, choose `approved` (one-time), `session`, `always_approve` (learned rule), or `rejected: <reason>`.
 
 Interrupted runs resume seamlessly from SQLite checkpoints:
 
 ```bash
-agent-os --resume --thread-id docstring-task --sandbox ./sandbox
+agent-os --resume --thread-id type-check-task --sandbox ./sandbox
 ```
 
 ### Multi-Turn Chat, Sessions & Schedules
 
 ```bash
-# Interactive multi-turn conversation
-agent-os chat --thread-id daily-session
+# Interactive multi-turn CLI session
+agent-os chat --thread-id dev-session
 
-# Session inspection
+# Inspect active sessions and audit trails
 agent-os sessions list
-agent-os sessions inspect daily-session
+agent-os sessions inspect dev-session
 
-# Local cron/interval schedules
+# Local cron and interval background schedules
 agent-os schedule list
 ```
 
-### Self-Update & Migrations
+### Self-Update & Live Migrations
 
 ```bash
-# Check for latest updates against GitHub releases (cached)
+# Check latest updates against GitHub releases
 agent-os update --check
 
-# Execute upgrade with pre-migration database backup
+# Upgrade runtime with pre-migration database backup and daemon restart
 agent-os update --yes --reload
 ```
 
 ---
 
-## Self-Hosting & Docker
+## Self-Hosting & Operations
 
 ### Run with Docker Compose
 
-Start the Agent OS backend runtime and web console with a single command:
+Start the complete Agent OS backend and Web Operator Console:
 
 ```bash
 docker compose up -d
 ```
 
-- **Runtime API**: `http://127.0.0.1:4680`
+- **Agent OS Runtime API**: `http://127.0.0.1:4680`
 - **Operator Console**: `http://127.0.0.1:3000`
-- **API Health**: `http://127.0.0.1:4680/api/health`
+- **Health Check**: `http://127.0.0.1:4680/api/health`
 
 ### Run Runtime Server Locally
 
@@ -222,17 +235,17 @@ docker compose up -d
 agent-os serve --host 127.0.0.1 --port 4680
 ```
 
-Key endpoints:
-- `GET /api/health` — Runtime health and update cache status
+Core Runtime Endpoints:
+- `GET /api/health` — Runtime health and update cache
 - `POST /api/runs` — Trigger non-blocking asynchronous agent runs
-- `GET /api/runs/events` — Server-Sent Events (SSE) stream for live run output
-- `POST /api/runs/{run_id}/approve` — Submit approval or rejection for gated steps
+- `GET /api/runs/events` — Server-Sent Events (SSE) stream for live execution logs
+- `POST /api/runs/{run_id}/approve` — Submit gate decisions for suspended runs
 
 ---
 
-## Testing & Conformance Kit
+## Extension Conformance Kit
 
-Agent OS includes a dependency-light conformance testing kit under `agent_os.testing.conformance` for verifying custom plugins:
+Agent OS includes a lightweight testing kit under `agent_os.testing.conformance` to validate plugins in standalone CI:
 
 ```python
 from agent_os.testing.conformance import (
@@ -242,9 +255,9 @@ from agent_os.testing.conformance import (
     check_event_sink,
 )
 
-def test_my_custom_plugin():
-    my_sink = MyCustomEventSink()
-    check_event_sink(my_sink)
+def test_custom_plugin_conformance():
+    sink = MyCustomEventSink()
+    check_event_sink(sink)
 ```
 
 Run the complete test suite:
@@ -255,21 +268,20 @@ pytest -q
 
 ---
 
-## Security & Trust Boundaries
+## Security & Governance Invariants
 
-- **Immutable Policy Floor**: Hard safety constraints (such as `payment` and `privileged` actions) cannot be bypassed or overridden by plugins, even in permissive policy modes.
-- **DNS-Rebinding Safe Webhooks**: Webhook delivery validates IP addresses against loopback/private ranges and pins sockets with TLS SNI validation.
-- **Server-Trusted Actor Identity**: `Principal` provenance is resolved securely server-side to prevent HTTP header spoofing.
-- **Workspace Isolation**: Database files, permission rules, and observations are isolated per workspace.
+- **Non-Bypassable Policy Floors**: Hard safety constraints (e.g. `payment` or `privileged` actions) cannot be bypassed by plugins, even with `mode="off"`.
+- **Anti-SSRF DNS-Rebinding Protection**: Webhooks validate target IPs against loopback/private CIDRs, pin sockets to verified IPs, and preserve TLS SNI/certificate validation.
+- **Server-Trusted Actor Identity**: `Principal` provenance is resolved server-side to prevent header spoofing in multi-tenant environments.
+- **Workspace Isolation**: Database files, permission rules, and observation records are isolated per workspace path.
 
 ---
 
-## Contributing & Development
+## Development & Contributing
 
-We welcome contributions! Please review:
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Guidelines for code style, tests, and PR process.
-- [docs/EXTENDING.md](docs/EXTENDING.md) — Guide to authoring plugins, connectors, and policies.
-- [docs/architecture.md](docs/architecture.md) — Complete system architecture.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Contributing guidelines and development workflow.
+- [docs/EXTENDING.md](docs/EXTENDING.md) — Comprehensive guide to developing Agent OS plugins.
+- [docs/architecture.md](docs/architecture.md) — Deep-dive system architecture.
 
 ---
 
