@@ -1,3 +1,4 @@
+import contextlib
 import io
 from pathlib import Path
 
@@ -117,7 +118,7 @@ def test_existing_observations_table_migrates_task_signature_additively(
     conn.close()
 
     _store(db_path)
-    with sqlite3.connect(db_path) as migrated:
+    with contextlib.closing(sqlite3.connect(db_path)) as migrated:
         columns = {
             row[1] for row in migrated.execute("PRAGMA table_info(observations)")
         }

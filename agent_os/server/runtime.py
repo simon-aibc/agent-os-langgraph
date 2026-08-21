@@ -8,7 +8,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from agent_os.bindings import resolve_backend_binding
-from agent_os.connectors import GbrainConnector, MemoryConnector
+from agent_os.connectors import MemoryConnector
 from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
 from agent_os.observations import (
     observation_workspace_id,
@@ -93,6 +93,7 @@ def initial_state(
     return {
         "messages": [HumanMessage(content=task)],
         "task": task,
+        "run_id": run_id,
         "plan": None,
         "executor_output": None,
         "human_feedback": None,
@@ -131,7 +132,9 @@ def memory_connector() -> MemoryConnector:
     runtime = composed_workspace()
     if runtime is not None:
         return runtime.memory_connector
-    return GbrainConnector()
+    from agent_os.tools.memory_write import default_memory_connector
+
+    return default_memory_connector()
 
 
 def runtime_summary() -> dict[str, object]:

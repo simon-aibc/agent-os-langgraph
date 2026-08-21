@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import datetime as dt
 import json
+import logging
 import os
 import sqlite3
 import uuid
@@ -32,6 +33,9 @@ from agent_os.schedule_recurrence import (
     parse_interval,
     validate_cron,
 )
+from agent_os.stores.base import configure_sqlite_connection
+
+logger = logging.getLogger(__name__)
 
 # ── Public constants ────────────────────────────────────────────────
 
@@ -73,9 +77,7 @@ def _get_db_path() -> str:
 def _connect() -> sqlite3.Connection:
     """Open the scheduler DB with WAL + busy_timeout=30 000 ms."""
     conn = sqlite3.connect(_get_db_path(), timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+    return configure_sqlite_connection(conn, wal=True, busy_timeout_ms=30000)
 
 
 def _init_schedules_db() -> None:

@@ -1,5 +1,4 @@
-"""Backend adapter contracts, registry, and built-in CLI adapters."""
-
+import inspect
 import json
 import tempfile
 from collections.abc import Callable
@@ -15,6 +14,7 @@ from agent_os.cli_backends import (
     run_cli_command,
     write_schema_file,
 )
+from agent_os.plugins import PluginError, PluginRegistry
 from agent_os.schemas import (
     CodingPlan,
     CodingResult,
@@ -24,6 +24,7 @@ from agent_os.schemas import (
 from agent_os.state import SimonState
 
 BackendRole = Literal["architect", "executor"]
+BACKEND_ROLES = frozenset({"architect", "executor"})
 BackendArtifact = PlanArtifact | ExecutionResult
 BackendInvoker = Callable[[SimonState], BackendArtifact]
 
@@ -361,13 +362,88 @@ class AntigravityAdapter:
         )
 
 
-def build_default_registry() -> BackendRegistry:
-    """Build the built-in registry without mutable global state."""
+BUILT_IN_BACKEND_NAMES: frozenset[str] = frozenset(
+    {"claude-code", "codex", "antigravity"}
+)
+
+
+def build_default_registry(
+    plugin_registry: PluginRegistry | None = None,
+) -> BackendRegistry:
+    """Build the backend registry with built-in adapters and discovered plugins."""
+    if plugin_registry is None:
+        plugin_registry = PluginRegistry()
+
+    # 1. Unconditionally discover plugins to protect built-in names
+    try:
+        discovered_backends = plugin_registry.discover("agent_os.backends")
+    except PluginError as exc:
+        raise ValueError(
+            f"Plugin discovery failed for group 'agent_os.backends': {exc}"
+        ) from exc
+
+    for ep_name in discovered_backends:
+        if ep_name in BUILT_IN_BACKEND_NAMES:
+            raise ValueError(
+                f"Plugin in 'agent_os.backends' cannot override built-in backend '{ep_name}'."
+            )
 
     registry = BackendRegistry()
     registry.register(ClaudeCodeAdapter())
     registry.register(CodexAdapter())
     registry.register(AntigravityAdapter())
+
+    # 2. Instantiate and register discovered backend adapter plugins
+    for ep_name in discovered_backends:
+        try:
+            plugin_obj = plugin_registry.resolve("agent_os.backends", ep_name)
+        except PluginError as exc:
+            raise ValueError(
+                f"Failed to load backend plugin '{ep_name}': {exc}"
+            ) from exc
+
+        if isinstance(plugin_obj, type) or (
+            callable(plugin_obj) and not hasattr(plugin_obj, "name")
+        ):
+            sig = inspect.signature(plugin_obj)
+            required_params = [
+                p.name
+                for p in sig.parameters.values()
+                if p.default is inspect.Parameter.empty
+                and p.kind
+                not in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                )
+            ]
+            if required_params:
+                raise ValueError(
+                    f"Backend plugin '{ep_name}' in group 'agent_os.backends' requires unsupported arguments: "
+                    f"{required_params}. Backend factory must accept 0 required arguments."
+                )
+            try:
+                adapter_inst = plugin_obj()
+            except Exception as exc:
+                raise ValueError(
+                    f"Failed to instantiate backend plugin '{ep_name}': {exc}"
+                ) from exc
+        else:
+            adapter_inst = plugin_obj
+
+        if not (
+            hasattr(adapter_inst, "name")
+            and isinstance(adapter_inst.name, str)
+            and hasattr(adapter_inst, "binary_name")
+            and hasattr(adapter_inst, "supported_roles")
+            and callable(getattr(adapter_inst, "build_invoker", None))
+            and callable(getattr(adapter_inst, "authentication_status", None))
+        ):
+            raise ValueError(
+                f"Backend plugin '{ep_name}' does not satisfy the BackendAdapter interface."
+            )
+
+        registry.register(adapter_inst)
+
     return registry
 
 

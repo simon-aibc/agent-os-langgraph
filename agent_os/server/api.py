@@ -27,6 +27,7 @@ from agent_os.observations import (
     observation_workspace_id,
     open_observation_store,
 )
+from agent_os.principal import LocalPrincipalResolver
 from agent_os.public_concierge import (
     PublicChatRequest,
     PublicChatResponse,
@@ -36,15 +37,6 @@ from agent_os.public_concierge import (
 from agent_os.public_concierge_ai import (
     PublicConciergeAI,
     public_concierge_runtime_summary,
-)
-from agent_os.runs import (
-    append_event,
-    create_run,
-    get_run,
-    list_events,
-    list_runs,
-    set_status,
-    transition_status,
 )
 from agent_os.sandbox import resolve_workspace_root
 from agent_os.schedule_models import ScheduleInput
@@ -68,6 +60,7 @@ from agent_os.skill_authoring import (
 )
 from agent_os.skill_candidates import mine_skill_candidates
 from agent_os.skills import SkillRegistry
+from agent_os.stores import SqliteRunStore
 from agent_os.strategies import strategies_for
 from agent_os.update_check import check_for_update, read_cached_update
 
@@ -239,6 +232,31 @@ def _execution_token_from_connection(connection: Request | WebSocket) -> str:
     return token
 
 
+def _check_private_api_access(connection: Request | WebSocket) -> tuple[str | None, dict[str, Any]]:
+    """Authorize private runtime endpoints and extract trusted auth state."""
+    origin = connection.headers.get("origin", "").strip()
+    if origin and origin not in _cors_origins:
+        return "Origin is not allowed", {}
+
+    required_token = os.getenv(EXECUTION_TOKEN_ENV, "").strip()
+    client = connection.client
+    client_host = client.host if client is not None else None
+    is_loopback = _is_loopback_client(client_host)
+
+    if not required_token:
+        if is_loopback:
+            return None, {"authenticated_with_token": False, "is_loopback": True}
+        return (
+            "Private execution API requires AGENT_OS_EXECUTION_TOKEN "
+            "for non-loopback clients"
+        ), {}
+
+    supplied_token = _execution_token_from_connection(connection)
+    if not hmac.compare_digest(supplied_token, required_token):
+        return "Forbidden", {}
+    return None, {"authenticated_with_token": True, "is_loopback": is_loopback}
+
+
 def _private_api_access_error(connection: Request | WebSocket) -> str | None:
     """Authorize private runtime endpoints without exposing them to the web.
 
@@ -247,25 +265,8 @@ def _private_api_access_error(connection: Request | WebSocket) -> str | None:
     from a configured operator origin, because CORS does not secure WebSocket
     handshakes and does not prevent cross-site form posts.
     """
-    origin = connection.headers.get("origin", "").strip()
-    if origin and origin not in _cors_origins:
-        return "Origin is not allowed"
-
-    required_token = os.getenv(EXECUTION_TOKEN_ENV, "").strip()
-    client = connection.client
-    client_host = client.host if client is not None else None
-    if not required_token:
-        if _is_loopback_client(client_host):
-            return None
-        return (
-            "Private execution API requires AGENT_OS_EXECUTION_TOKEN "
-            "for non-loopback clients"
-        )
-
-    supplied_token = _execution_token_from_connection(connection)
-    if not hmac.compare_digest(supplied_token, required_token):
-        return "Forbidden"
-    return None
+    error, _ = _check_private_api_access(connection)
+    return error
 
 
 @app.middleware("http")
@@ -274,9 +275,15 @@ async def protect_private_api(request: Request, call_next: Any) -> Any:
     if path.startswith("/api/") and not (
         path == "/api/health" or path.startswith("/api/public/")
     ):
-        error = _private_api_access_error(request)
+        error, auth_state = _check_private_api_access(request)
         if error is not None:
             return JSONResponse(status_code=403, content={"detail": error})
+        for key, val in auth_state.items():
+            setattr(request.state, key, val)
+    else:
+        request.state.authenticated_with_token = False
+        client = request.client
+        request.state.is_loopback = _is_loopback_client(client.host if client else None)
     return await call_next(request)
 
 
@@ -517,6 +524,9 @@ def get_graph_data(limit: int = GRAPH_MAX_NODES) -> dict[str, list[dict[str, Any
         return {"nodes": [], "edges": []}
 
 
+_run_store = SqliteRunStore()
+
+
 def _start_run_task(
     run_id: str,
     thread_id: str,
@@ -536,10 +546,10 @@ def _start_run_task(
                 run_kwargs["strategy_override"] = strategy_override
             await execute_run(run_id, thread_id, task, **run_kwargs)
         except asyncio.CancelledError:
-            run = get_run(run_id)
+            run = _run_store.get_run(run_id)
             if run is not None and run["status"] not in TERMINAL_RUN_STATUSES:
-                set_status(run_id, "cancelled", ended=True)
-                append_event(run_id, "status", {"status": "cancelled"})
+                _run_store.set_status(run_id, "cancelled", ended=True)
+                _run_store.append_event(run_id, "status", {"status": "cancelled"})
             raise
         finally:
             ACTIVE_RUN_TASKS.pop(run_id, None)
@@ -551,7 +561,10 @@ def _start_run_task(
 
 
 @app.post("/api/runs")
-async def create_run_endpoint(request: CreateRunRequest) -> dict[str, str]:
+async def create_run_endpoint(
+    request: CreateRunRequest,
+    http_request: Request,
+) -> dict[str, str]:
     if request.strategy_id is not None:
         allowed = {
             item.strategy_id
@@ -566,7 +579,24 @@ async def create_run_endpoint(request: CreateRunRequest) -> dict[str, str]:
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     thread_id = request.thread_id or str(uuid.uuid4())
-    run_id = create_run(thread_id, workspace, request.task)
+    principal = LocalPrincipalResolver().resolve(http_request)
+    run_id = _run_store.create_run(
+        thread_id,
+        workspace,
+        request.task,
+        workspace_id=workspace,
+        principal=principal,
+    )
+    from agent_os.events import emit_run_lifecycle_event
+
+    emit_run_lifecycle_event(
+        "run.created",
+        run_id=run_id,
+        workspace_id=workspace,
+        status="queued",
+        principal=principal,
+        thread_id=thread_id,
+    )
     _start_run_task(
         run_id,
         thread_id,
@@ -584,12 +614,12 @@ def list_runs_endpoint(
 ) -> list[dict[str, Any]]:
     return [
         _with_result_self_check(run)
-        for run in list_runs(status=status, workspace=workspace, limit=limit)
+        for run in _run_store.list_runs(status=status, workspace=workspace, limit=limit)
     ]
 
 
 def _latest_result_self_check(run_id: str) -> dict[str, Any] | None:
-    for event in reversed(list_events(run_id)):
+    for event in reversed(_run_store.list_events(run_id)):
         if event["kind"] != "result" or not isinstance(event["payload"], dict):
             continue
         self_check = event["payload"].get("self_check")
@@ -608,7 +638,7 @@ def _with_result_self_check(run: dict[str, Any]) -> dict[str, Any]:
 
 
 def _latest_interrupt_prompt(run_id: str) -> object | None:
-    for event in reversed(list_events(run_id)):
+    for event in reversed(_run_store.list_events(run_id)):
         if event["kind"] == "interrupt":
             payload = event["payload"]
             if isinstance(payload, dict):
@@ -619,7 +649,7 @@ def _latest_interrupt_prompt(run_id: str) -> object | None:
 
 @app.get("/api/runs/{run_id}")
 def get_run_endpoint(run_id: str) -> dict[str, Any]:
-    run = get_run(run_id)
+    run = _run_store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     run = _with_result_self_check(run)
@@ -629,12 +659,21 @@ def get_run_endpoint(run_id: str) -> dict[str, Any]:
     return run
 
 
+@app.get("/api/runs/{run_id}/approvals")
+def get_run_approvals_endpoint(run_id: str) -> list[dict[str, Any]]:
+    run = _run_store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return _run_store.list_approvals(run_id)
+
+
 @app.post("/api/runs/{run_id}/approve")
 async def approve_run_endpoint(
     run_id: str,
     request: ApproveRunRequest,
+    http_request: Request,
 ) -> dict[str, str]:
-    run = get_run(run_id)
+    run = _run_store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if run["status"] != "interrupted":
@@ -642,11 +681,31 @@ async def approve_run_endpoint(
             return {"run_id": run_id, "status": "running"}
         raise HTTPException(status_code=409, detail="Run is not interrupted")
 
-    if not transition_status(run_id, expected="interrupted", status="running"):
-        latest = get_run(run_id)
+    principal = LocalPrincipalResolver().resolve(http_request)
+    if not _run_store.record_approval_and_transition(
+        run_id,
+        decision="approved",
+        actor_id=principal.id,
+        actor_kind=principal.kind,
+        on_behalf_of=principal.on_behalf_of,
+        reason=request.feedback or None,
+        expected="interrupted",
+        status="running",
+    ):
+        latest = _run_store.get_run(run_id)
         if latest is not None and latest["status"] == "running":
             return {"run_id": run_id, "status": "running"}
         raise HTTPException(status_code=409, detail="Run is not interrupted")
+    from agent_os.events import emit_run_lifecycle_event
+
+    emit_run_lifecycle_event(
+        "run.approved",
+        run_id=run_id,
+        workspace_id=str(run.get("workspace_id") or run.get("workspace") or "default"),
+        status="running",
+        principal=principal,
+        thread_id=str(run.get("thread_id") or ""),
+    )
     _start_run_task(
         run_id,
         run["thread_id"],
@@ -657,18 +716,39 @@ async def approve_run_endpoint(
 
 
 @app.post("/api/runs/{run_id}/cancel")
-async def cancel_run_endpoint(run_id: str) -> dict[str, str]:
-    run = get_run(run_id)
+async def cancel_run_endpoint(run_id: str, request: Request) -> dict[str, str]:
+    run = _run_store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     if run["status"] in TERMINAL_RUN_STATUSES:
         raise HTTPException(status_code=409, detail="Run is already terminal")
 
+    principal = LocalPrincipalResolver().resolve(request)
+    if not _run_store.record_cancellation_and_transition(
+        run_id,
+        actor_id=principal.id,
+        actor_kind=principal.kind,
+        on_behalf_of=principal.on_behalf_of,
+    ):
+        latest = _run_store.get_run(run_id)
+        if latest is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=409, detail="Run is already terminal")
+
     active_task = ACTIVE_RUN_TASKS.get(run_id)
     if active_task is not None and not active_task.done():
         active_task.cancel()
-    set_status(run_id, "cancelled", ended=True)
-    append_event(run_id, "status", {"status": "cancelled"})
+    _run_store.append_event(run_id, "status", {"status": "cancelled"})
+    from agent_os.events import emit_run_lifecycle_event
+
+    emit_run_lifecycle_event(
+        "run.cancelled",
+        run_id=run_id,
+        workspace_id=str(run.get("workspace_id") or run.get("workspace") or "default"),
+        status="cancelled",
+        principal=principal,
+        thread_id=str(run.get("thread_id") or ""),
+    )
     from agent_os.policy import LocalPolicy
 
     LocalPolicy.clear_session(run_id)
@@ -677,21 +757,21 @@ async def cancel_run_endpoint(run_id: str) -> dict[str, str]:
 
 @app.get("/api/runs/{run_id}/events")
 def get_run_events(run_id: str, after: int = 0) -> StreamingResponse:
-    if get_run(run_id) is None:
+    if _run_store.get_run(run_id) is None:
         raise HTTPException(status_code=404, detail="Run not found")
 
     async def event_stream():
         last_seq = after
-        for event in list_events(run_id, after=last_seq):
+        for event in _run_store.list_events(run_id, after=last_seq):
             last_seq = event["seq"]
             yield f"data: {json.dumps(event)}\n\n"
 
         while True:
-            for event in list_events(run_id, after=last_seq):
+            for event in _run_store.list_events(run_id, after=last_seq):
                 last_seq = event["seq"]
                 yield f"data: {json.dumps(event)}\n\n"
 
-            run = get_run(run_id)
+            run = _run_store.get_run(run_id)
             if run is None or run["status"] in TERMINAL_RUN_STATUSES:
                 yield "event: end\ndata: {}\n\n"
                 return

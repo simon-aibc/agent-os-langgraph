@@ -1,104 +1,221 @@
 # Extending Agent OS
 
-Agent OS v2 guarantees compatibility only for the names in `agent_os.api`.
-Imports from other `agent_os.*` modules are implementation details and may change in a
-minor release. Existing public signatures and documented behavior remain compatible
-through v2; an incompatible change requires a v3 release, migration notes, and a
-reviewed update to the public API contract fixture.
+Agent OS v2 guarantees stability only for symbols exported from `agent_os.api`.
+Imports from internal `agent_os.*` modules are private implementation details and may change across minor releases.
 
-## Memory connectors
+---
 
-A memory connector is synchronous and read-only. Register one under an application
-chosen name:
+## 1. Extension Axes & Protocols
+
+Agent OS supports pluggable extension across multiple independent axes:
+
+### Memory Connectors (`MemoryConnector`, `WritableMemory`, `IndexableMemory`)
+- **`MemoryConnector`**: Synchronous read & search interface.
+- **`WritableMemory`**: Write interface (`write_note`, `describe_write_side_effect`, `supported_write_modes`).
+- **`IndexableMemory`**: Lifecycle indexing interface (`index`, `reindex`, `index_status`).
 
 ```python
-from agent_os.api import ConnectorRegistry
+from typing import Any
+from agent_os.api import MemoryConnector, MemoryHit
 
 
-class Notes:
+class NotesMemory:
     name = "notes"
 
-    def search(self, query: str, limit: int = 10) -> list[dict]:
-        return [{"slug": "welcome", "text": query}][:limit]
+    def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        return [
+            MemoryHit(ref="welcome.md", snippet=query, score=1.0).model_dump()
+        ][:limit]
 
-    def read_note(self, slug_or_path: str) -> dict:
-        return {"slug": slug_or_path, "text": "Hello"}
+    def read_note(self, ref: str) -> dict[str, Any]:
+        return {"ref": ref, "content": "Welcome note"}
 
-    def list_notes(self, filters: dict | None = None) -> list[dict]:
-        return [{"slug": "welcome"}]
-
-
-connectors = ConnectorRegistry()
-connectors.register("notes", Notes())
-notes = connectors.resolve("notes")
+    def list_notes(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        return [{"ref": "welcome.md", "title": "Welcome"}]
 ```
 
-Errors raised by connector implementations propagate to their caller. Connectors
-should return the documented dictionary/list shapes and must not hide writes behind
-these read methods.
+```python
+from typing import Any, Literal
+from agent_os.api import MemoryWriteResult, WritableMemory
 
-## Backend adapters
 
-Adapters declare the graph roles they support and return a synchronous invoker.
+class WritableNotesMemory:
+    name = "writable_notes"
+    supported_write_modes = frozenset({"create", "append", "overwrite"})
+
+    def describe_write_side_effect(self, ref: str, mode: str) -> str:
+        return "write"
+
+    def write_note(
+        self,
+        ref: str,
+        content: str,
+        frontmatter: dict[str, Any] | None = None,
+        mode: Literal["create", "append", "overwrite"] = "create",
+    ) -> MemoryWriteResult:
+        # Perform write logic...
+        return MemoryWriteResult(
+            ref=ref,
+            mode=mode,
+            bytes_written=len(content.encode("utf-8")),
+            committed=True,
+        )
+```
+
+### Action Connectors (`Connector`)
+Custom external tools and system integrations. Connectors declare their capabilities mapping and describe the side-effect category for each action:
 
 ```python
-from agent_os.api import AuthStatus, BackendRegistry, ExecutionResult
+from typing import Any
+from agent_os.api import Connector, ExecutionResult
 
 
-class LocalBackend:
-    name = "local"
-    binary_name = "local-agent"
+class CustomActionConnector:
+    name = "ops_tools"
+
+    def capabilities(self) -> dict[str, Any]:
+        return {"actions": ["fetch_metrics", "deploy_service"]}
+
+    def describe_side_effect(self, action: str) -> str:
+        if action == "fetch_metrics":
+            return "read"
+        return "write"  # Must be one of the 7-value taxonomy
+
+    def invoke(self, action: str, args: dict[str, Any]) -> ExecutionResult:
+        return ExecutionResult(status="completed", outputs={"status": "ok"})
+```
+
+### Pre-Planner Context Providers (`ContextProvider`)
+Synchronously fetch contextual knowledge (e.g. database schemas, company glossaries) before planner execution without blocking the event loop:
+
+```python
+from agent_os.api import ContextBlock, ContextProvider, Principal
+
+
+class SchemaContextProvider:
+    name = "db_schema"
+
+    def provide(
+        self,
+        task: str,
+        *,
+        budget_chars: int,
+        principal: Principal,
+        workspace_id: str,
+    ) -> list[ContextBlock]:
+        return [
+            ContextBlock(
+                source="db_schema",
+                content="TABLE users (id INT, email TEXT);",
+            )
+        ]
+```
+
+### Backend Adapters (`BackendAdapter`)
+Integrate local or remote model execution backends:
+
+```python
+from agent_os.api import AuthStatus, BackendAdapter, BackendRole, ExecutionResult
+
+
+class CustomLLMBackend:
+    name = "custom_llm"
+    binary_name = "custom-agent"
     supported_roles = frozenset({"executor"})
     stub = False
 
-    def build_invoker(self, role):
+    def authentication_status(self) -> AuthStatus:
+        return AuthStatus(status="ok", detail="API key verified")
+
+    def build_invoker(self, role: BackendRole):
         if role not in self.supported_roles:
-            raise ValueError(f"unsupported role: {role}")
+            raise ValueError(f"Unsupported role: {role}")
 
         def invoke(state):
-            return ExecutionResult(status="completed", outputs={"task": state["task"]})
+            return ExecutionResult(status="completed", outputs={"result": "done"})
 
         return invoke
-
-    def authentication_status(self):
-        return AuthStatus(status="ok", detail="local")
-
-
-backends = BackendRegistry()
-backends.register(LocalBackend())
-adapter = backends.resolve("executor", "local")
 ```
 
-Authentication details must be safe to display and must never contain credentials.
-Unsupported roles and invalid output should fail explicitly rather than silently
-falling back to another backend.
-
-## Policies
-
-Policies synchronously decide whether a proposed action is allowed, denied, or needs
-approval. `apply_policy` executes only an allowed proposal; approval uses the runtime's
-human-interrupt path.
+### Event Egress Sinks (`EventSink`)
+Export real-time lifecycle event notifications (`run.created`, `run.interrupted`, `run.approved`, `run.completed`, `run.failed`, `run.cancelled`):
 
 ```python
-from agent_os.api import PolicyDecision, apply_policy
+from typing import Any
+from agent_os.api import EventSink
 
 
-class ReadOnlyPolicy:
-    def evaluate(self, proposal, *, workspace=None, context=None):
-        decision = "allow" if proposal.side_effect in {"none", "read"} else "deny"
-        return PolicyDecision(decision=decision, policy_id="read-only")
+class ConsoleEventSink:
+    name = "console_audit"
+
+    def emit(self, event: dict[str, Any]) -> None:
+        print(f"Lifecycle event: {event['event']} on run {event['run_id']}")
+```
+
+---
+
+## 2. Plugin Discovery & Entry Points
+
+Third-party packages register extensions in `pyproject.toml` using standard Python entry points:
+
+| Extension Group | Protocol | Description |
+|---|---|---|
+| `agent_os.connectors` | `Connector` | Custom domain action tools and integrations |
+| `agent_os.memory_connectors` | `MemoryConnector` | Custom memory and knowledge store connectors |
+| `agent_os.backends` | `BackendAdapter` | Custom architect and executor model backends |
+| `agent_os.policies` | `PolicyEngine` | Custom policy evaluation and governance engines |
+| `agent_os.skill_packages` | `SkillPackageLoader` | Standalone packaged skills and tools |
+| `agent_os.context_providers` | `ContextProvider` | Pre-planner context injection providers |
+| `agent_os.event_sinks` | `EventSink` | Lifecycle event egress sinks (e.g. webhooks, audit) |
+
+Example `pyproject.toml`:
+```toml
+[project.entry-points."agent_os.context_providers"]
+db_schema = "my_ext.context:SchemaContextProvider"
+
+[project.entry-points."agent_os.event_sinks"]
+datadog = "my_ext.events:DatadogEventSink"
+```
+
+### Discovery & Collision Policy
+- **Fail-Closed Loading**: If a configured plugin fails to import or satisfy its protocol, Agent OS raises an explicit error and halts.
+- **Built-in Name Protection**: Third-party plugins cannot override protected built-in names (`markdown`, `markdown_vault`, `gbrain`, `codex`, `claude`, `webhook`, `console`). Collisions trigger an immediate fail-closed error.
+
+---
+
+## 3. Policies & Safety Boundaries
+
+Policies synchronously decide whether a proposed action is allowed, denied, or requires human approval. `apply_policy` executes only an allowed proposal; approval uses the runtime's human-interrupt path.
+
+```python
+from typing import Any
+from agent_os.api import ActionProposal, PolicyDecision, PolicyEngine, apply_policy
 
 
-# result = apply_policy(ReadOnlyPolicy(), proposal, execute_fn=execute)
+class CustomReadOnlyPolicy:
+    def evaluate(
+        self,
+        proposal: ActionProposal,
+        *,
+        workspace: Any = None,
+        context: Any = None,
+    ) -> PolicyDecision:
+        decision = "allow" if proposal.side_effect in {"none", "read"} else "require_approval"
+        return PolicyDecision(decision=decision, policy_id="custom-read-only")
 ```
 
 ### Policy Modes
-
-- **`manual` (default)**: Evaluates safely scoped learned memory rules, active session grants, built-in log/brief rules, and the 7-level taxonomy (`read`/`none` → `allow`, `write`/`network`/`communication` → `require_approval`, `payment`/`privileged` → `deny`). Requires interactive human approval for unknown low/medium actions.
+- **`manual` (default)**: Evaluates safely scoped learned memory rules, active session grants, built-in log/brief rules, and the 7-value taxonomy (`read`/`none` → `allow`, `write`/`network`/`communication` → `require_approval`, `payment`/`privileged` → `deny`). Requires interactive human approval for unknown low/medium actions.
 - **`smart`**: Operates as a tested alias of `manual` with identical safety boundaries.
-- **`off`**: Explicit **unsafe local-only escape hatch** that bypasses all policy checks and auto-allows all actions (including `payment` and `privileged`). Intended strictly for isolated sandbox testing.
+- **`off`**: Explicit **unsafe local-only escape hatch** intended strictly for isolated sandbox testing.
 
-### User-Taught Permission Learning
+### Policy Safety Boundary Invariants
+- **Additive Restrictions Only**: Custom policy plugins may add restrictions or require human approval.
+- **Hard Safety Floor**: High-risk taxonomy denials (`payment` and `privileged`) remain unconditionally denied. A custom policy plugin **cannot** override or bypass these built-in denials.
+
+---
+
+## 4. User-Taught Permission Learning
 
 Agent OS uses explicit, user-taught permission learning rather than autonomous self-learning:
 - **Approve once** (`approved`, `y`): Grants access only for the immediate action.
@@ -107,31 +224,14 @@ Agent OS uses explicit, user-taught permission learning rather than autonomous s
 - **Always deny** (`always_deny`): Persists a deny rule to SQLite across restarts.
 - **Reject** (`rejected`, `n`): Cancels the action execution.
 
-In this release, remembered rules deliberately apply **only** to `memory.write`.
-Each key includes the actual connector, write mode, and full note ref:
-
+Remembered rules deliberately apply **only** to `memory.write`. Each key includes the actual connector, write mode, and full note ref:
 ```text
 memory_write:write:<connector>:<create|append|overwrite>:<ref>
 ```
 
-For example, approval to create a note never authorizes overwriting that note,
-and a `markdown_vault` rule never authorizes a `gbrain` write. Generic file,
-network, and communication tools do not yet expose a canonical destination
-schema, so `session` and `always_*` are rejected for them; use one-time
-`approved` instead. `payment` and `privileged` are denied before any rule is
-read (except the explicitly unsafe `mode = "off"` escape hatch).
+For example, approval to create a note never authorizes overwriting that note, and a `markdown_vault` rule never authorizes a `gbrain` write. Generic file, network, and communication tools do not expose a canonical destination schema, so `session` and `always_*` are rejected for them; use one-time `approved` instead. `payment` and `privileged` are denied before any rule is read.
 
-The shipped native action is `memory_write [create|append|overwrite] <ref> :: <content>`.
-`MarkdownVaultConnector` supports all three modes. Gbrain currently exposes
-only an upsert (`put_page`), so it accepts only an explicit `overwrite`;
-`create` and `append` fail before prompting or saving a learned rule rather
-than silently overwriting a page.
-
-For a workspace, rules live in `<workspace>/permissions.db`. Set
-`AGENT_OS_PERMISSIONS_DB` to explicitly override that location. The composed
-workspace policy is bound into CLI graph streams and server runs, so a nested
-`gated_write()` uses the right workspace and session without callers having to
-manually thread an engine.
+For a workspace, rules live in `<workspace>/permissions.db`. Set `AGENT_OS_PERMISSIONS_DB` to explicitly override that location.
 
 Learned rules can be inspected and revoked via the CLI:
 ```bash
@@ -144,16 +244,11 @@ Or via the Runtime API:
 - `GET /api/permissions`
 - `DELETE /api/permissions/{permission_key}`
 
-The local CLI does not need an admin token. Runtime API management is disabled
-until `AGENT_OS_PERMISSIONS_ADMIN_TOKEN` is set; then send that token using
-`X-Admin-Token` or `Authorization: Bearer …`. This prevents an exposed server
-from becoming an unauthenticated permission-administration surface.
+---
 
-### Structured observation and outcome evidence
+## 5. Structured Observation & Outcome Evidence
 
-Terminal Runtime runs add one structured observation with `outcome_signal =
-unknown`. A completed run is **not** evidence of user acceptance. Operators
-may explicitly label the observation `accepted`, `rejected`, or `edited`:
+Terminal Runtime runs add one structured observation with `outcome_signal = unknown`. A completed run is **not** evidence of user acceptance. Operators may explicitly label the observation `accepted`, `rejected`, or `edited`:
 
 ```bash
 agent-os observations list --workspace path/to/workspace.toml
@@ -162,40 +257,16 @@ agent-os observations record-outcome <observation-id> --signal edited \
 ```
 
 The same data is available through the private execution API:
-
 - `GET /api/observations`
 - `POST /api/observations/{observation_id}/outcome`
 
-Stores live in `<workspace>/observations.db` (or standalone
-`./observations.db`), unless `AGENT_OS_OBSERVATIONS_DB` explicitly overrides
-the path. The records contain bounded operational metadata only; they never
-store the task, model output, tool arguments, or memory contents. For the
-`workflow` task kind, labelled outcomes can select only one fixed versioned
-architect strategy: `default-v1`, `verification-first-v1`, or
-`concise-plan-v1`. Raw outcome evidence is never placed in the architect
-prompt. Selection is deterministic: a valid explicit override wins; otherwise
-an evidence-backed winner needs at least five labels for both compared
-strategies, score at least 0.70, and lead at least 0.15; otherwise runs use
-atomic balanced exploration. Strategy selection never grants a permission,
-executes a tool, or changes execution safety constraints.
+Stores live in `<workspace>/observations.db` (or standalone `./observations.db`), unless `AGENT_OS_OBSERVATIONS_DB` explicitly overrides the path. The records contain bounded operational metadata only; they never store task prompt text, model output, tool arguments, or memory contents. Strategy assignment records maintain full audit provenance across workflow replays.
 
-Private Runtime API endpoints (runs, sessions, briefs, schedules, graph, and
-chat) are local-only by default. A non-loopback caller must configure
-`AGENT_OS_EXECUTION_TOKEN` and send it as `X-Execution-Token` or
-`Authorization: Bearer …`; `agent-os serve --host 0.0.0.0` refuses to start
-without it. Browser-originated requests must also use an exact origin listed in
-`AGENT_OS_CORS_ORIGINS`; this includes WebSocket handshakes and prevents a
-third-party page from submitting an approval to the local agent. For a browser
-WebSocket, offer `agent-os` and `agent-os-token.<base64url-token>` as
-subprotocols; the server selects only `agent-os`, so the token is not placed in
-a query string or echoed in the response.
+---
 
-Policy implementations are trusted code. They should be deterministic for the same
-proposal and context and should use `deny` for errors that cannot be safely recovered.
+## 6. Skill Packages
 
-## Skill packages
-
-A package is trusted local Python code with this exact layout:
+A skill package is trusted local Python code with this layout:
 
 ```text
 my_skill/
@@ -219,7 +290,7 @@ def hello(name: str = "world") -> str:
     return f"Hello, {name}"
 ```
 
-Load it with stable imports:
+Load it using `SkillPackageLoader` and `SkillRegistry`:
 
 ```python
 from pathlib import Path
@@ -230,18 +301,44 @@ SkillPackageLoader(skills).load_package(Path("my_skill"))
 result = skills.get("hello").invoke({"name": "Ada"})
 ```
 
-`name` and `version` are required. There must be at least one handler. Every handler
-needs a non-empty `match` list and a package-relative `module:function` entrypoint.
-The first match is canonical and the rest are aliases. Handlers are either LangChain
-`BaseTool` instances or plain callables invoked with keyword arguments. Malformed
-packages raise `ValueError` containing the manifest path; duplicate names and aliases
-are rejected by `SkillRegistry`. Loading executes Python code, so install packages only
-from trusted sources.
+`name` and `version` are required. There must be at least one handler. Every handler needs a non-empty `match` list and a package-relative `module:function` entrypoint. Handlers are either LangChain `BaseTool` instances or plain callables invoked with keyword arguments.
 
-## Typing and compatibility
+---
 
-The distribution includes `py.typed`. Type annotations are part of the v2 public
-contract; use a Python type checker against `agent_os.api`, but retain runtime error
-handling for third-party implementations. Async protocol variants, dependency
-installation, remote package discovery, graph internals, CLI/HTTP internals, and
-concrete built-in connectors are not stable extension APIs.
+## 7. Webhook & Event Sink Safety Guarantees
+
+The reference `WebhookEventSink` enforces strict security invariants:
+
+1. **Payload Privacy**: Webhook events contain sanitized operational metadata only (`event`, `run_id`, `workspace_id`, `status`, `timestamp`, `actor`, `references`). Payloads **never** include prompt text, model outputs, tool arguments/results, approval reasons, or secrets.
+2. **HMAC-SHA256 Signatures**: Payloads are signed with a shared secret using `X-AgentOS-Timestamp` and `X-AgentOS-Signature: sha256=<hex>`.
+3. **SSRF & DNS-Rebinding Protection**: Target hostnames are resolved immediately before connecting, every IP address is checked against private/loopback/internal ranges, and the connection is pinned directly to the validated IP. TLS SNI and server certificate validation use the original domain name.
+4. **Asynchronous Non-Blocking Offload**: Webhook deliveries execute in background threads with bounded retries and exponential backoff; failures never crash or delay agent execution.
+
+---
+
+## 8. Extension Conformance Kit
+
+Satellite packages can import the standalone conformance kit under `agent_os.testing` to validate compliance in local CI:
+
+```python
+import pytest
+from agent_os.testing import (
+    check_memory_connector,
+    check_connector,
+    check_context_provider,
+    check_backend_adapter,
+    check_event_sink,
+)
+from my_package import MyMemoryConnector, MyActionConnector
+
+
+def test_conformance():
+    check_memory_connector(MyMemoryConnector())
+    check_connector(MyActionConnector())
+```
+
+---
+
+## 9. Typing & Compatibility
+
+The distribution includes `py.typed`. Type annotations are part of the v2 public contract; use a Python type checker against `agent_os.api`, but retain runtime error handling for third-party implementations. Async protocol variants, dependency installation, remote package discovery, graph internals, CLI/HTTP internals, and concrete built-in connectors are not stable extension APIs.

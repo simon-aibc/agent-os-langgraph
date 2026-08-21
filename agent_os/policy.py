@@ -314,6 +314,103 @@ class LocalPolicy:
         )
 
 
+class CompositePolicyEngine:
+    """Additive policy engine that chains built-in policy evaluation with policy plugins.
+
+    Safety Invariant:
+    - Built-in policy taxonomy and deny-first checks always run first.
+    - Policy plugins can only add restrictions (deny). They can NEVER turn a built-in
+      denial into an approval.
+    - If built-in policy returns 'deny', the decision is final.
+    - If built-in policy returns 'allow' or 'require_approval', any plugin returning
+      'deny' overrides the decision to 'deny'.
+    - If all plugins return 'allow', the built-in decision stands.
+    """
+
+    def __init__(
+        self,
+        base_policy: PolicyEngine,
+        plugins: list[PolicyEngine] | None = None,
+    ) -> None:
+        self.base_policy = base_policy
+        self.plugins: list[PolicyEngine] = plugins or []
+
+    @property
+    def mode(self) -> str:
+        return getattr(self.base_policy, "mode", "manual")
+
+    @property
+    def store(self) -> Any:
+        return getattr(self.base_policy, "store", None)
+
+    @property
+    def session_key(self) -> str | None:
+        return getattr(self.base_policy, "session_key", None)
+
+    @property
+    def rules(self) -> dict[str, Any]:
+        return getattr(self.base_policy, "rules", {})
+
+    def with_session(self, session_key: str | None) -> "CompositePolicyEngine":
+        new_base = (
+            self.base_policy.with_session(session_key)
+            if hasattr(self.base_policy, "with_session")
+            else self.base_policy
+        )
+        return CompositePolicyEngine(new_base, self.plugins)
+
+    def evaluate(
+        self,
+        proposal: ActionProposal,
+        *,
+        workspace: Any = None,
+        context: Any = None,
+    ) -> PolicyDecision:
+        # 1. Preserve the non-bypassable high-tier taxonomy gate even if the
+        # base LocalPolicy is configured in its legacy local-only "off" mode.
+        # A plugin composition must never become a path around this invariant.
+        if proposal.side_effect in ("payment", "privileged"):
+            return PolicyDecision(
+                decision="deny",
+                policy_id="default",
+                reason=f"Default taxonomy for {proposal.side_effect}",
+            )
+
+        # 2. Built-in policy evaluation always runs first.
+        base_decision = self.base_policy.evaluate(
+            proposal, workspace=workspace, context=context
+        )
+
+        # If built-in policy denies, no plugin can ever override it (especially high-tier payment/privileged)
+        if base_decision.decision == "deny":
+            return base_decision
+
+        # 3. Evaluate all configured policy plugins.
+        for plugin in self.plugins:
+            try:
+                plugin_decision = plugin.evaluate(
+                    proposal, workspace=workspace, context=context
+                )
+            except Exception as exc:
+                # Fail closed on plugin evaluation error
+                return PolicyDecision(
+                    decision="deny",
+                    policy_id="policy-plugin-error",
+                    reason=f"Policy plugin evaluation failed: {exc}",
+                )
+
+            # A plugin can ONLY add restrictions (deny). An 'allow' from a plugin cannot weaken built-in checks.
+            if plugin_decision.decision == "deny":
+                return PolicyDecision(
+                    decision="deny",
+                    policy_id=plugin_decision.policy_id or "policy-plugin-denied",
+                    reason=plugin_decision.reason or "Denied by policy plugin",
+                )
+
+        # If all plugins allowed, return the base decision
+        return base_decision
+
+
 def apply_policy(
     engine: PolicyEngine,
     proposal: ActionProposal,
@@ -411,10 +508,27 @@ def apply_policy(
                 ],
                 artifacts=[],
             )
+        ws_id = None
+        if workspace is not None:
+            from agent_os.observations import observation_workspace_id
+
+            ws_id = observation_workspace_id(workspace)
+        taught_by = None
+        if isinstance(context, dict):
+            principal = context.get("principal")
+            if principal is not None:
+                taught_by = getattr(principal, "id", str(principal))
+        if taught_by is None:
+            from agent_os.principal import LocalPrincipalResolver
+
+            taught_by = LocalPrincipalResolver().resolve().id
+
         rule = PermissionRule(
             permission_key=perm_key,
             effect=effect,
             tier_at_creation=tier,  # type: ignore[arg-type]
+            workspace_id=ws_id,
+            taught_by=taught_by,
         )
         try:
             store.upsert(rule)

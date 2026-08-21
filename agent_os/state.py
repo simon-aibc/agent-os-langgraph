@@ -46,6 +46,7 @@ class SimonState(TypedDict):
 
     messages: Annotated[list[AnyMessage], add_messages]
     task: str
+    run_id: NotRequired[str | None]
     plan: PlanField
     executor_output: ResultField
     human_feedback: str | None

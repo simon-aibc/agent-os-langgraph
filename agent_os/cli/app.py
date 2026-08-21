@@ -258,6 +258,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workspace.toml or a workspace directory.",
     )
 
+    # agent-os memory index|status
+    p_memory = subparsers.add_parser("memory", help="Manage memory index and status")
+    mem_sub = p_memory.add_subparsers(dest="memory_command")
+
+    p_mem_index = mem_sub.add_parser("index", help="Build or update the memory index")
+    p_mem_index.add_argument(
+        "refs", nargs="*", help="Optional specific note refs to index"
+    )
+    p_mem_index.add_argument(
+        "--reindex", action="store_true", help="Force a full reindex"
+    )
+    p_mem_index.add_argument(
+        "--json", dest="json_output", action="store_true", help="Output as JSON"
+    )
+    p_mem_index.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+
+    p_mem_status = mem_sub.add_parser("status", help="Show memory index status")
+    p_mem_status.add_argument(
+        "--json", dest="json_output", action="store_true", help="Output as JSON"
+    )
+    p_mem_status.add_argument(
+        "--workspace",
+        default=argparse.SUPPRESS,
+        help="Path to workspace.toml or a workspace directory.",
+    )
+
     p_observations = subparsers.add_parser(
         "observations",
         help="Review structured outcome evidence (does not change agent policy).",
@@ -311,6 +341,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to workspace.toml or a workspace directory.",
     )
 
+    # agent-os runs approvals <run_id>
+    p_runs = subparsers.add_parser("runs", help="Inspect runs and audit history")
+    runs_sub = p_runs.add_subparsers(dest="runs_command")
+    p_runs_approvals = runs_sub.add_parser(
+        "approvals", help="List approval and cancellation history for a run"
+    )
+    p_runs_approvals.add_argument("run_id", help="Run ID")
+    p_runs_approvals.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Output as JSON",
+    )
+
     return parser
 
 
@@ -323,6 +367,7 @@ def _generate_thread_id() -> str:
 def _normalize_argv(argv: list[str]) -> list[str]:
     commands = (
         "run",
+        "runs",
         "doctor",
         "update",
         "chat",
@@ -332,6 +377,7 @@ def _normalize_argv(argv: list[str]) -> list[str]:
         "schedule",
         "permissions",
         "observations",
+        "memory",
     )
     if not argv:
         return ["run"]
@@ -848,6 +894,7 @@ async def _chat_loop(
                 return 2
             graph_input = Command(resume=feedback)
 
+        from agent_os.principal import LocalPrincipalResolver
         from agent_os.sessions import upsert_session
 
         title = None
@@ -859,7 +906,18 @@ async def _chat_loop(
             msg = graph_input["messages"][0]
             content = msg[1] if isinstance(msg, tuple) else msg.content
             title = content[:50] + ("..." if len(content) > 50 else "")
-        upsert_session(thread_id, title)
+        cli_principal = LocalPrincipalResolver().resolve()
+        cli_ws = None
+        if workspace_runtime is not None:
+            ws_obj = getattr(workspace_runtime, "workspace", None)
+            if ws_obj is not None:
+                cli_ws = str(getattr(ws_obj, "base_path", ws_obj))
+        upsert_session(
+            thread_id,
+            title,
+            workspace_id=cli_ws,
+            created_by=cli_principal.id,
+        )
 
     # On exit, write session log if summary exists
     try:
@@ -1239,6 +1297,168 @@ def _handle_observations_command(
     return 2
 
 
+def _handle_runs_command(
+    args: argparse.Namespace, formatter: EventFormatter
+) -> int:
+    import json as _json
+
+    from agent_os.stores import SqliteRunStore
+
+    store = SqliteRunStore()
+
+    if getattr(args, "runs_command", None) == "approvals":
+        run_id = getattr(args, "run_id", "")
+        if not run_id:
+            formatter.print_error("Run ID is required.")
+            return 2
+
+        run = store.get_run(run_id)
+        if run is None:
+            formatter.print_error(f"Run '{run_id}' not found.")
+            return 1
+
+        approvals = store.list_approvals(run_id)
+        if getattr(args, "json_output", False):
+            print(_json.dumps(approvals, indent=2))
+            return 0
+
+        if not approvals:
+            formatter.print_info(f"No approval decisions recorded for run '{run_id}'.")
+            return 0
+
+        for decision in approvals:
+            detail = (
+                f"#{decision['seq']} [{decision['decision']}] "
+                f"actor={decision['actor_id']} ({decision['actor_kind']}) "
+                f"at={decision['decided_at']}"
+            )
+            if decision.get("reason"):
+                detail += f" reason={decision['reason']}"
+            if decision.get("on_behalf_of"):
+                detail += f" on_behalf_of={decision['on_behalf_of']}"
+            formatter.print_info(detail)
+        return 0
+
+    formatter.print_error("Unknown runs subcommand. See: agent-os runs --help")
+    return 2
+
+
+def _handle_memory_command(
+    args: argparse.Namespace, formatter: EventFormatter
+) -> int:
+    import json as _json
+
+    if not getattr(args, "memory_command", None):
+        formatter.print_error("Missing memory command. Use: agent-os memory [index|status]")
+        return 1
+
+    workspace_path = getattr(args, "workspace", None)
+    memory_conn = None
+    try:
+        if workspace_path:
+            from agent_os.workspace import compose_workspace, load_workspace
+
+            ws = load_workspace(workspace_path)
+            composed = compose_workspace(ws)
+            memory_conn = composed.memory_connector
+        else:
+            from agent_os.server.runtime import composed_workspace, memory_connector
+
+            runtime = composed_workspace()
+            if runtime is not None:
+                memory_conn = runtime.memory_connector
+            else:
+                memory_conn = memory_connector()
+    except Exception as exc:
+        if getattr(args, "json_output", False):
+            print(_json.dumps({"error": f"Failed to load workspace: {exc}"}))
+        else:
+            formatter.print_error(f"Failed to load workspace: {exc}")
+        return 1
+
+    if memory_conn is None:
+        if getattr(args, "json_output", False):
+            print(_json.dumps({"error": "No memory connector available."}))
+        else:
+            formatter.print_error("No memory connector available.")
+        return 1
+
+    conn_name = getattr(memory_conn, "name", "unknown")
+    if not (
+        hasattr(memory_conn, "index")
+        and callable(getattr(memory_conn, "index", None))
+        and hasattr(memory_conn, "index_status")
+        and callable(getattr(memory_conn, "index_status", None))
+    ):
+        if getattr(args, "json_output", False):
+            print(
+                _json.dumps(
+                    {"error": f"Memory connector '{conn_name}' does not support indexing."}
+                )
+            )
+        else:
+            formatter.print_error(
+                f"Memory connector '{conn_name}' does not support indexing."
+            )
+        return 1
+
+    if args.memory_command == "index":
+        try:
+            if getattr(args, "reindex", False):
+                result = memory_conn.reindex()
+            else:
+                refs = getattr(args, "refs", None) or None
+                result = memory_conn.index(refs=refs)
+        except Exception as exc:
+            if getattr(args, "json_output", False):
+                print(_json.dumps({"error": f"Indexing failed: {exc}"}))
+            else:
+                formatter.print_error(f"Indexing failed: {exc}")
+            return 1
+
+        if getattr(args, "json_output", False):
+            payload = (
+                result.model_dump()
+                if hasattr(result, "model_dump")
+                else {
+                    "indexed_count": getattr(result, "indexed_count", 0),
+                    "deleted_count": getattr(result, "deleted_count", 0),
+                    "errors": getattr(result, "errors", []),
+                    "metadata": getattr(result, "metadata", {}),
+                }
+            )
+            print(_json.dumps(payload, indent=2))
+        else:
+            formatter.print_info(
+                f"Memory index complete: {result.indexed_count} indexed, "
+                f"{result.deleted_count} deleted, {len(result.errors)} errors."
+            )
+            if result.errors:
+                for err in result.errors:
+                    formatter.print_warning(f"  - {err}")
+        return 0 if not result.errors else (0 if result.indexed_count > 0 else 1)
+
+    elif args.memory_command == "status":
+        try:
+            status_data = memory_conn.index_status()
+        except Exception as exc:
+            if getattr(args, "json_output", False):
+                print(_json.dumps({"error": f"Failed to get index status: {exc}"}))
+            else:
+                formatter.print_error(f"Failed to get index status: {exc}")
+            return 1
+
+        if getattr(args, "json_output", False):
+            print(_json.dumps(status_data, indent=2))
+        else:
+            formatter.print_info(f"Memory Connector: {conn_name}")
+            for k, v in sorted(status_data.items()):
+                formatter.print_info(f"  {k}: {v}")
+        return 0
+
+    return 1
+
+
 async def async_main(
     argv: list[str] | None = None,
     *,
@@ -1255,6 +1475,12 @@ async def async_main(
     argv = _normalize_argv(argv)
 
     args = build_parser().parse_args(argv)
+
+    if args.command == "memory":
+        return _handle_memory_command(args, EventFormatter(console=console))
+
+    if args.command == "runs":
+        return _handle_runs_command(args, EventFormatter(console=console))
 
     if args.command == "permissions":
         return _handle_permissions_command(args, EventFormatter(console=console))

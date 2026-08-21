@@ -4,27 +4,36 @@ Supports:
 - Dry-run update check (`--check`)
 - Safe pre-update DB backups
 - Docker container detection vs Pip/Wheel environment
-- Optional automated execution with `--yes`
+- Optional automated execution with `--yes`, `--pull`, and `--reload`
 - Daemon reload guidance
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
-from agent_os.migrations import run_migrations
+from agent_os.migrations import (
+    PERMISSIONS_MIGRATIONS,
+    RUNS_MIGRATIONS,
+    backup_database,
+    run_migrations,
+)
 from agent_os.observations import DEFAULT_OBSERVATION_DB, OBSERVATION_DB_ENV
 from agent_os.permission_store import DEFAULT_PERMISSION_DB, PERMISSION_DB_ENV
 from agent_os.runs import _get_db_path as get_runs_db_path
 from agent_os.schedules import _get_db_path as get_sched_db_path
 from agent_os.update_check import check_for_update
+
+logger = logging.getLogger(__name__)
 
 
 def is_docker_environment() -> bool:
@@ -40,29 +49,35 @@ def is_docker_environment() -> bool:
 
 def run_pre_update_db_backups() -> list[str]:
     """Execute pre-migration checks and backups on all known SQLite databases."""
-    db_paths: list[str] = [
-        get_runs_db_path(),
-        get_sched_db_path(),
-        os.getenv(PERMISSION_DB_ENV, DEFAULT_PERMISSION_DB),
-        os.getenv(OBSERVATION_DB_ENV, DEFAULT_OBSERVATION_DB),
+    db_configs: list[tuple[str, tuple[Any, ...]]] = [
+        (get_runs_db_path(), RUNS_MIGRATIONS),
+        (get_sched_db_path(), ()),
+        (os.getenv(PERMISSION_DB_ENV, DEFAULT_PERMISSION_DB), PERMISSIONS_MIGRATIONS),
+        (os.getenv(OBSERVATION_DB_ENV, DEFAULT_OBSERVATION_DB), ()),
     ]
 
     checkpoint_db = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
     if checkpoint_db != ":memory:":
-        db_paths.append(checkpoint_db)
+        db_configs.append((checkpoint_db, ()))
 
     backed_up: list[str] = []
-    for db_path_str in db_paths:
+    for db_path_str, migrations in db_configs:
         if db_path_str == ":memory:":
             continue
         p = Path(db_path_str).expanduser()
         if p.exists() and p.is_file():
             try:
-                run_migrations(p, baseline_version=1)
-                backed_up.append(str(p))
-            except Exception:
-                # Still continue backing up other databases
-                pass
+                # 1. Explicitly backup database before update
+                backup_path = backup_database(p)
+                if backup_path and backup_path.exists():
+                    backed_up.append(str(p))
+            except Exception as exc:
+                logger.warning(f"Could not create pre-update backup for {p}: {exc}")
+            try:
+                # 2. Run schema migrations
+                run_migrations(p, migrations=migrations, baseline_version=1)
+            except Exception as exc:
+                logger.warning(f"Pre-update migration check failed for {p}: {exc}")
     return backed_up
 
 
@@ -156,7 +171,9 @@ def handle_update_command(
         except Exception as e:
             out.print(f"[yellow]Daemon reload note: {e}[/yellow]")
     else:
-        out.print("If running as a macOS launchd daemon, restart with:")
+        out.print("If running as a background service, restart with:")
         out.print(f"  [bold]launchctl kickstart -k gui/{uid}/com.simon.agentos[/bold]")
+        out.print("Or restart the server manually:")
+        out.print("  [dim]pkill -f 'agent-os serve' && agent-os serve[/dim]\n")
 
     return 0

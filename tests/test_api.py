@@ -481,6 +481,124 @@ def test_run_api_list_filters(tmp_path, monkeypatch):
     assert len(limit_resp.json()) == 2
 
 
+def test_run_api_approvals_endpoint(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    monkeypatch.setenv(EXECUTION_TOKEN_ENV, "secret-token")
+
+    # 404 for unknown run
+    assert client.get("/api/runs/nonexistent-run/approvals", headers={"x-execution-token": "secret-token"}).status_code == 404
+
+    # Empty list for run with no approvals
+    run_id = create_run("thread-audit", None, "task")
+    resp = client.get(f"/api/runs/{run_id}/approvals", headers={"x-execution-token": "secret-token"})
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+    # Transition to interrupted
+    set_status(run_id, "interrupted")
+
+    # Approve with feedback and attempt to spoof headers
+    approve_resp = client.post(
+        f"/api/runs/{run_id}/approve",
+        json={"feedback": "LGTM from review"},
+        headers={
+            "x-actor-label": "spoofed-reviewer",
+            "x-on-behalf-of": "spoofed-vip",
+            "x-execution-token": "secret-token",
+        },
+    )
+    assert approve_resp.status_code == 200
+
+    # Get approvals history - verify spoofed headers were ignored
+    approvals_resp = client.get(f"/api/runs/{run_id}/approvals", headers={"x-execution-token": "secret-token"})
+    assert approvals_resp.status_code == 200
+    history = approvals_resp.json()
+    assert len(history) == 1
+    assert history[0]["seq"] == 1
+    assert history[0]["decision"] == "approved"
+    assert history[0]["actor_id"] == "token:execution"
+    assert history[0]["actor_kind"] == "service"
+    assert history[0]["on_behalf_of"] is None
+    assert history[0]["reason"] == "LGTM from review"
+
+    # Create another run to test atomic cancel audit
+    cancel_run_id = create_run("thread-cancel-audit", None, "cancel task")
+    set_status(cancel_run_id, "interrupted")
+
+    cancel_resp = client.post(
+        f"/api/runs/{cancel_run_id}/cancel",
+        headers={
+            "x-actor-label": "spoofed-ops",
+            "x-on-behalf-of": "spoofed-ceo",
+            "x-execution-token": "secret-token",
+        },
+    )
+    assert cancel_resp.status_code == 200
+
+    # Verify decision recorded in approvals history and status changed to cancelled
+    assert get_run(cancel_run_id)["status"] == "cancelled"
+    cancel_history = client.get(f"/api/runs/{cancel_run_id}/approvals", headers={"x-execution-token": "secret-token"}).json()
+    assert len(cancel_history) == 1
+    assert cancel_history[0]["seq"] == 1
+    assert cancel_history[0]["decision"] == "cancelled"
+    assert cancel_history[0]["actor_id"] == "token:execution"
+    assert cancel_history[0]["on_behalf_of"] is None
+
+    # Attempting to cancel already-cancelled run -> 409 Conflict, no duplicate audit row
+    cancel_again = client.post(f"/api/runs/{cancel_run_id}/cancel", headers={"x-execution-token": "secret-token"})
+    assert cancel_again.status_code == 409
+    cancel_history_after = client.get(f"/api/runs/{cancel_run_id}/approvals", headers={"x-execution-token": "secret-token"}).json()
+    assert len(cancel_history_after) == 1
+
+
+def test_run_api_create_records_creator_identity(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "checkpoints.sqlite")
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    ws = sandbox / "workspace-creator"
+    ws.mkdir()
+    monkeypatch.setenv(CHECKPOINT_DB_ENV, db_path)
+    monkeypatch.setenv("AGENT_OS_SANDBOX", str(sandbox))
+    monkeypatch.setenv(EXECUTION_TOKEN_ENV, "secret-token")
+
+    # 1. Authenticated via token -> token:execution
+    resp = client.post(
+        "/api/runs",
+        json={"task": "create with principal", "workspace": "workspace-creator"},
+        headers={
+            "x-actor-label": "spoofed-deploy-bot",
+            "x-on-behalf-of": "spoofed-ci",
+            "x-execution-token": "secret-token",
+        },
+    )
+    assert resp.status_code == 200
+    run_id = resp.json()["run_id"]
+
+    run = get_run(run_id)
+    assert run is not None
+    assert run["created_by"] == "token:execution"
+    assert run["created_by_kind"] == "service"
+    assert run["workspace_id"] == str(ws.resolve())
+
+    # 2. Unauthenticated loopback without token requirement -> local:<user>
+    monkeypatch.delenv(EXECUTION_TOKEN_ENV, raising=False)
+    resp_loopback = client.post(
+        "/api/runs",
+        json={"task": "create loopback", "workspace": "workspace-creator"},
+        headers={
+            "x-actor-label": "spoofed-deploy-bot",
+            "x-on-behalf-of": "spoofed-ci",
+        },
+    )
+    assert resp_loopback.status_code == 200
+    run_loopback_id = resp_loopback.json()["run_id"]
+    run_loopback = get_run(run_loopback_id)
+    assert run_loopback is not None
+    assert run_loopback["created_by"].startswith("local:")
+    assert run_loopback["created_by_kind"] == "human"
+
+
 @pytest.mark.anyio
 async def test_ws_chat_streams(monkeypatch, tmp_path):
     db_path = str(tmp_path / "checkpoints.sqlite")
@@ -754,7 +872,6 @@ async def test_ws_chat_resumes_policy_learning_and_reapplies_rule(
     assert (tmp_path / "vault" / proposal.ref).read_text(
         encoding="utf-8"
     ) == "entry\nentry"
-
 
 def test_serve_missing_extra(monkeypatch, capsys):
     import asyncio

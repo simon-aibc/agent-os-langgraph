@@ -1,6 +1,6 @@
-# Agent OS LangGraph - public product specification
+# Agent OS - public product specification
 
-- **Current version:** 2.2.1
+- **Current version:** 2.4.0
 - **Status:** Released
 - **License:** MIT
 - **Runtime:** Python 3.11+
@@ -9,30 +9,25 @@
 
 ## 1. Product summary
 
-Agent OS LangGraph is a local-first agent orchestration backbone built with
-LangGraph. It sends exact, low-risk commands through deterministic tools and
-escalates ambiguous work through a read-only architect, a human plan gate, and
-a sandbox-scoped executor.
+Agent OS is a local-first agent operating system and extensible harness powered
+by LangGraph. It executes exact, low-risk commands through kernel fast-path
+deterministic tools and escalates ambiguous work through a read-only architect,
+an immutable human/policy gate, and a sandbox-scoped executor.
 
-The project demonstrates production-oriented agent patterns without claiming
-to provide operating-system isolation:
+The system provides production-grade agent primitives:
 
-- explicit typed state and routing precedence;
-- structured contracts between agent roles;
-- human approval before agent-planned writes;
-- durable SQLite checkpoints and cross-process resume;
+- explicit typed state and deterministic kernel fast-path;
+- structured contracts between agent roles (router, architect, executor);
+- human approval and non-bypassable policy floors before agent writes;
+- durable SQLite checkpoints, live additive migrations, and cross-process resume;
 - bounded subprocess execution and output retention;
-- native, MCP, API-model, and subscription-CLI extension points;
-- Runtime API, run ledger, scheduler, and self-host Compose for long-running
-  operation;
+- generic plugin runtime across 7 entry-point groups ("Everything is a Plugin");
+- retrieval lifecycle indexing (`IndexableMemory`) and non-blocking context injection;
+- signed, anti-SSRF lifecycle webhook egress (`EventSink`);
+- Runtime API, run ledger, local cron scheduler, and self-host Docker Compose;
 - explicit, workspace-scoped permission memory for native memory writes;
 - structured outcome observations and bounded, deterministic strategy selection;
-- stable `agent_os.api` contracts for community and private extensions.
-
-The v2.2 planning loop is intentionally bounded: it selects only fixed,
-versioned strategies from structured evidence. Agent OS does not claim
-autonomous self-learning, unrestricted strategy invention, or autonomous
-changes to permissions and execution safety.
+- stable, frozen `agent_os.api` facade and third-party conformance testing kit.
 
 ## 2. Target users
 

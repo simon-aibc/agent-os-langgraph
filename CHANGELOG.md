@@ -5,6 +5,14 @@ for public releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Plugin Runtime & Discovery**: `agent_os.plugins.PluginRegistry` discovering extensions across 7 entry-point groups (`agent_os.connectors`, `agent_os.memory_connectors`, `agent_os.backends`, `agent_os.policies`, `agent_os.skill_packages`, `agent_os.context_providers`, `agent_os.event_sinks`) with fail-closed loading and protected built-in names.
+- **Identity & Audit Provenance**: Stable `Principal` model and `LocalPrincipalResolver` resolving server-trusted actor provenance (`id`, `kind`, `display`, `on_behalf_of`) preventing HTTP header spoofing.
+- **Retrieval Lifecycle & Pre-Planner Context**: `IndexableMemory` protocol with bounded cold-start indexing, and non-blocking `ContextProvider` execution before planner nodes.
+- **Event Egress & Anti-SSRF Webhook**: `@runtime_checkable` `EventSink` protocol and reference `WebhookEventSink` featuring HMAC-SHA256 signatures, DNS-rebinding-safe IP pinning, and strict payload privacy invariants.
+- **Extension Conformance Kit**: Dependency-light testing package under `agent_os.testing` with reusable pytest mixins and assertion helpers for third-party satellite development.
+
 ## [2.3.0] — 2026-08-20
 
 ### Added

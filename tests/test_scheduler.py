@@ -79,15 +79,14 @@ def app_callback_schedule():
 
 @pytest.mark.anyio
 async def test_dispatch_run_schedule(run_schedule):
+    store = MagicMock()
+    store.create_run.return_value = "run-123"
+    store.get_run.return_value = {"status": "completed"}
     with (
-        patch("agent_os.scheduler.runs") as mock_runs,
         patch("agent_os.scheduler.execute_run", new_callable=AsyncMock) as mock_exec,
         patch("agent_os.scheduler.record_schedule_result") as mock_record,
     ):
-        mock_runs.create_run.return_value = "run-123"
-        mock_runs.get_run.return_value = {"status": "completed"}
-
-        result = await dispatch_schedule(run_schedule)
+        result = await dispatch_schedule(run_schedule, run_store=store)
 
         assert isinstance(result, ScheduleDispatchResult)
         assert result.schedule_id == "sched-1"
@@ -97,8 +96,8 @@ async def test_dispatch_run_schedule(run_schedule):
         assert result.error is None
 
         # Verify create_run was called with fresh thread/run IDs.
-        mock_runs.create_run.assert_called_once()
-        call_args = mock_runs.create_run.call_args
+        store.create_run.assert_called_once()
+        call_args = store.create_run.call_args
         assert call_args[0][1] == "/ws"  # workspace
         assert call_args[0][2] == "refactor code"  # task
 
@@ -279,8 +278,9 @@ async def test_dispatch_app_callback_cancellation(app_callback_schedule):
 
 @pytest.mark.anyio
 async def test_dispatch_run_error_is_captured(run_schedule):
+    store = MagicMock()
+    store.create_run.return_value = "run-err"
     with (
-        patch("agent_os.scheduler.runs") as mock_runs,
         patch(
             "agent_os.scheduler.execute_run",
             new_callable=AsyncMock,
@@ -288,8 +288,7 @@ async def test_dispatch_run_error_is_captured(run_schedule):
         ),
         patch("agent_os.scheduler.record_schedule_result") as mock_record,
     ):
-        mock_runs.create_run.return_value = "run-err"
-        result = await dispatch_schedule(run_schedule)
+        result = await dispatch_schedule(run_schedule, run_store=store)
 
         assert result.status == "error"
         assert "boom" in (result.error or "")
@@ -300,18 +299,17 @@ async def test_dispatch_run_error_is_captured(run_schedule):
 async def test_dispatch_uses_fresh_thread_ids(run_schedule):
     """Each dispatch should generate a unique thread_id."""
     thread_ids = set()
+    store = MagicMock()
+    store.create_run.return_value = "run-1"
+    store.get_run.return_value = {"status": "completed"}
 
     with (
-        patch("agent_os.scheduler.runs") as mock_runs,
         patch("agent_os.scheduler.execute_run", new_callable=AsyncMock),
         patch("agent_os.scheduler.record_schedule_result"),
     ):
-        mock_runs.create_run.return_value = "run-1"
-        mock_runs.get_run.return_value = {"status": "completed"}
-
         for _ in range(3):
-            await dispatch_schedule(run_schedule)
-            call_args = mock_runs.create_run.call_args
+            await dispatch_schedule(run_schedule, run_store=store)
+            call_args = store.create_run.call_args
             thread_ids.add(call_args[0][0])
 
     assert len(thread_ids) == 3

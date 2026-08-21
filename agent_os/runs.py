@@ -7,9 +7,12 @@ import uuid
 from typing import Any
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
-from agent_os.migrations import run_migrations
+from agent_os.migrations import RUNS_MIGRATIONS, run_migrations
+from agent_os.principal import Principal
+from agent_os.stores.base import configure_sqlite_connection
 
 RUNS_DB_ENV = "AGENT_OS_RUNS_DB"
+TERMINAL_RUN_STATUSES = frozenset({"completed", "error", "cancelled"})
 
 
 def _get_db_path() -> str:
@@ -37,12 +40,11 @@ def _connect() -> sqlite3.Connection:
     writer does not deadlock with the async LangGraph checkpointer sharing the
     same file (both write concurrently during a run)."""
     conn = sqlite3.connect(_get_db_path(), timeout=30.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=30000")
-    return conn
+    return configure_sqlite_connection(conn, wal=True, busy_timeout_ms=30000)
 
 
 def _init_runs_db() -> None:
+    db_path = _get_db_path()
     with contextlib.closing(_connect()) as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -67,23 +69,52 @@ def _init_runs_db() -> None:
                 PRIMARY KEY (run_id, seq)
             )
         """)
-        run_migrations(conn, baseline_version=1)
         conn.commit()
+    run_migrations(db_path, RUNS_MIGRATIONS, baseline_version=1)
 
 
-def create_run(thread_id: str, workspace: str | None, task: str | None) -> str:
+def create_run(
+    thread_id: str,
+    workspace: str | None,
+    task: str | None,
+    *,
+    workspace_id: str | None = None,
+    created_by: str | None = None,
+    created_by_kind: str | None = None,
+    principal: Principal | None = None,
+) -> str:
     _init_runs_db()
     run_id = str(uuid.uuid4())
     now = dt.datetime.now(dt.UTC).isoformat()
+
+    if principal is not None:
+        created_by = principal.id
+        created_by_kind = principal.kind
+
+    eff_workspace_id = workspace_id if workspace_id is not None else workspace
+    eff_workspace = workspace if workspace is not None else workspace_id
+
     with contextlib.closing(_connect()) as conn:
         conn.execute(
             """
             INSERT INTO runs (
-                run_id, thread_id, workspace, status, task, created_at, updated_at
+                run_id, thread_id, workspace, workspace_id, status, task,
+                created_by, created_by_kind, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, thread_id, workspace, "queued", task, now, now),
+            (
+                run_id,
+                thread_id,
+                eff_workspace,
+                eff_workspace_id,
+                "queued",
+                task,
+                created_by,
+                created_by_kind,
+                now,
+                now,
+            ),
         )
         conn.commit()
     return run_id
@@ -177,6 +208,176 @@ def transition_status(
         return cursor.rowcount == 1
 
 
+def record_approval(
+    run_id: str,
+    *,
+    decision: str,
+    actor_id: str,
+    actor_kind: str,
+    on_behalf_of: str | None = None,
+    reason: str | None = None,
+) -> int:
+    """Record an audit decision for a run into the run_approvals ledger."""
+    _init_runs_db()
+    decided_at = dt.datetime.now(dt.UTC).isoformat()
+    with contextlib.closing(_connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,))
+        if cursor.fetchone() is None:
+            conn.rollback()
+            raise KeyError(f"Run '{run_id}' not found")
+        seq_cursor = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM run_approvals WHERE run_id = ?",
+            (run_id,),
+        )
+        seq = int(seq_cursor.fetchone()[0])
+        conn.execute(
+            """
+            INSERT INTO run_approvals (
+                run_id, seq, decision, actor_id, actor_kind, on_behalf_of, reason, decided_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, seq, decision, actor_id, actor_kind, on_behalf_of, reason, decided_at),
+        )
+        conn.commit()
+    return seq
+
+
+def record_approval_and_transition(
+    run_id: str,
+    *,
+    decision: str = "approved",
+    actor_id: str,
+    actor_kind: str,
+    on_behalf_of: str | None = None,
+    reason: str | None = None,
+    expected: str = "interrupted",
+    status: str = "running",
+    error: str | None = None,
+    ended: bool = False,
+) -> bool:
+    """Atomically write an audit decision and transition run status if expected status matches."""
+    _init_runs_db()
+    now = dt.datetime.now(dt.UTC).isoformat()
+    ended_at = now if ended else None
+    with contextlib.closing(_connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,))
+        row = cursor.fetchone()
+        if row is None or row[0] != expected:
+            conn.rollback()
+            return False
+
+        seq_cursor = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM run_approvals WHERE run_id = ?",
+            (run_id,),
+        )
+        seq = int(seq_cursor.fetchone()[0])
+        conn.execute(
+            """
+            INSERT INTO run_approvals (
+                run_id, seq, decision, actor_id, actor_kind, on_behalf_of, reason, decided_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, seq, decision, actor_id, actor_kind, on_behalf_of, reason, now),
+        )
+        if ended:
+            conn.execute(
+                """
+                UPDATE runs
+                SET status = ?, updated_at = ?, ended_at = ?, error = ?
+                WHERE run_id = ? AND status = ?
+                """,
+                (status, now, ended_at, error, run_id, expected),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE runs
+                SET status = ?, updated_at = ?, error = ?
+                WHERE run_id = ? AND status = ?
+                """,
+                (status, now, error, run_id, expected),
+            )
+        conn.commit()
+        return True
+
+
+def record_cancellation_and_transition(
+    run_id: str,
+    *,
+    actor_id: str,
+    actor_kind: str,
+    on_behalf_of: str | None = None,
+    reason: str | None = None,
+) -> bool:
+    """Atomically record cancellation audit and transition non-terminal run to 'cancelled'.
+
+    Returns False if the run does not exist or is already in a terminal status.
+    """
+    _init_runs_db()
+    now = dt.datetime.now(dt.UTC).isoformat()
+    with contextlib.closing(_connect()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        cursor = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,))
+        row = cursor.fetchone()
+        if row is None:
+            conn.rollback()
+            return False
+        current_status = row[0]
+        if current_status in TERMINAL_RUN_STATUSES:
+            conn.rollback()
+            return False
+
+        seq_cursor = conn.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM run_approvals WHERE run_id = ?",
+            (run_id,),
+        )
+        seq = int(seq_cursor.fetchone()[0])
+        conn.execute(
+            """
+            INSERT INTO run_approvals (
+                run_id, seq, decision, actor_id, actor_kind, on_behalf_of, reason, decided_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_id, seq, "cancelled", actor_id, actor_kind, on_behalf_of, reason, now),
+        )
+        update_cursor = conn.execute(
+            """
+            UPDATE runs
+            SET status = 'cancelled', updated_at = ?, ended_at = ?
+            WHERE run_id = ? AND status = ?
+            """,
+            (now, now, run_id, current_status),
+        )
+        if update_cursor.rowcount != 1:
+            conn.rollback()
+            return False
+
+        conn.commit()
+        return True
+
+
+def list_approvals(run_id: str) -> list[dict[str, Any]]:
+    """Return all recorded audit decisions for a run ordered by sequence number."""
+    _init_runs_db()
+    with contextlib.closing(_connect()) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            """
+            SELECT run_id, seq, decision, actor_id, actor_kind, on_behalf_of, reason, decided_at
+            FROM run_approvals
+            WHERE run_id = ?
+            ORDER BY seq ASC
+            """,
+            (run_id,),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
 def get_run(run_id: str) -> dict[str, Any] | None:
     _init_runs_db()
     with contextlib.closing(_connect()) as conn:
@@ -190,6 +391,7 @@ def list_runs(
     *,
     status: str | None = None,
     workspace: str | None = None,
+    workspace_id: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
     _init_runs_db()
@@ -198,9 +400,10 @@ def list_runs(
     if status is not None:
         where.append("status = ?")
         params.append(status)
-    if workspace is not None:
-        where.append("workspace = ?")
-        params.append(workspace)
+    target_workspace = workspace_id if workspace_id is not None else workspace
+    if target_workspace is not None:
+        where.append("(workspace = ? OR workspace_id = ?)")
+        params.extend([target_workspace, target_workspace])
 
     query = "SELECT * FROM runs"
     if where:

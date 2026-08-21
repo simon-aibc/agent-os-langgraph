@@ -74,6 +74,7 @@ serve = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 # -p no:threadexception: the async sqlite saver used by the websocket endpoint
 # can raise a benign "Event loop is closed" in its background thread during
 # TestClient teardown, which the threadexception plugin would non-deterministically

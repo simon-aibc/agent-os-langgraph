@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from typing import Any
@@ -14,6 +15,7 @@ from agent_os.observations import (
     task_signature_for_input,
 )
 from agent_os.policy import LocalPolicy, policy_scope
+from agent_os.runs import TERMINAL_RUN_STATUSES
 from agent_os.sandbox import sandbox_scope
 from agent_os.server.runtime import (
     build_runtime_graph,
@@ -203,6 +205,12 @@ async def execute_run(
 
                     snapshot = await graph.aget_state(config)
                     interrupt_prompt = _pending_interrupt(snapshot)
+                    from agent_os.events import emit_run_lifecycle_event
+
+                    workspace_id = str(
+                        run.get("workspace_id") or run.get("workspace") or "default"
+                    )
+
                     if interrupt_prompt is not None:
                         runs.append_event(
                             run_id,
@@ -210,6 +218,14 @@ async def execute_run(
                             {"prompt": str(interrupt_prompt)},
                         )
                         runs.set_status(run_id, "interrupted")
+                        emit_run_lifecycle_event(
+                            "run.interrupted",
+                            run_id=run_id,
+                            workspace_id=workspace_id,
+                            status="interrupted",
+                            run=run,
+                            thread_id=thread_id,
+                        )
                         preserve_session = True
                     else:
                         result_payload = _result_payload(snapshot)
@@ -217,21 +233,66 @@ async def execute_run(
                         failure = terminal_tool_failure(snapshot)
                         if failure is None:
                             runs.set_status(run_id, "completed", ended=True)
+                            emit_run_lifecycle_event(
+                                "run.completed",
+                                run_id=run_id,
+                                workspace_id=workspace_id,
+                                status="completed",
+                                run=run,
+                                thread_id=thread_id,
+                            )
                             _capture_terminal_observation(
                                 run, snapshot, terminal_status="completed"
                             )
                         else:
                             status, message = failure
                             runs.set_status(run_id, status, error=message, ended=True)
-                            _capture_terminal_observation(
-                                run, snapshot, terminal_status=status
+                            emit_run_lifecycle_event(
+                                "run.cancelled" if status == "cancelled" else "run.failed",
+                                run_id=run_id,
+                                workspace_id=workspace_id,
+                                status=status,
+                                run=run,
+                                thread_id=thread_id,
                             )
+    except asyncio.CancelledError:
+        run = runs.get_run(run_id)
+        if run is not None and run["status"] not in TERMINAL_RUN_STATUSES:
+            runs.set_status(run_id, "cancelled", ended=True)
+            runs.append_event(run_id, "status", {"status": "cancelled"})
+            workspace_id = str(
+                run.get("workspace_id") or run.get("workspace") or "default"
+            )
+            from agent_os.events import emit_run_lifecycle_event
+
+            emit_run_lifecycle_event(
+                "run.cancelled",
+                run_id=run_id,
+                workspace_id=workspace_id,
+                status="cancelled",
+                run=run,
+                thread_id=thread_id,
+            )
+        raise
     except Exception as error:
         message = str(error)
         runs.append_event(run_id, "error", {"message": message})
         runs.set_status(run_id, "error", error=message, ended=True)
         run = runs.get_run(run_id)
         if run is not None:
+            workspace_id = str(
+                run.get("workspace_id") or run.get("workspace") or "default"
+            )
+            from agent_os.events import emit_run_lifecycle_event
+
+            emit_run_lifecycle_event(
+                "run.failed",
+                run_id=run_id,
+                workspace_id=workspace_id,
+                status="error",
+                run=run,
+                thread_id=thread_id,
+            )
             _capture_terminal_observation(run, None, terminal_status="error")
     finally:
         if not preserve_session:
