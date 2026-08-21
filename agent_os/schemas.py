@@ -51,13 +51,19 @@ class ToolExecutionResult(BaseModel):
     success: bool
 
 
+SideEffect = Literal[
+    "none", "read", "write", "network", "payment", "communication", "privileged"
+]
+SUPPORTED_SIDE_EFFECTS = frozenset(
+    {"none", "read", "write", "network", "payment", "communication", "privileged"}
+)
+
+
 class ActionProposal(BaseModel):
     tool: str
     arguments: dict[str, object] = Field(default_factory=dict)
     reason: str = ""
-    side_effect: Literal[
-        "none", "read", "write", "network", "payment", "communication", "privileged"
-    ] = "none"
+    side_effect: SideEffect = "none"
     connector: str | None = None
 
 

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from langchain_core.tools import BaseTool
 
+from agent_os.plugins import PluginError, PluginRegistry
 from agent_os.skills import RegisteredSkill, SkillHandler, SkillRegistry
 
 
@@ -130,3 +131,75 @@ class SkillPackageLoader:
             )
 
         self.registry.register_many(loaded)
+
+    def load_from_entry_points(
+        self, plugin_registry: PluginRegistry | None = None
+    ) -> None:
+        """Load skill packages discovered via 'agent_os.skill_packages' entry points."""
+        if plugin_registry is None:
+            plugin_registry = PluginRegistry()
+
+        try:
+            discovered = plugin_registry.discover("agent_os.skill_packages")
+        except PluginError as exc:
+            raise ValueError(
+                f"Plugin discovery failed for group 'agent_os.skill_packages': {exc}"
+            ) from exc
+
+        for ep_name in discovered:
+            try:
+                target = plugin_registry.resolve("agent_os.skill_packages", ep_name)
+            except PluginError as exc:
+                raise ValueError(
+                    f"Failed to load skill package plugin '{ep_name}': {exc}"
+                ) from exc
+
+            # Supported targets:
+            # 1. Path or str pointing to a skill package directory with manifest.toml
+            if isinstance(target, (str, Path)):
+                path = Path(target)
+                if path.is_dir() and (path / "manifest.toml").is_file():
+                    self.load_package(path)
+                else:
+                    raise ValueError(
+                        f"Skill package plugin '{ep_name}' path '{target}' is not a valid skill package directory."
+                    )
+            # 2. RegisteredSkill instance
+            elif isinstance(target, RegisteredSkill):
+                self.registry.register(target)
+            # 3. Iterable of RegisteredSkill instances
+            elif isinstance(target, (list, tuple)) and all(
+                isinstance(item, RegisteredSkill) for item in target
+            ):
+                self.registry.register_many(list(target))
+            # 4. Zero-argument factory callable
+            elif callable(target):
+                try:
+                    result = target()
+                except Exception as exc:
+                    raise ValueError(
+                        f"Failed to instantiate skill package plugin '{ep_name}': {exc}"
+                    ) from exc
+
+                if isinstance(result, (str, Path)):
+                    path = Path(result)
+                    if path.is_dir() and (path / "manifest.toml").is_file():
+                        self.load_package(path)
+                    else:
+                        raise ValueError(
+                            f"Skill package factory '{ep_name}' returned invalid path '{result}'."
+                        )
+                elif isinstance(result, RegisteredSkill):
+                    self.registry.register(result)
+                elif isinstance(result, (list, tuple)) and all(
+                    isinstance(item, RegisteredSkill) for item in result
+                ):
+                    self.registry.register_many(list(result))
+                else:
+                    raise ValueError(
+                        f"Skill package plugin '{ep_name}' factory returned unsupported type {type(result)}."
+                    )
+            else:
+                raise ValueError(
+                    f"Skill package plugin '{ep_name}' returned unsupported object of type {type(target)}."
+                )

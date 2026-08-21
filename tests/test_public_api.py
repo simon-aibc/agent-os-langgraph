@@ -2,8 +2,21 @@ from pathlib import Path
 
 from agent_os import api
 from agent_os.backends import BackendAdapter, BackendRegistry
-from agent_os.connectors import ConnectorRegistry, MemoryConnector
+from agent_os.connectors import (
+    Connector,
+    ConnectorRegistry,
+    IndexableMemory,
+    IndexResult,
+    MemoryConnector,
+    MemoryHit,
+    MemoryWriteResult,
+    WritableMemory,
+)
+from agent_os.context import ContextBlock, ContextProvider
+from agent_os.events import EventSink
+from agent_os.plugins import PluginRegistry
 from agent_os.policy import PolicyEngine
+from agent_os.principal import Principal, PrincipalResolver
 from agent_os.skill_packages import SkillPackageLoader
 
 EXPECTED_EXPORTS = {
@@ -14,16 +27,28 @@ EXPECTED_EXPORTS = {
     "BackendInvoker",
     "BackendRegistry",
     "BackendRole",
+    "Connector",
     "ConnectorRegistry",
+    "ContextBlock",
+    "ContextProvider",
+    "EventSink",
     "ExecutionResult",
+    "IndexResult",
+    "IndexableMemory",
     "LocalPolicy",
     "MemoryConnector",
+    "MemoryHit",
+    "MemoryWriteResult",
+    "PluginRegistry",
     "PolicyDecision",
     "PolicyEngine",
+    "Principal",
+    "PrincipalResolver",
     "RegisteredSkill",
     "SkillHandler",
     "SkillPackageLoader",
     "SkillRegistry",
+    "WritableMemory",
     "apply_policy",
 }
 
@@ -35,11 +60,23 @@ def test_public_export_set_is_exact() -> None:
 
 def test_facade_reexports_runtime_objects_by_identity() -> None:
     assert api.MemoryConnector is MemoryConnector
+    assert api.Connector is Connector
+    assert api.WritableMemory is WritableMemory
+    assert api.MemoryWriteResult is MemoryWriteResult
+    assert api.MemoryHit is MemoryHit
+    assert api.IndexResult is IndexResult
+    assert api.IndexableMemory is IndexableMemory
+    assert api.ContextBlock is ContextBlock
+    assert api.ContextProvider is ContextProvider
+    assert api.EventSink is EventSink
+    assert api.PluginRegistry is PluginRegistry
     assert api.ConnectorRegistry is ConnectorRegistry
     assert api.BackendAdapter is BackendAdapter
     assert api.BackendRegistry is BackendRegistry
     assert api.PolicyEngine is PolicyEngine
     assert api.SkillPackageLoader is SkillPackageLoader
+    assert api.Principal is Principal
+    assert api.PrincipalResolver is PrincipalResolver
 
 
 def test_protocols_accept_minimal_structural_implementations() -> None:
