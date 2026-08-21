@@ -3,131 +3,108 @@
 [![CI](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml/badge.svg)](https://github.com/simon-aibc/agent-os-langgraph/actions/workflows/ci.yml)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11-3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)
-[![Release](https://img.shields.io/github/v/release/simon-aibc/agent-os-langgraph)](https://github.com/simon-aibc/agent-os-langgraph/releases/latest)
+[![Release](https://img.shields.io/badge/release-v2.4.0-green.svg)](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0)
 ![Dependencies pinned](https://img.shields.io/badge/dependencies-pinned-informational.svg)
 
-An open-source, local-first backbone for building durable, controllable AI
-agent systems with LangGraph. It gives teams a reference architecture for
-deterministic tools, read-only architect planning, human approval gates,
-sandbox-scoped execution, durable runtime state, stable extension APIs, and
-self-hosted operation.
+> **Agent OS LangGraph: Everything is a Plugin.**<br>
+> An open-source, local-first backbone for building durable, controllable multi-agent systems with LangGraph.
 
-**Current release:** [v2.2.1](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.2.1) |
+Agent OS LangGraph provides an auditable, self-hosted reference harness featuring deterministic tool dispatch, read-only architect planning, human approval gates, sandbox-scoped execution, SQLite checkpoints, durable run ledgers, anti-SSRF webhook egress, and a stable extension plugin system.
+
+**Current release:** [v2.4.0](https://github.com/simon-aibc/agent-os-langgraph/releases/tag/v2.4.0) |
 [Changelog](CHANGELOG.md) |
-[Product specification](docs/PRD.md) |
 [Architecture](docs/architecture.md) |
-[Roadmap](docs/roadmap.md) |
-[Self-hosting](docs/self-hosting.md) |
-[Extending](docs/EXTENDING.md)
+[Extending Agent OS](docs/EXTENDING.md) |
+[Self-Hosting](docs/self-hosting.md) |
+[Product Spec](docs/PRD.md) |
+[Roadmap](docs/roadmap.md)
 
-## Table Of Contents
+---
 
-1. [About The Project](#about-the-project)
-2. [Built With](#built-with)
-3. [Getting Started](#getting-started)
-4. [Usage](#usage)
-5. [Self-Hosting](#self-hosting)
-6. [Extending Agent OS](#extending-agent-os)
-7. [Security And Trust Boundaries](#security-and-trust-boundaries)
-8. [Roadmap](#roadmap)
-9. [Contributing](#contributing)
-10. [License](#license)
-11. [Contact](#contact)
-12. [Acknowledgments](#acknowledgments)
+## Table of Contents
 
-## About The Project
+1. [Architecture](#architecture)
+2. [Everything is a Plugin](#everything-is-a-plugin)
+3. [Quickstart](#quickstart)
+4. [Usage Guide](#usage-guide)
+5. [Self-Hosting & Docker](#self-hosting--docker)
+6. [Testing & Conformance Kit](#testing--conformance-kit)
+7. [Security & Trust Boundaries](#security--trust-boundaries)
+8. [Contributing & Development](#contributing--development)
+9. [License](#license)
 
-Agent OS LangGraph is not a hosted SaaS, a prompt pack, or a demo that only
-works with one developer's private setup. It is a public, auditable framework
-for running agent workflows with clear boundaries:
+---
 
-- deterministic tools handle exact, low-risk work first;
-- ambiguous work escalates to a read-only architect;
-- human review happens before agent-planned side effects;
-- executor work is scoped to the configured sandbox;
-- SQLite checkpoints, run ledgers, schedules, and event streams make runs
-  observable and resumable;
-- stable public interfaces live under `agent_os.api`;
-- private deployments supply their own memory, tools, credentials, policies,
-  prompts, dashboards, and organization-specific behavior.
+## Architecture
 
-The core graph looks like this:
+Agent OS separates agent reasoning into bounded, observable stages:
+
+- **Deterministic Fast-Path**: Exact low-risk tool invocations execute immediately without invoking an LLM.
+- **Architect Planning**: Complex or ambiguous goals escalate to a read-only architect that produces structured execution proposals.
+- **Human Gate & Policy Floor**: Side-effect proposals require approval; non-bypassable policy floors enforce hard safety denials.
+- **Sandboxed Execution**: Side effects execute only within configured workspace sandboxes.
+- **Durable Checkpoints & Audit**: Graph execution states, run ledgers, permission rules, and observation evidence persist across restarts in WAL-mode SQLite databases.
 
 ```mermaid
 flowchart TD
-    START(["START"]) --> planner["planner"] --> supervisor["supervisor"]
-    supervisor -->|"new task"| dispatcher["tool_dispatcher"]
-    dispatcher -->|"tool success"| END(["END"])
-    dispatcher -->|"low confidence or failure"| supervisor
-    supervisor -->|"escalated"| architect["architect"]
-    architect --> gate["human_gate"]
-    gate -->|"approved or rejected"| supervisor
-    supervisor -->|"approved"| executor["executor"]
-    supervisor -->|"rejected"| architect
+    START(["START"]) --> planner["planner (Context Injection)"]
+    planner --> supervisor["supervisor"]
+    supervisor -->|"deterministic task"| dispatcher["tool_dispatcher"]
+    dispatcher -->|"success"| END(["END"])
+    dispatcher -->|"ambiguous / complex"| supervisor
+    supervisor -->|"escalate"| architect["architect (Read-Only)"]
+    architect --> gate["human_gate (Policy Floor)"]
+    gate -->|"approved"| supervisor
+    gate -->|"rejected"| architect
+    supervisor -->|"execute"| executor["executor (Sandbox Scoped)"]
     executor --> supervisor
-    supervisor -->|"execution complete"| END
+    supervisor -->|"done"| END
 ```
 
-### What v2.2.1 Ships
+---
 
-| Area | Capability | Why it matters |
+## Everything is a Plugin
+
+Agent OS exposes a frozen, stable public facade under `agent_os.api` with 7 standard plugin entry-point groups:
+
+| Plugin Group | Protocol / Base | Description |
 |---|---|---|
-| Runtime | Runtime API, run ledger, SSE event stream, approve/cancel | External dashboards and operators can observe and control runs |
-| Persistence | SQLite checkpoints, separate run/scheduler databases | Work survives restarts without cross-locking the graph checkpointer |
-| Control | Architect, human gate, policy engine, executor boundary | Agent-planned side effects are reviewable and auditable |
-| Memory | Connector framework, gated write path, hot context, native `memory_write` | Private memory can be attached with explicit, scoped consent |
-| Evidence | Structured outcome observations and sanitized strategy assignments | Planning can use labelled evidence without exposing raw task or model data |
-| Scheduling | Local cron/interval schedules for runs and briefs | Long-running self-hosted instances can fire background work |
-| Self-hosting | Docker Compose backend + digest-pinned console image | A fresh clone can run the runtime and operator console locally |
-| Extensions | Stable `agent_os.api`, `py.typed`, conformance tests | Community users can build connectors, skills, backends, and policies |
+| `agent_os.connectors` | `Connector` | Custom action tools and external API adapters |
+| `agent_os.memory_connectors` | `MemoryConnector`, `WritableMemory`, `IndexableMemory` | Long-term memory vaults (Markdown, G-Brain, SQLite, vector) |
+| `agent_os.backends` | `BackendAdapter` | Model execution backends (Claude Code, Codex CLI, LiteLLM, Ollama) |
+| `agent_os.policies` | `PolicyEngine` | Custom policy evaluators and organizational approval rules |
+| `agent_os.skill_packages` | `SkillPackageLoader` | Reusable skill bundles and prompt workflows |
+| `agent_os.context_providers` | `ContextProvider` | Pre-planner retrieval and dynamic context injection hooks |
+| `agent_os.event_sinks` | `EventSink` | Lifecycle run event egress and signed webhook delivery |
 
-The v2.x learning surface is deliberately bounded. v2.1.0 adds explicit,
-user-taught permission memory for exact memory-write scopes. v2.2.0 adds
-structured outcome evidence and deterministic selection among three fixed,
-versioned planning strategies; v2.2.1 preserves the original selection reason
-and sanitized decision snapshot for replay. These features do not claim
-autonomous self-learning, unrestricted strategy invention, or autonomous
-changes to permissions and execution safety.
+### Stable Public API
 
-### Public vs Private Boundary
+All third-party extensions build directly against `agent_os.api`:
 
-The public repository contains generic primitives, contracts, reference
-implementations, documentation, and tests. Private deployments should keep the
-following outside the public repo:
+```python
+from agent_os.api import (
+    Connector,
+    ContextProvider,
+    ContextBlock,
+    EventSink,
+    IndexableMemory,
+    MemoryConnector,
+    PluginRegistry,
+    Principal,
+)
+```
 
-- `.env` files, API keys, OAuth tokens, and provider credentials;
-- checkpoints, run ledgers, schedules, logs, and sandbox output;
-- personal vaults, client memory, proprietary prompts, and private skills;
-- organization-specific dashboards, Telegram bots, and deployment secrets.
+---
 
-See [ADR 0001: Public vs Private](docs/adr/0001-public-vs-private.md) for the
-boundary decision.
-
-## Built With
-
-- [LangGraph](https://github.com/langchain-ai/langgraph) for graph execution,
-  interrupts, and checkpointed workflows
-- [LangChain](https://github.com/langchain-ai/langchain) and
-  [LiteLLM](https://github.com/BerriAI/litellm) for model/provider boundaries
-- [Pydantic](https://docs.pydantic.dev/) for structured contracts
-- [FastAPI](https://fastapi.tiangolo.com/) for the runtime API
-- [MCP](https://modelcontextprotocol.io/) for optional external tool adapters
-- SQLite for checkpoints, run ledgers, schedules, and local state
-- Docker Compose for local self-hosting
-
-## Getting Started
+## Quickstart
 
 ### Prerequisites
 
 - Python 3.11 or 3.12
 - Git
-- Docker with Compose v2, if you want the self-hosted API + console stack
-- Optional: provider credentials, local model endpoint, Claude Code, Codex CLI,
-  or MCP servers, depending on the backend you choose
+- Docker with Compose v2 (optional, for local self-hosted stack)
 
-### Installation
-
-Clone the repository and install the development extra:
+### 1. Installation
 
 ```bash
 git clone https://github.com/simon-aibc/agent-os-langgraph.git
@@ -135,17 +112,18 @@ cd agent-os-langgraph
 
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+pip install -e ".[dev,serve]"
 ```
 
-Run the zero-LLM deterministic path:
+### 2. Zero-LLM Deterministic Fast-Path
+
+Run exact tool commands with zero model dependencies:
 
 ```bash
 agent-os "read_file README.md" --thread-id quickstart --sandbox .
 ```
 
-Expected shape:
-
+Output:
 ```text
 [THREAD] quickstart
 [SUPERVISOR] -> tool_dispatcher
@@ -153,15 +131,15 @@ Expected shape:
 [RESULT] # Agent OS LangGraph ...
 ```
 
-### Configure Model Roles
+### 3. Configure LLM Model Roles
 
-Copy the sample environment and select a router, architect, and executor:
+Copy the environment template and set your model backends:
 
 ```bash
 cp .env.example .env
 ```
 
-The runtime reads these three roles:
+Agent OS reads 3 decoupled roles:
 
 ```bash
 LLM_ROUTER="ollama/qwen2.5:14b"
@@ -169,247 +147,132 @@ LLM_ARCHITECT="anthropic/claude-opus-4-8"
 LLM_EXECUTOR="openai/gpt-5.5"
 ```
 
-You may also use authenticated subscription CLIs:
+You can also use authenticated subscription CLIs:
 
 ```bash
 LLM_ARCHITECT=cli/claude-code
 LLM_EXECUTOR=cli/codex
 ```
 
-Authenticate those CLIs before starting Agent OS. Backend subprocesses are
-noninteractive and cannot complete login flows mid-run.
+---
 
-## Usage
+## Usage Guide
 
-### Deterministic Tools
+### Architect + Human Approval Gate
 
-Exact tool commands take the fast path and do not require a model:
-
-```bash
-agent-os "read_file README.md" --thread-id readme-demo --sandbox .
-agent-os "bash python -m compileall agent_os" --thread-id compile-demo --sandbox .
-```
-
-Tier-1 `write` uses a simple `write <path> :: <content>` contract. Shell
-quoting happens before Agent OS sees the task, so multiline content must be
-expanded by the shell or read from a source file:
+When a goal requires complex changes, the system creates a proposal and pauses for interactive or API review:
 
 ```bash
-agent-os "write notes.txt :: $(printf 'line1\nline2')" --sandbox ./sandbox
-```
-
-### Architect + Human Gate + Executor
-
-Semantic work escalates to a read-only plan, pauses for approval, and only then
-allows executor work:
-
-```bash
-agent-os "add type hints to math_util.py and verify it compiles" \
-  --thread-id type-hints-demo \
+agent-os "add docstrings to math_util.py and verify syntax" \
+  --thread-id docstring-task \
   --sandbox ./sandbox
 ```
 
-At the plan gate, the CLI accepts `approved`, `y`, or `rejected: <reason>`.
-Interrupted processes can resume from SQLite without repeating the original
-task:
+At the approval prompt, choose `approved`, `session`, `always_approve`, or `rejected: <reason>`.
+
+Interrupted runs resume seamlessly from SQLite checkpoints:
 
 ```bash
-agent-os --resume --thread-id type-hints-demo --sandbox ./sandbox
+agent-os --resume --thread-id docstring-task --sandbox ./sandbox
 ```
 
-### Conversations, Sessions, Briefs, And Schedules
-
-Agent OS also supports longer-lived operation:
+### Multi-Turn Chat, Sessions & Schedules
 
 ```bash
-agent-os chat --thread-id daily-driver
+# Interactive multi-turn conversation
+agent-os chat --thread-id daily-session
+
+# Session inspection
 agent-os sessions list
-agent-os sessions inspect daily-driver
-agent-os brief --workspace ./examples/personal-assistant
+agent-os sessions inspect daily-session
+
+# Local cron/interval schedules
 agent-os schedule list
 ```
 
-Schedules are local cron/interval jobs for `run` and `brief` work. Automatic
-firing happens in a long-running `agent-os serve` process or the self-hosted
-Compose stack.
-
-### Runtime API
-
-Install the serve extra and start the local API:
+### Self-Update & Migrations
 
 ```bash
-python -m pip install -e ".[serve]"
+# Check for latest updates against GitHub releases (cached)
+agent-os update --check
+
+# Execute upgrade with pre-migration database backup
+agent-os update --yes --reload
+```
+
+---
+
+## Self-Hosting & Docker
+
+### Run with Docker Compose
+
+Start the Agent OS backend runtime and web console with a single command:
+
+```bash
+docker compose up -d
+```
+
+- **Runtime API**: `http://127.0.0.1:4680`
+- **Operator Console**: `http://127.0.0.1:3000`
+- **API Health**: `http://127.0.0.1:4680/api/health`
+
+### Run Runtime Server Locally
+
+```bash
 agent-os serve --host 127.0.0.1 --port 4680
 ```
 
-Useful endpoints include:
+Key endpoints:
+- `GET /api/health` — Runtime health and update cache status
+- `POST /api/runs` — Trigger non-blocking asynchronous agent runs
+- `GET /api/runs/events` — Server-Sent Events (SSE) stream for live run output
+- `POST /api/runs/{run_id}/approve` — Submit approval or rejection for gated steps
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/health` | Runtime health |
-| `POST /api/runs` | Start a graph run |
-| `GET /api/runs` | List runs |
-| `GET /api/runs/{id}` | Inspect a run and pending interrupt |
-| `GET /api/runs/{id}/events` | Replay and live-tail run events over SSE |
-| `POST /api/runs/{id}/approve` | Resume an interrupted run |
-| `POST /api/runs/{id}/cancel` | Cancel a nonterminal run |
-| `GET /api/graph` | Return memory graph nodes/edges when a memory connector is configured |
-| `GET /api/observations` | List bounded structured outcome evidence for the active workspace |
-| `POST /api/observations/{id}/outcome` | Record an explicit accepted, rejected, or edited outcome |
-| `GET /api/observations/assignments/{run_id}` | Inspect the sanitized strategy assignment trace for a run |
+---
 
-Terminal runs create an `unknown` observation only; completion never implies
-user acceptance. Operators can inspect or label observations with
-`agent-os observations list` and `agent-os observations record-outcome`.
-Labelled outcomes can select only a fixed, versioned planning strategy for the
-same workspace and task kind. Raw evidence is never added to the architect
-prompt, and strategy selection cannot alter permissions, invoke tools, or make
-autonomous execution changes.
+## Testing & Conformance Kit
 
-Assignment decisions can be inspected after a run with
-`agent-os observations assignment <run_id>`; the record includes the original
-selection reason and sanitized evidence summary, not raw task or model data.
-
-The API is localhost-first and is not designed to be exposed directly to the
-internet.
-
-## Self-Hosting
-
-Run the backend API and operator console locally with Docker Compose:
-
-```bash
-cp .env.example .env
-# Edit .env with model roles, provider keys, and AGENT_OS_WORKSPACE.
-docker compose up --build --detach
-docker compose ps
-```
-
-Open the console at [http://127.0.0.1:4100](http://127.0.0.1:4100). The
-backend health endpoint is
-[http://127.0.0.1:4680/api/health](http://127.0.0.1:4680/api/health).
-
-The Compose stack:
-
-- builds the local backend image;
-- mounts `AGENT_OS_WORKSPACE` at `/workspace`;
-- stores checkpoints, run ledger, and schedules in the `agentos_data` volume;
-- pulls the operator console from an immutable, multi-arch GHCR digest;
-- binds both published ports to `127.0.0.1`.
-
-See [docs/self-hosting.md](docs/self-hosting.md) for configuration, backups,
-logs, port changes, and security guidance.
-
-## Extending Agent OS
-
-The stable v2 extension surface is `agent_os.api`. Imports from lower-level
-`agent_os.*` modules are implementation details and may change in minor
-releases.
-
-You can extend Agent OS with:
-
-- `MemoryConnector` implementations for private knowledge bases;
-- `BackendAdapter` implementations for model or agent backends;
-- `PolicyEngine` implementations for deployment-specific approval rules;
-- `RegisteredSkill` objects and trusted local skill packages;
-- MCP-backed tool catalogs injected into graph construction.
-
-Minimal native skill example:
+Agent OS includes a dependency-light conformance testing kit under `agent_os.testing.conformance` for verifying custom plugins:
 
 ```python
-from langchain_core.tools import tool
+from agent_os.testing.conformance import (
+    check_connector,
+    check_memory_connector,
+    check_context_provider,
+    check_event_sink,
+)
 
-from agent_os.api import RegisteredSkill
-from agent_os.default_registry import build_default_registry
-from agent_os.graph import build_graph
-from agent_os.nodes.tool_dispatcher import build_tool_dispatcher_node
-
-
-@tool
-def summarize(text: str) -> str:
-    """Return a compact summary."""
-    return text[:200]
-
-
-registry = build_default_registry()
-registry.register(RegisteredSkill("summarize", (), summarize))
-dispatcher = build_tool_dispatcher_node(registry=registry)
-custom_graph = build_graph(tool_dispatcher_node_impl=dispatcher)
+def test_my_custom_plugin():
+    my_sink = MyCustomEventSink()
+    check_event_sink(my_sink)
 ```
 
-See [docs/EXTENDING.md](docs/EXTENDING.md) for connector, backend, policy, and
-skill-package contracts.
-
-## Security And Trust Boundaries
-
-Agent OS provides application-level boundaries, not complete isolation.
-
-- Human approval protects agent-planned executor work.
-- Explicit Tier-1 `write_file` and `bash` requests are direct user
-  instructions.
-- Native writes and subprocesses resolve under `AGENT_OS_SANDBOX`.
-- Subprocesses use argument arrays, `shell=False`, timeouts, redaction, and
-  output caps.
-- Checkpoints may contain tasks, messages, plans, tool results, and file
-  content; treat them as sensitive local data.
-- CLI argument guards and permission modes are defense-in-depth, not an OS
-  sandbox.
-- Untrusted workloads require a container, microVM, or another isolation layer.
-
-Never commit `.env`, checkpoints, sandboxes, provider credentials, private
-vault content, or real workflow logs.
-
-## Roadmap
-
-The first public backbone arc is complete through v2.0.0:
-
-- v1.0-v1.2: typed graph, durable checkpoints, router, MCP, backend profiles
-- v1.3-v1.5: generic contracts, memory connectors, chat, sessions, recall
-- v1.6-v1.8: policy, workspaces, runtime API, ledger, graph API, scheduler,
-  backend container
-- v1.9 console: public multi-arch operator console image
-- v2.0: stable extension API and one-command self-host Compose
-- v2.1: scoped, user-taught memory permissions with workspace isolation
-- v2.2: structured outcome evidence and bounded adaptive planning
-- v2.2.1: audit-trace integrity for strategy assignment replay
-
-Current v2.x work is focused on community adoption, operational hardening, and
-private deployment integration rather than expanding the public core by
-default. See
-[docs/roadmap.md](docs/roadmap.md) for the live roadmap and public/private
-boundary.
-
-## Contributing
-
-Small, focused issues and pull requests are welcome.
+Run the complete test suite:
 
 ```bash
-python -m ruff check .
-python -m pytest -W error
-python -m pip check
-git diff --check
+pytest -q
 ```
 
-The default suite must remain offline. External provider, MCP, Docker, or live
-CLI checks should be opt-in and documented. Do not include private memory,
-credentials, checkpoints, or real user logs in fixtures.
+---
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide and
-[SECURITY.md](SECURITY.md) for private vulnerability reporting.
+## Security & Trust Boundaries
+
+- **Immutable Policy Floor**: Hard safety constraints (such as `payment` and `privileged` actions) cannot be bypassed or overridden by plugins, even in permissive policy modes.
+- **DNS-Rebinding Safe Webhooks**: Webhook delivery validates IP addresses against loopback/private ranges and pins sockets with TLS SNI validation.
+- **Server-Trusted Actor Identity**: `Principal` provenance is resolved securely server-side to prevent HTTP header spoofing.
+- **Workspace Isolation**: Database files, permission rules, and observations are isolated per workspace.
+
+---
+
+## Contributing & Development
+
+We welcome contributions! Please review:
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Guidelines for code style, tests, and PR process.
+- [docs/EXTENDING.md](docs/EXTENDING.md) — Guide to authoring plugins, connectors, and policies.
+- [docs/architecture.md](docs/architecture.md) — Complete system architecture.
+
+---
 
 ## License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for more information.
-
-## Contact
-
-Simon Tran - [GitHub @simon-aibc](https://github.com/simon-aibc)
-
-Project link:
-[https://github.com/simon-aibc/agent-os-langgraph](https://github.com/simon-aibc/agent-os-langgraph)
-
-## Acknowledgments
-
-- The README structure follows the community-friendly shape popularized by
-  [Best-README-Template](https://github.com/othneildrew/Best-README-Template).
-- LangGraph, LangChain, LiteLLM, FastAPI, MCP, Docker, Claude Code, and Codex
-  provide the ecosystem pieces this reference implementation integrates.
+[MIT](LICENSE) © Simon Tran

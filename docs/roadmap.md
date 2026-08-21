@@ -5,7 +5,7 @@ controllable AI agent systems - generic primitives an engineering team can
 clone, audit, extend, and self-host, without private context living in the
 public repository.**
 
-## Current State - v2.2.1
+## Current State - v2.4.0
 
 The first public backbone arc is complete:
 
@@ -28,6 +28,11 @@ The first public backbone arc is complete:
   selection among fixed, versioned planning strategies.
 - **v2.2.1:** audit-trace integrity that preserves the original strategy
   selection reason and sanitized decision snapshot across replay.
+- **v2.3.0:** self-update lifecycle, update discovery, additive migrations,
+  and semantic M/N post-execution judge.
+- **v2.4.0:** generic plugin runtime across 7 entry-point groups, identity audit
+  provenance, retrieval lifecycle indexing, non-blocking pre-planner context,
+  anti-SSRF signed webhook egress, and third-party conformance kit.
 
 See [`CHANGELOG.md`](../CHANGELOG.md) for shipped release details.
 
@@ -69,7 +74,7 @@ decisions.
 | v2.2 | Complete | Structured outcome evidence and bounded adaptive planning |
 | v2.2.1 | Complete | Strategy assignment audit-trace integrity across replay |
 | v2.3 | Complete | Self-update lifecycle, update discovery, additive migrations, semantic M/N judge |
-| v2.4 | In Progress (Unreleased) | Plugin runtime, stable API facade, retrieval lifecycle, event egress & conformance kit |
+| v2.4 | Complete | Plugin runtime, stable API facade, retrieval lifecycle, event egress & conformance kit |
 
 ## v2.x Direction
 

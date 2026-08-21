@@ -3,7 +3,7 @@
 All notable changes are recorded here. The project follows semantic versioning
 for public releases.
 
-## [Unreleased]
+## [2.4.0] — 2026-08-21
 
 ### Added
 
@@ -12,6 +12,8 @@ for public releases.
 - **Retrieval Lifecycle & Pre-Planner Context**: `IndexableMemory` protocol with bounded cold-start indexing, and non-blocking `ContextProvider` execution before planner nodes.
 - **Event Egress & Anti-SSRF Webhook**: `@runtime_checkable` `EventSink` protocol and reference `WebhookEventSink` featuring HMAC-SHA256 signatures, DNS-rebinding-safe IP pinning, and strict payload privacy invariants.
 - **Extension Conformance Kit**: Dependency-light testing package under `agent_os.testing` with reusable pytest mixins and assertion helpers for third-party satellite development.
+
+## [2.3.0] — 2026-08-20
 
 ### Added
 
