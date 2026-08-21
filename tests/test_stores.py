@@ -211,3 +211,31 @@ def test_api_and_scheduler_boundaries_use_store_interface(monkeypatch, tmp_path:
         assert store.get_run(res.run_id) is not None
 
     anyio.run(run_dispatch)
+
+
+def test_store_backend_discovery(monkeypatch):
+    from agent_os.stores import list_store_backends, resolve_store_backend
+
+    class FakeEntryPoint:
+        def __init__(self, name, target):
+            self.name = name
+            self.target = target
+
+        def load(self):
+            return self.target
+
+    class CustomPostgresRunStore:
+        pass
+
+    fake_eps = [FakeEntryPoint("postgres", CustomPostgresRunStore)]
+
+    monkeypatch.setattr(
+        "agent_os.plugins._get_entry_points",
+        lambda group: fake_eps if group == "agent_os.stores" else [],
+    )
+
+    available = list_store_backends()
+    assert available == ["postgres"]
+
+    resolved = resolve_store_backend("postgres")
+    assert resolved is CustomPostgresRunStore

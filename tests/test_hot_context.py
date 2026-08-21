@@ -69,3 +69,60 @@ def test_load_hot_context_empty(tmp_path):
     connector = MarkdownVaultConnector(str(vault))
     res = load_hot_context(connector)
     assert res == ""
+
+
+def test_architect_node_prefers_workspace_memory_connector(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from agent_os.nodes.architect import architect_node
+    from agent_os.profiles import HotContextConfig, Profile
+    from agent_os.state import BackendBinding
+
+    mock_runtime = MagicMock()
+    mock_connector = MagicMock()
+    mock_connector.list_notes.return_value = [{"ref": "hot.md"}]
+    mock_connector.read_note.return_value = {"content": "workspace memory note content"}
+    mock_runtime.memory_connector = mock_connector
+
+    monkeypatch.setattr(
+        "agent_os.server.runtime.composed_workspace",
+        lambda: mock_runtime,
+    )
+
+    mock_profile = Profile(
+        name="test_prof",
+        hot_context=HotContextConfig(max_chars=1000, sources=["hot.md"]),
+    )
+
+    state = {
+        "task": "do something",
+        "messages": [],
+        "backend_binding": BackendBinding(
+            router=None,
+            architect="cli/claude-code",
+            executor="cli/codex",
+            profile_name="test_prof",
+            sandbox_root="/tmp/sandbox",
+        ),
+    }
+
+    # Mock agent execution to avoid calling real LLM
+    from agent_os.schemas import PlanArtifact
+
+    brief_mock = PlanArtifact(summary="test")
+
+    monkeypatch.setattr(
+        "agent_os.profiles.load_profiles",
+        lambda *args, **kwargs: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "agent_os.profiles.resolve_profile",
+        lambda *args, **kwargs: mock_profile,
+    )
+    monkeypatch.setattr(
+        "agent_os.nodes.architect.invoke_with_llm_retry",
+        lambda fn: {"structured_response": brief_mock},
+    )
+
+    architect_node(state)
+    assert mock_connector.read_note.called

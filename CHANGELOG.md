@@ -5,10 +5,15 @@ for public releases.
 
 ## [Unreleased]
 
+### Added
+
+- **Pluggable Store Discovery**: Added dynamic entry-point discovery for the `agent_os.stores` group via `resolve_store_backend()` and `list_store_backends()` in `agent_os.stores`, allowing third-party persistence adapters (e.g. Postgres) to be loaded as plugins.
+
 ### Fixed
 
 - **Bounded Webhook Worker & Shutdown Drain**: `WebhookEventSink` now routes background delivery through a bounded FIFO queue and fixed worker pool, ensuring `emit()` never blocks the execution path, drops with a warning under queue saturation, and cleanly drains in-flight deliveries during graceful shutdown via `close()`.
 - **Explicit Insecure HTTP Opt-in**: Webhook URLs now reject unencrypted `http://` schemes by default. Insecure HTTP requires explicit opt-in via workspace configuration `[webhooks] allow_insecure_http = true` or `allowed_internal_hosts`.
+- **Workspace Composition Memory Routing**: Eliminated direct environment variable bypasses in `architect.py`, `brief_runtime.py`, and `cli/app.py`, ensuring all memory operations route through `composed_workspace().memory_connector` when a workspace is active.
 
 ## [2.4.0] — 2026-08-21
 

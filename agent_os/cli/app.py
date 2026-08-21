@@ -936,14 +936,20 @@ async def _chat_loop(
             ):
                 connector = workspace_connector
             else:
-                connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
-                if connector_name == "gbrain":
-                    connector = GbrainConnector()
+                from agent_os.server.runtime import composed_workspace
+
+                runtime = composed_workspace()
+                if runtime is not None and getattr(runtime, "memory_connector", None) is not None:
+                    connector = runtime.memory_connector
                 else:
-                    vault_path = os.getenv(
-                        "AGENT_OS_VAULT_PATH", backend_binding.sandbox_root
-                    )
-                    connector = MarkdownVaultConnector(vault_path)
+                    connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
+                    if connector_name == "gbrain":
+                        connector = GbrainConnector()
+                    else:
+                        vault_path = os.getenv(
+                            "AGENT_OS_VAULT_PATH", backend_binding.sandbox_root
+                        )
+                        connector = MarkdownVaultConnector(vault_path)
 
             with _get_db() as db:
                 c = db.execute(
