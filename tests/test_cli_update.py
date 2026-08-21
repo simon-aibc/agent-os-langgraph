@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import sqlite3
 from unittest.mock import patch
 
 from rich.console import Console
@@ -7,7 +9,9 @@ from agent_os.cli.app import build_parser
 from agent_os.cli.update import (
     handle_update_command,
     is_docker_environment,
+    run_pre_update_db_backups,
 )
+from agent_os.permission_store import PERMISSION_DB_ENV
 from agent_os.update_check import UpdateInfo
 
 
@@ -97,3 +101,19 @@ def test_handle_update_docker_guidance():
         text = console.export_text()
         assert "Detected Docker container runtime." in text
         assert "docker compose pull && docker compose up -d" in text
+
+
+def test_run_pre_update_db_backups_creates_real_backup_files(tmp_path, monkeypatch):
+    test_db = tmp_path / "permissions.db"
+    with contextlib.closing(sqlite3.connect(test_db)) as conn:
+        conn.execute("CREATE TABLE test (id INT)")
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+
+    monkeypatch.setenv(PERMISSION_DB_ENV, str(test_db))
+    monkeypatch.setattr("agent_os.cli.update.get_runs_db_path", lambda: str(tmp_path / "nonexistent_runs.db"))
+    monkeypatch.setattr("agent_os.cli.update.get_sched_db_path", lambda: str(tmp_path / "nonexistent_sched.db"))
+
+    backed_up = run_pre_update_db_backups()
+    assert str(test_db) in backed_up
+    assert (tmp_path / "permissions.db.bak-1").exists()

@@ -146,7 +146,8 @@ def emit_run_lifecycle_event(
             runtime = composed_workspace()
             if runtime is not None:
                 sinks = getattr(runtime, "event_sinks", ())
-        except Exception:
+        except Exception as exc:
+            logger.debug(f"Could not retrieve runtime event sinks: {exc}")
             sinks = ()
 
     if sinks:

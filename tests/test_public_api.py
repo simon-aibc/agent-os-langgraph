@@ -45,6 +45,7 @@ EXPECTED_EXPORTS = {
     "Principal",
     "PrincipalResolver",
     "RegisteredSkill",
+    "SUPPORTED_SIDE_EFFECTS",
     "SkillHandler",
     "SkillPackageLoader",
     "SkillRegistry",

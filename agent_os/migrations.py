@@ -167,7 +167,7 @@ def _apply_statement(conn: sqlite3.Connection, sql: str) -> None:
     conn.execute(clean)
 
 
-def backup_database(db_path: str | Path, version: int) -> Path | None:
+def backup_database(db_path: str | Path, version: int = 1) -> Path | None:
     """Create a backup of the DB file before applying migrations.
 
     WAL-aware: Executes PRAGMA wal_checkpoint(TRUNCATE) before copying to flush

@@ -673,7 +673,12 @@ def _build_connector_registry(
 
     memory_connector = _build_memory_connector(ws, plugin_registry=plugin_registry)
     registry.register("memory", memory_connector)
-    registry.register(memory_connector.name, memory_connector)
+    try:
+        registry.register(memory_connector.name, memory_connector)
+    except ValueError as exc:
+        raise WorkspaceLoadError(
+            f"Failed to register memory connector '{memory_connector.name}': {exc}"
+        ) from exc
     if memory_connector.name == "markdown_vault":
         registry.register("markdown", memory_connector)
 

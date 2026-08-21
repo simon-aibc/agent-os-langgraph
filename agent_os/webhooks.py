@@ -19,7 +19,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_WEBHOOK_TIMEOUT_SECONDS = 2.0
 DEFAULT_WEBHOOK_MAX_RETRIES = 3
-MAX_REDIRECTS = 3
+
+
+def _redact_url_for_log(url: str) -> str:
+    """Redact path, query, and credentials from webhook URL to prevent secret leakage in logs."""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        netloc = parsed.netloc
+        if "@" in netloc:
+            netloc = netloc.split("@", 1)[1]
+        return f"{parsed.scheme}://{netloc}/*"
+    except Exception:
+        return "http(s)://<redacted>"
 
 
 def is_safe_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -224,18 +235,13 @@ class WebhookEventSink:
         target_url: str,
         body: bytes,
         headers: dict[str, str],
-        redirect_hops: int = 0,
     ) -> tuple[bool, int, str]:
         """Perform a single HTTP request connecting only to a validated pinned IP address."""
-        if redirect_hops > MAX_REDIRECTS:
-            logger.warning(f"Webhook exceeded max redirects ({MAX_REDIRECTS}) for '{self.url}'")
-            return False, 0, "Too many redirects"
-
         is_safe, reason, scheme, hostname, port, pinned_ip, path = _resolve_and_validate_target(
             target_url, self.allowed_internal_hosts
         )
         if not is_safe:
-            logger.warning(f"Webhook delivery aborted: {reason}")
+            logger.warning(f"Webhook delivery aborted for destination: {reason}")
             return False, 0, reason
 
         host_header = hostname if (port in (80, 443)) else f"{hostname}:{port}"
@@ -269,18 +275,10 @@ class WebhookEventSink:
                 resp.read()
                 return True, status, ""
 
-            # Handle redirects safely with re-validation and IP pinning
-            if status in (301, 302, 303, 307, 308):
-                location = resp.getheader("Location")
+            # Webhooks do not follow redirects to prevent signature forwarding & cross-origin leakage
+            if 300 <= status < 400:
                 resp.read()
-                if location:
-                    redirect_url = urllib.parse.urljoin(target_url, location)
-                    return self._send_single_request(
-                        redirect_url,
-                        body,
-                        headers,
-                        redirect_hops=redirect_hops + 1,
-                    )
+                return False, status, f"Redirects not permitted (HTTP {status})"
 
             resp.read()
             return False, status, f"HTTP {status}"
@@ -310,6 +308,7 @@ class WebhookEventSink:
             "User-Agent": "AgentOS-Webhook/1.0",
         }
 
+        redacted_url = _redact_url_for_log(self.url)
         for attempt in range(self.max_retries):
             success, status, err_msg = self._send_single_request(self.url, body, headers)
             if success:
@@ -317,7 +316,7 @@ class WebhookEventSink:
 
             logger.warning(
                 f"Webhook delivery attempt {attempt + 1}/{self.max_retries} "
-                f"to '{self.url}' failed: {err_msg or f'status={status}'}"
+                f"to '{redacted_url}' failed: {err_msg or f'status={status}'}"
             )
 
             if attempt < self.max_retries - 1:
@@ -326,6 +325,6 @@ class WebhookEventSink:
 
         logger.warning(
             f"Webhook delivery failed for event '{event.get('event')}' "
-            f"to '{self.url}' after {self.max_retries} attempts."
+            f"to '{redacted_url}' after {self.max_retries} attempts."
         )
         return False

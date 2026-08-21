@@ -10,11 +10,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from agent_os.backends import AuthStatus
-from agent_os.connectors import IndexResult
-from agent_os.context import ContextBlock
-from agent_os.principal import Principal
-from agent_os.schemas import SUPPORTED_SIDE_EFFECTS
+from agent_os.api import (
+    SUPPORTED_SIDE_EFFECTS,
+    AuthStatus,
+    ContextBlock,
+    IndexResult,
+    Principal,
+)
 
 
 class ConformanceError(AssertionError):

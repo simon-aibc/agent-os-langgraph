@@ -15,11 +15,17 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 
 from agent_os.checkpoints import CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB
-from agent_os.migrations import run_migrations
+from agent_os.migrations import (
+    PERMISSIONS_MIGRATIONS,
+    RUNS_MIGRATIONS,
+    backup_database,
+    run_migrations,
+)
 from agent_os.observations import DEFAULT_OBSERVATION_DB, OBSERVATION_DB_ENV
 from agent_os.permission_store import DEFAULT_PERMISSION_DB, PERMISSION_DB_ENV
 from agent_os.runs import _get_db_path as get_runs_db_path
@@ -40,28 +46,34 @@ def is_docker_environment() -> bool:
 
 def run_pre_update_db_backups() -> list[str]:
     """Execute pre-migration checks and backups on all known SQLite databases."""
-    db_paths: list[str] = [
-        get_runs_db_path(),
-        get_sched_db_path(),
-        os.getenv(PERMISSION_DB_ENV, DEFAULT_PERMISSION_DB),
-        os.getenv(OBSERVATION_DB_ENV, DEFAULT_OBSERVATION_DB),
+    db_configs: list[tuple[str, tuple[Any, ...]]] = [
+        (get_runs_db_path(), RUNS_MIGRATIONS),
+        (get_sched_db_path(), ()),
+        (os.getenv(PERMISSION_DB_ENV, DEFAULT_PERMISSION_DB), PERMISSIONS_MIGRATIONS),
+        (os.getenv(OBSERVATION_DB_ENV, DEFAULT_OBSERVATION_DB), ()),
     ]
 
     checkpoint_db = os.getenv(CHECKPOINT_DB_ENV, DEFAULT_CHECKPOINT_DB)
     if checkpoint_db != ":memory:":
-        db_paths.append(checkpoint_db)
+        db_configs.append((checkpoint_db, ()))
 
     backed_up: list[str] = []
-    for db_path_str in db_paths:
+    for db_path_str, migrations in db_configs:
         if db_path_str == ":memory:":
             continue
         p = Path(db_path_str).expanduser()
         if p.exists() and p.is_file():
             try:
-                run_migrations(p, baseline_version=1)
-                backed_up.append(str(p))
+                # 1. Explicitly backup database before update
+                backup_path = backup_database(p)
+                if backup_path:
+                    backed_up.append(str(p))
             except Exception:
-                # Still continue backing up other databases
+                pass
+            try:
+                # 2. Run schema migrations
+                run_migrations(p, migrations=migrations, baseline_version=1)
+            except Exception:
                 pass
     return backed_up
 
@@ -98,65 +110,28 @@ def handle_update_command(
         for db in backed_up:
             out.print(f"  ✓ Verified/backed up database: {db}")
     else:
-        out.print("  ✓ No active database files needed backup.")
+        out.print("  • No local SQLite databases found to backup.")
 
-    in_docker = is_docker_environment()
-    yes_flag = getattr(args, "yes", False)
-
-    out.print("\n[bold cyan]2. Update Execution[/bold cyan]")
-    if in_docker:
-        out.print("[yellow]Detected Docker container runtime.[/yellow]")
-        out.print("To update your container, run on host:")
-        out.print("  [bold]docker compose pull && docker compose up -d[/bold]\n")
-        if yes_flag and getattr(args, "pull", False):
-            out.print("Executing `docker compose pull`...")
+    out.print("\n[bold cyan]2. Update procedure:[/bold cyan]")
+    if is_docker_environment():
+        out.print("Detected Docker container runtime.")
+        out.print("To update the container image, run:")
+        out.print("  [bold yellow]docker compose pull && docker compose up -d[/bold yellow]")
+    else:
+        out.print("To update your Python package installation, run:")
+        out.print("  [bold yellow]pip install --upgrade agent-os-langgraph[/bold yellow]")
+        if getattr(args, "yes", False):
+            out.print("\n[bold cyan]Executing pip upgrade...[/bold cyan]")
             try:
-                subprocess.run(["docker", "compose", "pull"], check=False)
-            except Exception as e:
-                out.print(f"[red]Failed to execute docker compose pull: {e}[/red]")
-    else:
-        out.print("[yellow]Detected pip / local Python runtime.[/yellow]")
-        upgrade_cmd = [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--upgrade",
-            "agent-os-langgraph",
-        ]
-        if yes_flag:
-            out.print(f"Running: {' '.join(upgrade_cmd)}")
-            res = subprocess.run(upgrade_cmd, check=False)
-            if res.returncode != 0:
-                out.print(
-                    f"[bold red]Upgrade failed with exit code {res.returncode}[/bold red]"
+                subprocess.check_call(
+                    [sys.executable, "-m", "pip", "install", "--upgrade", "agent-os-langgraph"]
                 )
-                return res.returncode
-            out.print(
-                "[bold green]Successfully upgraded agent-os-langgraph![/bold green]"
-            )
-        else:
-            out.print("To upgrade, execute:")
-            out.print("  [bold]pip install --upgrade agent-os-langgraph[/bold]")
-            out.print("Or re-run with `--yes`:")
-            out.print("  [bold]agent-os update --yes[/bold]")
+                out.print("[bold green]✓ Successfully upgraded agent-os-langgraph[/bold green]")
+            except Exception as e:
+                out.print(f"[bold red]Failed to run pip upgrade: {e}[/bold red]")
+                return 1
 
-    out.print("\n[bold cyan]3. Service Reload[/bold cyan]")
-    uid = os.getuid() if hasattr(os, "getuid") else 1000
-    kickstart_cmd = [
-        "launchctl",
-        "kickstart",
-        "-k",
-        f"gui/{uid}/com.simon.agentos",
-    ]
-    if getattr(args, "reload", False):
-        out.print(f"Reloading daemon: {' '.join(kickstart_cmd)}")
-        try:
-            subprocess.run(kickstart_cmd, check=False)
-        except Exception as e:
-            out.print(f"[yellow]Daemon reload note: {e}[/yellow]")
-    else:
-        out.print("If running as a macOS launchd daemon, restart with:")
-        out.print(f"  [bold]launchctl kickstart -k gui/{uid}/com.simon.agentos[/bold]")
-
+    out.print("\n[bold cyan]3. Post-update instructions:[/bold cyan]")
+    out.print("If you run the background daemon or web server, restart it now:")
+    out.print("  [dim]pkill -f 'agent-os server' && agent-os server[/dim]\n")
     return 0

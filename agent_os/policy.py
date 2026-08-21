@@ -510,11 +510,9 @@ def apply_policy(
             )
         ws_id = None
         if workspace is not None:
-            ws_id = getattr(workspace, "workspace_id", None) or (
-                str(getattr(workspace, "base_path", workspace))
-                if getattr(workspace, "base_path", None)
-                else str(workspace)
-            )
+            from agent_os.observations import observation_workspace_id
+
+            ws_id = observation_workspace_id(workspace)
         taught_by = None
         if isinstance(context, dict):
             principal = context.get("principal")
