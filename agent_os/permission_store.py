@@ -5,9 +5,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
-from agent_os.migrations import run_migrations
+from agent_os.migrations import PERMISSIONS_MIGRATIONS, run_migrations
+from agent_os.stores.base import configure_sqlite_connection
 
 PERMISSION_DB_ENV = "AGENT_OS_PERMISSIONS_DB"
 DEFAULT_PERMISSION_DB = "./permissions.db"
@@ -32,8 +33,11 @@ class PermissionRule:
     deny_count: int = 0
     created_at: int = 0  # epoch MILLIseconds
     updated_at: int = 0
+    workspace_id: str | None = None
+    taught_by: str | None = None
 
 
+@runtime_checkable
 class PermissionRuleStore(Protocol):
     """Protocol for storing learned permission rules."""
 
@@ -50,6 +54,9 @@ class PermissionRuleStore(Protocol):
     def increment_deny(self, permission_key: str) -> None: ...
 
 
+PermissionStore = PermissionRuleStore
+
+
 class SqlitePermissionStore:
     """SQLite-backed permission rule store with WAL and busy timeout safety."""
 
@@ -63,13 +70,13 @@ class SqlitePermissionStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(path, timeout=10.0)
         try:
-            conn.execute("PRAGMA journal_mode=WAL;")
-            conn.execute("PRAGMA busy_timeout=5000;")
+            configure_sqlite_connection(conn, wal=True, busy_timeout_ms=5000)
             yield conn
         finally:
             conn.close()
 
     def _init_db(self) -> None:
+        path = str(Path(self.db_path).expanduser())
         with self._connect() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS permission_rules (
@@ -82,8 +89,8 @@ class SqlitePermissionStore:
                   updated_at       INTEGER NOT NULL
                 );
             """)
-            run_migrations(conn, baseline_version=1)
             conn.commit()
+        run_migrations(path, PERMISSIONS_MIGRATIONS, baseline_version=1)
 
     def _validate_key(self, permission_key: str) -> None:
         if not isinstance(permission_key, str) or not PERMISSION_KEY_REGEX.fullmatch(
@@ -97,7 +104,8 @@ class SqlitePermissionStore:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT permission_key, effect, tier_at_creation, approve_count, deny_count, created_at, updated_at
+                SELECT permission_key, effect, tier_at_creation, approve_count, deny_count,
+                       created_at, updated_at, workspace_id, taught_by
                 FROM permission_rules
                 WHERE permission_key = ?
                 """,
@@ -114,6 +122,8 @@ class SqlitePermissionStore:
                 deny_count=row[4],
                 created_at=row[5],
                 updated_at=row[6],
+                workspace_id=row[7],
+                taught_by=row[8],
             )
 
     def upsert(self, rule: PermissionRule) -> None:
@@ -126,12 +136,15 @@ class SqlitePermissionStore:
             conn.execute(
                 """
                 INSERT INTO permission_rules (
-                  permission_key, effect, tier_at_creation, approve_count, deny_count, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                  permission_key, effect, tier_at_creation, approve_count, deny_count,
+                  created_at, updated_at, workspace_id, taught_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(permission_key) DO UPDATE SET
                   effect = excluded.effect,
                   tier_at_creation = excluded.tier_at_creation,
-                  updated_at = excluded.updated_at
+                  updated_at = excluded.updated_at,
+                  workspace_id = COALESCE(excluded.workspace_id, permission_rules.workspace_id),
+                  taught_by = COALESCE(excluded.taught_by, permission_rules.taught_by)
                 """,
                 (
                     rule.permission_key,
@@ -141,6 +154,8 @@ class SqlitePermissionStore:
                     rule.deny_count,
                     created_at,
                     updated_at,
+                    rule.workspace_id,
+                    rule.taught_by,
                 ),
             )
             conn.commit()
@@ -150,7 +165,8 @@ class SqlitePermissionStore:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT permission_key, effect, tier_at_creation, approve_count, deny_count, created_at, updated_at
+                SELECT permission_key, effect, tier_at_creation, approve_count, deny_count,
+                       created_at, updated_at, workspace_id, taught_by
                 FROM permission_rules
                 ORDER BY permission_key ASC
                 """
@@ -165,6 +181,8 @@ class SqlitePermissionStore:
                     deny_count=r[4],
                     created_at=r[5],
                     updated_at=r[6],
+                    workspace_id=r[7],
+                    taught_by=r[8],
                 )
                 for r in rows
             ]
@@ -235,6 +253,10 @@ class InMemoryPermissionStore:
             existing.effect = rule.effect
             existing.tier_at_creation = rule.tier_at_creation
             existing.updated_at = now_ms
+            if rule.workspace_id is not None:
+                existing.workspace_id = rule.workspace_id
+            if rule.taught_by is not None:
+                existing.taught_by = rule.taught_by
         else:
             created_at = rule.created_at if rule.created_at else now_ms
             new_rule = PermissionRule(
@@ -245,6 +267,8 @@ class InMemoryPermissionStore:
                 deny_count=rule.deny_count,
                 created_at=created_at,
                 updated_at=now_ms,
+                workspace_id=rule.workspace_id,
+                taught_by=rule.taught_by,
             )
             self._rules[rule.permission_key] = new_rule
 

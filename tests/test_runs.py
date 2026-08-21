@@ -97,3 +97,184 @@ def test_list_runs_supports_status_workspace_and_limit_filters(runs_db):
         run["run_id"] for run in list_runs(status="running", workspace="workspace-a")
     ] == [third]
     assert len(list_runs(limit=2)) == 2
+
+
+def test_create_run_persists_principal_and_workspace_id(runs_db):
+    from agent_os.principal import Principal
+
+    principal = Principal(
+        id="token:test-runner",
+        kind="service",
+        display="Service (test-runner)",
+        on_behalf_of="operator-1",
+    )
+    run_id = create_run(
+        "thread-p",
+        None,
+        "principal test task",
+        workspace_id="/custom/workspace",
+        principal=principal,
+    )
+
+    run = get_run(run_id)
+    assert run is not None
+    assert run["workspace_id"] == "/custom/workspace"
+    assert run["workspace"] == "/custom/workspace"  # Back-compat
+    assert run["created_by"] == "token:test-runner"
+    assert run["created_by_kind"] == "service"
+
+
+def test_run_approvals_ordered_decisions_and_audit(runs_db):
+    from agent_os.runs import list_approvals, record_approval
+
+    run_id = create_run("thread-audit", "/ws", "audit task")
+    assert list_approvals(run_id) == []
+
+    seq1 = record_approval(
+        run_id,
+        decision="approved",
+        actor_id="local:simon",
+        actor_kind="human",
+        reason="Looks safe to execute",
+    )
+    assert seq1 == 1
+
+    seq2 = record_approval(
+        run_id,
+        decision="approved",
+        actor_id="token:auto-gate",
+        actor_kind="service",
+        on_behalf_of="lead-dev",
+        reason="Second gate passed",
+    )
+    assert seq2 == 2
+
+    seq3 = record_approval(
+        run_id,
+        decision="cancelled",
+        actor_id="local:simon",
+        actor_kind="human",
+        reason="User requested cancellation",
+    )
+    assert seq3 == 3
+
+    history = list_approvals(run_id)
+    assert len(history) == 3
+    assert [h["seq"] for h in history] == [1, 2, 3]
+    assert [h["decision"] for h in history] == ["approved", "approved", "cancelled"]
+    assert history[0]["actor_id"] == "local:simon"
+    assert history[1]["actor_id"] == "token:auto-gate"
+    assert history[1]["on_behalf_of"] == "lead-dev"
+
+
+def test_record_approval_and_transition_atomic_and_prevents_false_audits(runs_db):
+    from agent_os.runs import list_approvals, record_approval_and_transition
+
+    run_id = create_run("thread-gate", "/ws", "gate task")
+    set_status(run_id, "interrupted")
+
+    # 1. Successful transition from interrupted -> running
+    success = record_approval_and_transition(
+        run_id,
+        decision="approved",
+        actor_id="local:operator",
+        actor_kind="human",
+        reason="Approved by user",
+        expected="interrupted",
+        status="running",
+    )
+    assert success is True
+    assert get_run(run_id)["status"] == "running"
+    approvals = list_approvals(run_id)
+    assert len(approvals) == 1
+    assert approvals[0]["decision"] == "approved"
+
+    # 2. Conflicting / duplicate approval attempt on already running run -> must fail and NOT insert false audit row
+    failed_attempt = record_approval_and_transition(
+        run_id,
+        decision="approved",
+        actor_id="local:another_user",
+        actor_kind="human",
+        expected="interrupted",
+        status="running",
+    )
+    assert failed_attempt is False
+    # Approvals list must still be only 1!
+    assert len(list_approvals(run_id)) == 1
+
+
+def test_record_cancellation_and_transition_atomic(runs_db):
+    from agent_os.runs import list_approvals, record_cancellation_and_transition
+
+    run_id = create_run("thread-cancel-atomic", "/ws", "cancel atomic task")
+    set_status(run_id, "running")
+
+    success = record_cancellation_and_transition(
+        run_id,
+        actor_id="token:execution",
+        actor_kind="service",
+        reason="Operator requested abort",
+    )
+    assert success is True
+
+    run = get_run(run_id)
+    assert run["status"] == "cancelled"
+    assert run["ended_at"] is not None
+
+    approvals = list_approvals(run_id)
+    assert len(approvals) == 1
+    assert approvals[0]["seq"] == 1
+    assert approvals[0]["decision"] == "cancelled"
+    assert approvals[0]["actor_id"] == "token:execution"
+    assert approvals[0]["actor_kind"] == "service"
+    assert approvals[0]["reason"] == "Operator requested abort"
+
+
+def test_cancellation_conflict_creates_no_audit_decision(runs_db):
+    from agent_os.runs import list_approvals, record_cancellation_and_transition
+
+    run_id = create_run("thread-cancel-conflict", "/ws", "terminal task")
+    set_status(run_id, "completed", ended=True)
+
+    # Attempting to cancel already-completed run
+    success = record_cancellation_and_transition(
+        run_id,
+        actor_id="token:execution",
+        actor_kind="service",
+    )
+    assert success is False
+    assert get_run(run_id)["status"] == "completed"
+    assert list_approvals(run_id) == []
+
+
+def test_audit_attempt_against_unknown_run_rejected(runs_db):
+    import pytest
+
+    from agent_os.runs import (
+        list_approvals,
+        record_approval,
+        record_approval_and_transition,
+        record_cancellation_and_transition,
+    )
+
+    with pytest.raises(KeyError, match="Run 'nonexistent-run' not found"):
+        record_approval(
+            "nonexistent-run",
+            decision="approved",
+            actor_id="local:tester",
+            actor_kind="human",
+        )
+
+    assert not record_approval_and_transition(
+        "nonexistent-run",
+        actor_id="local:tester",
+        actor_kind="human",
+    )
+
+    assert not record_cancellation_and_transition(
+        "nonexistent-run",
+        actor_id="local:tester",
+        actor_kind="human",
+    )
+
+    assert list_approvals("nonexistent-run") == []

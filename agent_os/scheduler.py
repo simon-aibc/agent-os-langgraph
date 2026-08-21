@@ -16,10 +16,10 @@ from typing import Any
 
 import httpx
 
-from agent_os import runs
 from agent_os.brief_runtime import execute_brief
 from agent_os.schedules import claim_due_schedules, record_schedule_result
 from agent_os.server.run_executor import execute_run
+from agent_os.stores import RunStore, SqliteRunStore
 
 logger = logging.getLogger(__name__)
 
@@ -38,28 +38,41 @@ async def dispatch_schedule(
     schedule: dict[str, Any],
     *,
     manual: bool = False,
+    run_store: RunStore | None = None,
 ) -> ScheduleDispatchResult:
     """Dispatch a single claimed schedule row."""
     schedule_id = schedule["schedule_id"]
     kind = schedule.get("kind", "run")
     payload = schedule.get("payload", {})
+    store = run_store or SqliteRunStore()
 
     try:
         if kind == "run":
             thread_id = str(uuid.uuid4())
             workspace = payload.get("workspace")
             task = payload.get("task", "")
+            from agent_os.principal import Principal
 
-            run_id = runs.create_run(thread_id, workspace, task)
+            run_id = store.create_run(
+                thread_id,
+                workspace,
+                task,
+                workspace_id=workspace,
+                principal=Principal(
+                    id=f"schedule:{schedule_id}",
+                    kind="schedule",
+                    display=f"Schedule ({schedule_id})",
+                ),
+            )
             try:
                 await execute_run(run_id, thread_id, task)
             except asyncio.CancelledError:
                 error = "Scheduler shutdown"
-                runs.append_event(run_id, "error", {"message": error})
-                runs.set_status(run_id, "error", error=error, ended=True)
+                store.append_event(run_id, "error", {"message": error})
+                store.set_status(run_id, "error", error=error, ended=True)
                 raise
 
-            run_obj = runs.get_run(run_id)
+            run_obj = store.get_run(run_id)
             status = (run_obj or {}).get("status", "error")
             error = (run_obj or {}).get("error")
 

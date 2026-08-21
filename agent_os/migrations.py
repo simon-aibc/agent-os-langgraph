@@ -52,6 +52,76 @@ class Migration(NamedTuple):
     description: str = ""
 
 
+def _backfill_runs_workspace_id(conn: sqlite3.Connection) -> None:
+    """Backfill runs.workspace_id from legacy runs.workspace."""
+    conn.execute(
+        """
+        UPDATE runs
+        SET workspace_id = workspace
+        WHERE workspace_id IS NULL AND workspace IS NOT NULL
+        """
+    )
+
+
+RUNS_MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        id="0002_add_runs_principal_and_approvals",
+        version=2,
+        statements=(
+            "ALTER TABLE runs ADD COLUMN workspace_id TEXT",
+            "ALTER TABLE runs ADD COLUMN created_by TEXT",
+            "ALTER TABLE runs ADD COLUMN created_by_kind TEXT",
+            """
+            CREATE TABLE IF NOT EXISTS run_approvals (
+                run_id TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                decision TEXT NOT NULL,
+                actor_id TEXT NOT NULL,
+                actor_kind TEXT NOT NULL,
+                on_behalf_of TEXT,
+                reason TEXT,
+                decided_at TEXT NOT NULL,
+                PRIMARY KEY (run_id, seq)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS run_approvals_run_id_idx
+                ON run_approvals (run_id, seq ASC)
+            """,
+        ),
+        handler=_backfill_runs_workspace_id,
+        description="Add principal columns to runs and create run_approvals audit table",
+    ),
+)
+
+SESSIONS_MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        id="0002_add_sessions_workspace_and_principal",
+        version=2,
+        statements=(
+            "ALTER TABLE sessions ADD COLUMN workspace_id TEXT",
+            "ALTER TABLE sessions ADD COLUMN created_by TEXT",
+        ),
+        description="Add workspace_id and created_by to sessions",
+    ),
+)
+
+PERMISSIONS_MIGRATIONS: tuple[Migration, ...] = (
+    Migration(
+        id="0002_add_permission_rules_workspace_and_taught_by",
+        version=2,
+        statements=(
+            "ALTER TABLE permission_rules ADD COLUMN workspace_id TEXT",
+            "ALTER TABLE permission_rules ADD COLUMN taught_by TEXT",
+        ),
+        description="Add workspace_id and taught_by to permission_rules",
+    ),
+)
+
+OBSERVATIONS_MIGRATIONS: tuple[Migration, ...] = ()
+SCHEDULES_MIGRATIONS: tuple[Migration, ...] = ()
+
+
 def _is_safe_statement(sql: str) -> bool:
     """Ensure statement contains no destructive DDL or DML."""
     clean = sql.strip()

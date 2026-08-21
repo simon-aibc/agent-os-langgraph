@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Final, Literal
 
 from agent_os.migrations import run_migrations
+from agent_os.stores.base import configure_sqlite_connection
 
 logger = logging.getLogger(__name__)
 
@@ -325,9 +326,9 @@ class SqliteObservationStore:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=30.0)
         try:
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA busy_timeout=30000")
-            return conn
+            return configure_sqlite_connection(
+                conn, wal=True, busy_timeout_ms=30000, row_factory=sqlite3.Row
+            )
         except Exception:
             conn.close()
             raise
