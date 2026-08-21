@@ -147,3 +147,21 @@ def test_real_llm_smoke(tmp_path):
 
     assert "routing" in brief.lower() or "bug" in brief.lower()
     assert "v1.6" in brief.lower()
+
+
+def test_resolve_brief_connector_prefers_workspace(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from agent_os.brief_runtime import resolve_brief_connector
+
+    mock_runtime = MagicMock()
+    mock_connector = MagicMock()
+    mock_runtime.memory_connector = mock_connector
+
+    monkeypatch.setattr(
+        "agent_os.server.runtime.composed_workspace",
+        lambda: mock_runtime,
+    )
+
+    # When no explicit name is passed, returns workspace connector
+    assert resolve_brief_connector() is mock_connector

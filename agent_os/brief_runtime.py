@@ -34,6 +34,13 @@ class BriefExecutionResult:
 
 
 def resolve_brief_connector(name: str | None = None) -> MemoryConnector:
+    if not name:
+        from agent_os.server.runtime import composed_workspace
+
+        runtime = composed_workspace()
+        if runtime is not None and getattr(runtime, "memory_connector", None) is not None:
+            return runtime.memory_connector
+
     connector_name = name or os.environ.get("AGENT_OS_MEMORY_CONNECTOR", "")
     if connector_name == "gbrain":
         return GbrainConnector()

@@ -39,14 +39,24 @@ def architect_node(state: SimonState) -> dict[str, ArchitectBrief]:
             try:
                 config = resolved_prof.hot_context
 
-                connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
-                from agent_os.connectors import GbrainConnector, MarkdownVaultConnector
+                connector = None
+                from agent_os.server.runtime import composed_workspace
 
-                if connector_name == "gbrain":
-                    connector = GbrainConnector()
+                runtime = composed_workspace()
+                if runtime is not None and getattr(runtime, "memory_connector", None) is not None:
+                    connector = runtime.memory_connector
                 else:
-                    vault_path = os.getenv("AGENT_OS_VAULT_PATH", binding.sandbox_root)
-                    connector = MarkdownVaultConnector(vault_path)
+                    connector_name = os.getenv("AGENT_OS_MEMORY_CONNECTOR", "markdown")
+                    from agent_os.connectors import (
+                        GbrainConnector,
+                        MarkdownVaultConnector,
+                    )
+
+                    if connector_name == "gbrain":
+                        connector = GbrainConnector()
+                    else:
+                        vault_path = os.getenv("AGENT_OS_VAULT_PATH", binding.sandbox_root)
+                        connector = MarkdownVaultConnector(vault_path)
 
                 from agent_os.hot_context import load_hot_context
 
